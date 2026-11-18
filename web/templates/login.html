@@ -1,0 +1,20 @@
+{{define "content"}}
+<div class="card threshold">
+  {{template "doorway"}}
+  <header>
+    <h1 class="card-title">Sign in</h1>
+    <p class="tagline">The threshold between agents and the world. {{if .Phone}}Unlock the console with the passkey on this phone. Your screen lock (PIN, fingerprint or face) is required.{{else}}Unlock the console with Windows Hello on the server. A PIN, fingerprint or face check is required.{{end}}</p>
+  </header>
+  <section>
+    {{if .NoApprover}}
+    <div class="alert" data-tone="warning" role="alert">
+      <h2>No approver is enrolled</h2>
+      <section>Run <code>chapd enroll</code> on the server, from an elevated prompt, and open the address it prints.</section>
+    </div>
+    {{else}}
+    <button class="btn" id="signin" type="button" data-passkey="login">{{if .Phone}}Sign in with your passkey{{else}}Sign in with Windows Hello{{end}}</button>
+    {{end}}
+    <p id="status" role="status" aria-live="polite"></p>
+  </section>
+</div>
+{{end}}

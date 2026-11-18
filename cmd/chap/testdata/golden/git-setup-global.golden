@@ -1,0 +1,12 @@
+$ chap git setup --global
+exit: 0
+--- git
+git config --global --replace-all url.http://127.0.0.1:55398/git/.insteadOf https://github.com/
+git config --global --replace-all credential.http://127.0.0.1:55398/git/.helper 
+git config --global --add credential.http://127.0.0.1:55398/git/.helper !f() { echo username=chap; echo "password=$CHAP_RUN_TOKEN"; }; f
+--- request
+(none)
+--- stdout
+git now sends https://github.com/ traffic to http://127.0.0.1:55398/git/ (global)
+push authenticates with CHAP_RUN_TOKEN from the environment; no token is stored
+--- stderr

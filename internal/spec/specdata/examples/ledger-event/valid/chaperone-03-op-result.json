@@ -1,0 +1,29 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 3,
+  "prev_hash": "sha256:c1486cf9d0fa63fff9f5b934cae499628ff1f2adae3cdbbd3d1c388ebe934e79",
+  "hash": "sha256:7a8257de7841d74baf6c48af6bd1844b540763d46e9a19459487575ad4d872a2",
+  "time_unix_nano": "1792795240000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "b0c8f1e67d406d1e",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "op.result",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.request_id": "q-4k2m9x",
+    "factory.op_hash": "sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415",
+    "factory.execution_id": "x-7c2m9q",
+    "factory.outcome": "succeeded",
+    "factory.policy_version": "baseline-2026.10.1",
+    "factory.external_ref": "https://github.invalid/acme/shop/pull/214",
+    "factory.requester.kind": "run"
+  }
+}

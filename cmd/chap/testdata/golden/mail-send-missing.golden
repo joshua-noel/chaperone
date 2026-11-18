@@ -1,0 +1,8 @@
+$ chap mail send --to a@example.com
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --from, --to, --subject and --body-file are required
+usage: chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f>

@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 15,
+  "prev_hash": "sha256:63c472535ec8328457bd9099e4fa28ec96f279d6b9d0224a6f8c6f9cae6a688b",
+  "hash": "sha256:79456a4f1222b9c2e877323d6b9752bdc9f11540e8f589855211bff80cd026bc",
+  "time_unix_nano": "1792793100500000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "8e41c6d2a95b0f37",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "trace.gap",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.trace.hop": "model_gateway",
+    "factory.trace.reason": "absent"
+  },
+  "body": "The model route did not forward traceparent; usage events still carry run_id."
+}

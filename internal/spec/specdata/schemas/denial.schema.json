@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory-spec.invalid/v0/denial.schema.json",
+  "title": "Denial",
+  "description": "What an agent receives when an action is refused, as structured data. the runner and Chaperone render it to the 3-line text form in docs/spec.md ('DENIED ...', 'why: ...', 'request: ...'). A denial always says why and how to ask for more, or says plainly that asking is not possible. A denial is a normal, expected event; repeated denials are counted as thrash and a threshold crossing raises the THRASH stop (data/stop-table.v0.json). DISPLAY_MISMATCH: the console-rendered card did not match the request it was rendered from, so the approval is refused (surface 'op'). APPROVAL_HASH_MISMATCH: the approval is intact but does not apply to this request (its op_hash, request or run differs). APPROVAL_INTEGRITY_FAILED: the approval record itself fails verification (its challenge digest or signature does not match its fields), so it is void. APPROVAL_UNAVAILABLE: the approval store cannot be reached, so whether an approval exists or was used cannot be known and the action must not run. The last two, like DISPLAY_MISMATCH, are faults on the approval side, not agent behaviour: thrash.count is 1 and the schema enforces it.",
+  "type": "object",
+  "properties": {
+    "spec_version": {
+      "$ref": "common.schema.json#/$defs/spec_version"
+    },
+    "type": {
+      "const": "denial"
+    },
+    "denial_id": {
+      "type": "string",
+      "pattern": "^d-[0-9a-z]{6,32}$"
+    },
+    "run_id": {
+      "$ref": "common.schema.json#/$defs/run_id",
+      "description": "The refused run. Absent when the refused requester is the orchestrator, which carries orchestrator_id instead."
+    },
+    "project": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "profile": {
+      "description": "Profile of the refused run; absent for an orchestrator.",
+      "$ref": "common.schema.json#/$defs/run_profile"
+    },
+    "at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "surface": {
+      "description": "Which control refused. net = egress proxy; op = Chaperone operation or approval; pkg = package admission; image = image admission; scope = task_scope path or branch; token = run token; output = redaction.",
+      "enum": [
+        "net",
+        "op",
+        "pkg",
+        "image",
+        "scope",
+        "token",
+        "output"
+      ]
+    },
+    "action": {
+      "description": "What was attempted. verb is a short machine word (connect, push, request, install, pull, merge ...); target is what it was aimed at (host:port, package@version, branch).",
+      "type": "object",
+      "properties": {
+        "verb": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,40}$"
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "verb",
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "cause_code": {
+      "enum": [
+        "NET_HOST_NOT_ALLOWED",
+        "NET_IP_LITERAL",
+        "NET_PRIVATE_RANGE",
+        "OP_NOT_IN_TOKEN",
+        "OP_DISABLED",
+        "OP_APPROVAL_REQUIRED",
+        "OP_APPROVAL_DENIED",
+        "OP_APPROVAL_EXPIRED",
+        "OP_POLICY_REFUSED",
+        "OP_PARAMS_INVALID",
+        "APPROVAL_HASH_MISMATCH",
+        "APPROVAL_CONSUMED",
+        "APPROVAL_INTEGRITY_FAILED",
+        "APPROVAL_UNAVAILABLE",
+        "PKG_IN_COOLDOWN",
+        "PKG_NOT_ADMITTED",
+        "IMAGE_NOT_ADMITTED",
+        "SCOPE_PATH",
+        "SCOPE_BRANCH",
+        "TOKEN_EXPIRED",
+        "TOKEN_INVALID",
+        "TOKEN_REVOKED",
+        "REDACTION_BLOCKED",
+        "DISPLAY_MISMATCH"
+      ]
+    },
+    "why": {
+      "$ref": "common.schema.json#/$defs/short_text"
+    },
+    "request": {
+      "description": "How to ask for more. possible=true carries the exact 'chap request ...' command (which creates an approval card); possible=false means policy forbids asking and no command is given.",
+      "type": "object",
+      "properties": {
+        "possible": {
+          "type": "boolean"
+        },
+        "command": {
+          "type": "string",
+          "pattern": "^chap request (net|op|pkg|scope) [^\\n]{1,300}$"
+        }
+      },
+      "required": [
+        "possible"
+      ],
+      "if": {
+        "properties": {
+          "possible": {
+            "const": true
+          }
+        },
+        "required": [
+          "possible"
+        ]
+      },
+      "then": {
+        "required": [
+          "command"
+        ]
+      },
+      "else": {
+        "properties": {
+          "command": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "thrash": {
+      "description": "Repeat-attempt counter for the same (surface, action) in the window. flagged=true marks the timeline.",
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "window_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "flagged": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "count",
+        "window_seconds",
+        "flagged"
+      ],
+      "additionalProperties": false
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "orchestrator_id": {
+      "description": "The refused orchestrator session (Phase 1: the orchestrator's own high-impact calls have no run).",
+      "$ref": "common.schema.json#/$defs/orchestrator_id"
+    }
+  },
+  "required": [
+    "spec_version",
+    "type",
+    "denial_id",
+    "project",
+    "at",
+    "surface",
+    "action",
+    "cause_code",
+    "why",
+    "request",
+    "thrash"
+  ],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "required": [
+        "run_id",
+        "profile"
+      ],
+      "not": {
+        "required": [
+          "orchestrator_id"
+        ]
+      }
+    },
+    {
+      "required": [
+        "orchestrator_id"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "run_id"
+            ]
+          },
+          {
+            "required": [
+              "profile"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "description": "Faults on the approval or console side are not agent behaviour and never count as thrash.",
+      "if": {
+        "properties": {
+          "cause_code": {
+            "enum": [
+              "DISPLAY_MISMATCH",
+              "APPROVAL_INTEGRITY_FAILED",
+              "APPROVAL_UNAVAILABLE"
+            ]
+          }
+        },
+        "required": [
+          "cause_code"
+        ]
+      },
+      "then": {
+        "properties": {
+          "thrash": {
+            "properties": {
+              "count": {
+                "const": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+$ chap health
+exit: 4
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+DENIED token pr.merge (orchestrator main)
+cause: TOKEN_REVOKED
+why: the orchestrator token was revoked
+next: the token was revoked or its run has ended: stop; do not re-issue or work around it; ask the operator

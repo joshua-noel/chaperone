@@ -1,0 +1,8 @@
+$ chap intake comment SHOP-12
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --body or --body-file is required
+usage: chap intake comment <SHOP-12> [--body <b> | --body-file <f>]

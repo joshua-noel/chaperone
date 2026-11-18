@@ -1,0 +1,50 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{.CSRF}}">
+<meta name="time-zone" content="{{timezone}}">
+<meta name="color-scheme" content="light dark">
+<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"selfRequestsOnly":true}'>
+<title>{{.Title}} - Chaperone</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/vendor/basecoat.min.css">
+<link rel="stylesheet" href="/static/console.css">
+<script src="/static/theme.js"></script>
+<script src="/static/frame-guard.js"></script>
+<script src="/static/vendor/htmx.min.js" defer></script>
+<script src="/static/vendor/basecoat.min.js" defer></script>
+<script src="/static/console.js" defer></script>
+<script src="/static/localtime.js" defer></script>
+</head>
+<body>
+{{if not .Framed}}
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="shell-header">
+  <a class="brand" href="/" aria-label="Chaperone, home">
+    <svg viewBox="0 0 32 24" fill="none" stroke-width="2.5" stroke-linecap="square" aria-hidden="true" focusable="false">
+      <path class="mark-bracket" d="M10 3H4v18h6"/>
+      <path class="mark-bracket" d="M22 3h6v18h-6"/>
+      <path class="mark-line" d="M13 12h6"/>
+    </svg>
+    <span>Chaperone</span>
+  </a>
+  <span class="shell-origin">{{.Origin}}</span>
+  {{if .Approver}}
+  <nav class="shell-nav" aria-label="Console">
+    <a href="/">Home</a>
+    <a href="/approvals">Approvals</a>
+    <a href="/runs">Runs</a>
+    <a href="/catalog">Operations</a>
+    <a href="/ledger">Ledger</a>
+    <a href="/secrets">Secrets</a>
+  </nav>
+  {{end}}
+</header>
+{{end}}
+<main class="shell-main" id="main" tabindex="-1">
+{{template "content" .}}
+</main>
+</body>
+</html>{{end}}

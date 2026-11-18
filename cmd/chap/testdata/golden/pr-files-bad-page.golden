@@ -1,0 +1,8 @@
+$ chap pr files 214 --page -1 --repo example-org/storefront
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --page must be 1 or more
+usage: chap pr files <n> [--page <p>] [--per-page <n>] [--expected-head <sha>] [--repo owner/name] [--dry-run]

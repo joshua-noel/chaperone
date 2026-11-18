@@ -1,0 +1,12 @@
+$ chap health
+exit: 3
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+DENIED pr.merge on example-org/storefront#582 (orchestrator main)
+cause: OP_POLICY_REFUSED
+why: CI_STALE: base_current: head is 1 commit(s) behind main; run pr.update, then wait for verify on the new head
+next: ask the orchestrator to bring the branch up to date (chap pr update), wait for CI on the new head, then ask again

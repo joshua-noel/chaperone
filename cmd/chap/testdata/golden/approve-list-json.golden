@@ -1,0 +1,37 @@
+$ chap approve list --json
+exit: 0
+--- request
+GET /v0/approvals
+auth: run
+--- stdout
+{
+  "items": [
+    {
+      "id": "a-8m2q4x",
+      "request_id": "q-7t4n6p",
+      "op": "deploy",
+      "op_hash": "sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415",
+      "state": "pending",
+      "class": "high",
+      "critical": false,
+      "policy_version": "baseline-2026.10.1",
+      "created_at": "2026-10-24T09:13:00Z",
+      "expires_at": "2026-10-24T09:43:00Z"
+    },
+    {
+      "id": "a-2c6v9b",
+      "request_id": "q-1k4m7p",
+      "op": "repo.settings",
+      "op_hash": "sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415",
+      "state": "approved",
+      "class": "critical",
+      "critical": true,
+      "policy_version": "baseline-2026.10.1",
+      "created_at": "2026-10-24T08:00:00Z",
+      "decided_at": "2026-10-24T08:02:00Z",
+      "expires_at": "2026-10-24T08:30:00Z"
+    }
+  ],
+  "next_cursor": "c2"
+}
+--- stderr

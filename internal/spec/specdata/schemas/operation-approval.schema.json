@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory-spec.invalid/v0/operation-approval.schema.json",
+  "title": "Operation approval (decision record)",
+  "description": "The human decision on exactly one operation request. It binds to the request's op_hash (so it can authorise nothing else), to the request_id and run_id (so it is not portable between requests or runs), carries a nonce and expiry, and is single use. Chaperone rejects an approval whose op_hash differs from the pending request's recomputed op_hash, whose request_id or run_id differs, that is expired, or that has already been consumed. An approval is never batched: one approval, one request. Approved decisions MUST list only passed policy checks (a failed precondition cannot be approved away) and MUST carry at least one confirmation. Which confirmations suffice (one channel or both) is policy, not schema. challenge_sha256 is what the approver's authenticator signs: SHA-256 over the JCS form of {approval_id, request_id, run_id (omitted when absent), op_hash, nonce, expires_at, policy_version, display_sha256}. op_hash alone binds none of those other fields; the challenge binds all of them. Chaperone recomputes it and also requires policy_version to equal the policy version in force when the approval is consumed. Phase 1: 'phone' in shown.channels may mean only that the push was accepted, not displayed (ntfy has no receipt); phone confirmations are allowed but policy need not require them.",
+  "type": "object",
+  "properties": {
+    "spec_version": {
+      "$ref": "common.schema.json#/$defs/spec_version"
+    },
+    "type": {
+      "const": "op.approval"
+    },
+    "approval_id": {
+      "type": "string",
+      "pattern": "^a-[0-9a-z]{6,32}$"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^q-[0-9a-z]{6,32}$"
+    },
+    "run_id": {
+      "description": "The requesting run, copied from the request. Absent when the requester is the orchestrator.",
+      "$ref": "common.schema.json#/$defs/run_id"
+    },
+    "op_hash": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "decision": {
+      "enum": [
+        "approved",
+        "denied"
+      ]
+    },
+    "reason": {
+      "description": "Required on denial.",
+      "$ref": "common.schema.json#/$defs/short_text"
+    },
+    "policy_version": {
+      "description": "Version of the Chaperone policy pack that evaluated the checks below.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "checks": {
+      "description": "Policy preconditions evaluated before the card was shown, as displayed to the approver.",
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{0,62}$"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "detail": {
+            "$ref": "common.schema.json#/$defs/short_text"
+          }
+        },
+        "required": [
+          "name",
+          "passed"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "shown": {
+      "description": "What the approver actually saw, so 'what was approved' is provable. display_sha256 is the hash of the exact rendered card text; channels are every surface it was shown on.",
+      "type": "object",
+      "properties": {
+        "display_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "pc",
+              "phone"
+            ]
+          },
+          "description": "Surfaces the card was delivered to. 'phone' in Phase 1 means the push was accepted, not that it was displayed."
+        }
+      },
+      "required": [
+        "display_sha256",
+        "channels"
+      ],
+      "additionalProperties": false
+    },
+    "confirmations": {
+      "description": "Authenticator evidence. 'pc' = Windows Hello on the server; 'phone' = phone push. assertion_sha256 is the hash of the signed authenticator assertion over challenge_sha256, stored alongside the ledger. Each channel appears at most once and only on a surface the card was shown on (checked by checkBinding).",
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "enum": [
+              "pc",
+              "phone"
+            ]
+          },
+          "credential_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,128}$"
+          },
+          "assertion_sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "at": {
+            "$ref": "common.schema.json#/$defs/timestamp"
+          }
+        },
+        "required": [
+          "channel",
+          "credential_id",
+          "assertion_sha256",
+          "at"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "approver": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,62}$"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "nonce": {
+      "description": "Random per approval; folded into challenge_sha256 so an assertion cannot be replayed.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22,64}$"
+    },
+    "single_use": {
+      "const": true
+    },
+    "decided_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "expires_at": {
+      "description": "Last instant the approval may be consumed.",
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "challenge_sha256": {
+      "description": "The authenticator challenge (see the schema description). Recomputed by the verifier.",
+      "$ref": "common.schema.json#/$defs/sha256"
+    }
+  },
+  "required": [
+    "spec_version",
+    "type",
+    "approval_id",
+    "request_id",
+    "op_hash",
+    "decision",
+    "policy_version",
+    "checks",
+    "shown",
+    "confirmations",
+    "approver",
+    "challenge_sha256",
+    "nonce",
+    "single_use",
+    "decided_at",
+    "expires_at"
+  ],
+  "if": {
+    "properties": {
+      "decision": {
+        "const": "approved"
+      }
+    },
+    "required": [
+      "decision"
+    ]
+  },
+  "then": {
+    "properties": {
+      "confirmations": {
+        "type": "array",
+        "minItems": 1
+      },
+      "checks": {
+        "type": "array",
+        "items": {
+          "properties": {
+            "passed": {
+              "const": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "else": {
+    "required": [
+      "reason"
+    ]
+  },
+  "additionalProperties": false
+}

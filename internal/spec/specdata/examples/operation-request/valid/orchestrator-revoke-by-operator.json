@@ -1,0 +1,24 @@
+{
+  "spec_version": "0",
+  "type": "op.request",
+  "request_id": "q-3b7k5u",
+  "requester": {
+    "kind": "orchestrator",
+    "id": "operator"
+  },
+  "project": "acme-shop",
+  "op": "orchestrator.revoke",
+  "target": {
+    "adapter": "chaperone",
+    "ref": "orchestrator:main"
+  },
+  "params": {
+    "id": "main",
+    "fingerprint": "3f9a1c0e",
+    "revoked_by": "operator"
+  },
+  "reason": "Operator revoked the orchestrator token for main.",
+  "requested_at": "2026-10-24T02:20:00Z",
+  "expires_at": "2026-10-24T02:30:00Z",
+  "op_hash": "sha256:690972a68573d1a0a1d101a0a348c80e16ba87e1c25d9481786309182765bc05"
+}

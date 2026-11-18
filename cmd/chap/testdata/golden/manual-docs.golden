@@ -1,0 +1,16 @@
+$ chap manual --profile docs
+exit: 0
+--- request
+GET /v0/catalog?profile=docs
+auth: run
+--- stdout
+manual: project acme-shop, profile docs, policy baseline-2026.10.1
+health [routine] Read the pilot's readiness status.
+  chap health
+logs [routine] Read recent log lines from a fixed source.
+  chap logs <web|worker|db|tunnel> [--lines <n>]
+pr.open [routine] Open a pull request from the run's branch.
+  chap pr open --title <t> [--branch <b>] [--base <b>] [--body <b>] [--draft]
+pr.update [routine] Update a PR title or body, or update its branch.
+  chap pr update <n> --expected-head <sha> [--title <t>] [--body <b>]
+--- stderr

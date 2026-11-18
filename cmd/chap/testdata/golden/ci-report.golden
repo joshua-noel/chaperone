@@ -1,0 +1,19 @@
+$ chap ci report r-9c1d --project chaperone
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"ci.report","params":{"run_id":"r-9c1d"},"project":"chaperone","target":{"adapter":"runner","ref":"r-9c1d"}}
+--- stdout
+ci.report r-9c1d: succeeded
+id: q-8c4p2w  class: routine  policy: baseline-2026.10.1
+execution: x-4k7m2n
+external_ref: https://github.com/joshua-noel/chaperone/runs/4242
+result:
+  check: local-ci
+  check_run_id: 4242
+  conclusion: success
+  head_sha: 0588aa4ee0116267162e895016bcfda9ec3a3e2c
+  outcome: done
+  run_id: r-9c1d
+--- stderr

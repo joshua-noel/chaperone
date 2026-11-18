@@ -1,0 +1,13 @@
+$ chap request op deploy --reason "ship the checkout fix" --params "{\"sha\":\"0588aa4ee0116267162e895016bcfda9ec3a3e2c\"}" --project acme-shop
+exit: 0
+--- request
+POST /v0/approvals
+auth: orchestrator
+{"kind":"op","op":"deploy","params":{"sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c"},"project":"acme-shop","reason":"ship the checkout fix","target":{"adapter":"wsl-host","ref":"pilot"}}
+--- stdout
+deploy pilot: pending_approval
+id: q-7t4n6p  class: high  policy: baseline-2026.10.1
+approval: a-8m2q4x pending, expires 2026-10-24T09:43:00Z
+waiting for the operator to approve in the console; nothing has run
+follow: chap op show q-7t4n6p --wait 30
+--- stderr

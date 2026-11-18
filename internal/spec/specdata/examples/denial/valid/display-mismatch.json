@@ -1,0 +1,24 @@
+{
+  "spec_version": "0",
+  "type": "denial",
+  "denial_id": "d-3f8k2q",
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "profile": "code",
+  "at": "2026-10-23T22:20:05Z",
+  "surface": "op",
+  "action": {
+    "verb": "approve",
+    "target": "q-4k2m9x"
+  },
+  "cause_code": "DISPLAY_MISMATCH",
+  "why": "the card text does not match the request",
+  "request": {
+    "possible": false
+  },
+  "thrash": {
+    "count": 1,
+    "window_seconds": 300,
+    "flagged": false
+  }
+}

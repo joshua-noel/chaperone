@@ -1,0 +1,8 @@
+$ chap deploy 0588aa4ee0116267162e895016bcfda9ec3a3e2c --request
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --request needs --reason
+usage: chap deploy <sha>

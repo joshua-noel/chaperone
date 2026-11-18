@@ -1,0 +1,30 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 20,
+  "prev_hash": "sha256:f870a1da2183b3dcd276c60565823e5c9f447449ca4701dc36e3e7a7c1b0b1d1",
+  "hash": "sha256:f2ca7e43e548653988a4e930e08f5c201ff17c40bc74699c76c07fbcc0935a64",
+  "time_unix_nano": "1792806070000000000",
+  "trace_id": "7b20021983ca55afd82274eae2fbc73a",
+  "span_id": "d2849e6a1f7b30c5",
+  "severity_number": 13,
+  "severity_text": "WARN",
+  "event_name": "vault.write",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "project": "acme-shop",
+  "attributes": {
+    "factory.request_id": "q-8h4e9p",
+    "factory.op_hash": "sha256:1317a7fd4eaf098766ca04e4f9f6b0a00bfeee3a68450e6e4aa9be5f85ded044",
+    "factory.execution_id": "x-8c3n6r",
+    "factory.outcome": "succeeded",
+    "factory.secret.id": "gh-app-key",
+    "factory.secret.action": "read",
+    "factory.secret.kind": "github-app-key",
+    "factory.requester.kind": "orchestrator",
+    "factory.orchestrator.id": "operator"
+  }
+}

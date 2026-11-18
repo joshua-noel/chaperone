@@ -1,0 +1,8 @@
+$ chap health --token abc
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: flag provided but not defined: -token
+usage: chap health

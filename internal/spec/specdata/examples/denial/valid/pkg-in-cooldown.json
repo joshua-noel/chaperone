@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "type": "denial",
+  "denial_id": "d-5c9p2w",
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "profile": "code",
+  "at": "2026-10-23T22:20:05Z",
+  "surface": "pkg",
+  "action": {
+    "verb": "install",
+    "target": "left-pad-ng@2.0.1"
+  },
+  "cause_code": "PKG_IN_COOLDOWN",
+  "why": "version published 1 day ago; the cooldown is 7 days",
+  "request": {
+    "possible": true,
+    "command": "chap request pkg left-pad-ng@2.0.1 --reason \"<why the task needs it>\""
+  },
+  "thrash": {
+    "count": 1,
+    "window_seconds": 300,
+    "flagged": false
+  }
+}

@@ -1,0 +1,13 @@
+$ chap drive share 1AbCdEf --from operator@example.com --name "Q3 plan" --to a@example.com --role reader --project acme-shop
+exit: 7
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"drive.share","params":{"file_id":"1AbCdEf","file_name":"Q3 plan","link_visibility":"restricted","recipients":["a@example.com"],"role":"reader"},"project":"acme-shop","target":{"adapter":"google","ref":"operator@example.com"}}
+--- stdout
+drive.share drive:1AbCdEf: pending_approval
+id: q-5d1r2v  class: high  policy: baseline-2026.10.1
+approval: a-8m2q4x pending, expires 2026-10-24T09:43:00Z
+waiting for the operator to approve in the console; nothing has run
+follow: chap op show q-5d1r2v --wait 30
+--- stderr

@@ -1,0 +1,12 @@
+{{define "content"}}
+<div class="card threshold">
+  {{template "doorway"}}
+  <header>
+    <h1 class="card-title">Signed out</h1>
+    <p>The console session ended (idle for 30 minutes, or 8 hours since sign-in). Sign in at Chaperone, then reload this frame.</p>
+  </header>
+  <section>
+    <a class="btn" data-variant="outline" href="/login" target="_blank" rel="noopener">Signed out: sign in at Chaperone</a>
+  </section>
+</div>
+{{end}}

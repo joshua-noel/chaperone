@@ -1,0 +1,8 @@
+$ chap pr merge 0 --head 0588aa4ee0116267162e895016bcfda9ec3a3e2c --repo acme/shop
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the PR number must be a positive integer
+usage: chap pr merge <n> --head <sha> [--base <b>] [--repo owner/name] [--dry-run]

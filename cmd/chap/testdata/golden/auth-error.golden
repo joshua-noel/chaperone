@@ -1,0 +1,12 @@
+$ chap health
+exit: 4
+--- request
+POST /v0/ops
+auth: run
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+AUTH FAILED: chapd could not identify the caller
+why: the token is not valid
+request: not possible, policy does not allow asking
+check CHAP_RUN_TOKEN or the orchestrator token file

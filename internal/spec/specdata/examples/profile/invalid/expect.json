@@ -1,0 +1,112 @@
+{
+  "branch-prefix-leading-dash.json": {
+    "keyword": "pattern",
+    "instancePath": "/branch_prefix",
+    "via": "generic"
+  },
+  "container-with-toolchain-manifest.json": {
+    "keyword": "false schema",
+    "instancePath": "/toolchain_manifest",
+    "via": "generic"
+  },
+  "container-without-image.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "image"
+    },
+    "via": "generic"
+  },
+  "generic-missing-cpus.json": {
+    "keyword": "required",
+    "instancePath": "/limits",
+    "params": {
+      "missingProperty": "cpus"
+    },
+    "via": "generic"
+  },
+  "image-tag-without-digest.json": {
+    "keyword": "pattern",
+    "instancePath": "/image/ref",
+    "via": "generic"
+  },
+  "ip-literal-host.json": {
+    "keyword": "pattern",
+    "instancePath": "/network/allow/0/host",
+    "via": "generic"
+  },
+  "overlay-adds-ops.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "/ops",
+    "params": {
+      "additionalProperty": "add"
+    },
+    "via": "overlay"
+  },
+  "overlay-double-wildcard-host.json": {
+    "keyword": "pattern",
+    "instancePath": "/network/allow_add/0/host",
+    "via": "overlay"
+  },
+  "overlay-without-digest.json": {
+    "keyword": "required",
+    "instancePath": "/extends",
+    "params": {
+      "missingProperty": "digest"
+    },
+    "via": "overlay"
+  },
+  "overlay-without-extends.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "extends"
+    },
+    "via": "overlay"
+  },
+  "port-out-of-range.json": {
+    "keyword": "maximum",
+    "instancePath": "/network/allow/0/ports/0",
+    "via": "generic"
+  },
+  "unknown-enforcement.json": {
+    "keyword": "enum",
+    "instancePath": "/network/enforcement",
+    "via": "generic"
+  },
+  "unknown-generic-kind.json": {
+    "keyword": "enum",
+    "instancePath": "/profile",
+    "via": "generic"
+  },
+  "unknown-layer.json": {
+    "keyword": "oneOf",
+    "instancePath": ""
+  },
+  "vm-manifest-digest-untagged.json": {
+    "keyword": "pattern",
+    "instancePath": "/toolchain_manifest/sha256",
+    "via": "generic"
+  },
+  "vm-manifest-extra-field.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "/toolchain_manifest",
+    "params": {
+      "additionalProperty": "path"
+    },
+    "via": "generic"
+  },
+  "vm-with-image-ref.json": {
+    "keyword": "false schema",
+    "instancePath": "/image",
+    "via": "generic"
+  },
+  "vm-without-toolchain-manifest.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "toolchain_manifest"
+    },
+    "via": "generic"
+  }
+}

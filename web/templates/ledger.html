@@ -1,0 +1,67 @@
+{{define "content"}}
+<h1>Ledger</h1>
+{{if .Restricted}}{{if .Legacy}}{{template "restricted-legacy-note"}}{{else}}{{template "restricted-note" "/ledger"}}{{end}}{{end}}
+
+<div class="card" role="region" aria-labelledby="integrity-heading">
+  <header>
+    <h2 id="integrity-heading">Integrity</h2>
+    <p>Chain <code>{{.Chain}}</code>, head seq {{.HeadSeq}}, hash <code>{{.HeadHash}}</code>.</p>
+  </header>
+  <section>
+    <h3>Last anchor</h3>
+    {{with .Anchor}}
+    <p>Event {{.Seq}} at {{template "t" .When}}: kind <code>{{.Kind}}</code>, <code>{{.Ref}}</code>; covers seq {{.HeadSeq}}, hash <code>{{.HeadHash}}</code>.</p>
+    {{else}}
+    <p class="muted">No anchor has been written yet.</p>
+    {{end}}
+  </section>
+  {{if not .Restricted}}
+  <section>
+    <form id="verify-form" class="form" hx-post="/ledger/verify" hx-target="#verify-result" hx-swap="innerHTML">
+      <label><input type="checkbox" name="against_export" value="1"> Also compare with the JSONL export</label>
+      <button class="btn" type="submit">Check integrity</button>
+    </form>
+    <div id="verify-result" aria-live="polite"></div>
+  </section>
+  {{end}}
+</div>
+
+<div class="card" role="region" aria-labelledby="search-heading">
+  <header>
+    <h2 id="search-heading">Search</h2>
+    <p>Newest events first, up to {{.Limit}}. Times are in {{timezone}} time, with the UTC time after each one; the From and Until filters are UTC.</p>
+  </header>
+  <section>
+    <form id="ledger-search" class="form form-grid" method="get" action="/ledger">
+      <div class="grid gap-2"><label for="f-run">Run id</label><input class="input" id="f-run" name="run" type="text" value="{{.Form.Run}}" maxlength="128" placeholder="r-7f3a"></div>
+      <div class="grid gap-2"><label for="f-request">Request id</label><input class="input" id="f-request" name="request" type="text" value="{{.Form.Request}}" maxlength="128" placeholder="q-000001"></div>
+      <div class="grid gap-2"><label for="f-op">Op</label><input class="input" id="f-op" name="op" type="text" value="{{.Form.Op}}" maxlength="128" placeholder="pr.merge"></div>
+      <div class="grid gap-2"><label for="f-event">Event name</label><input class="input" id="f-event" name="event" type="text" value="{{.Form.Event}}" maxlength="128" placeholder="denial"></div>
+      <div class="grid gap-2"><label for="f-from">From (UTC)</label><input class="input" id="f-from" name="from" type="datetime-local" value="{{.Form.From}}"></div>
+      <div class="grid gap-2"><label for="f-to">Until (UTC)</label><input class="input" id="f-to" name="to" type="datetime-local" value="{{.Form.To}}"></div>
+      <div class="actions"><button class="btn" type="submit">Search</button></div>
+    </form>
+    {{if .Error}}<div class="alert" data-variant="destructive" data-tone="danger" role="alert"><h2>Search not run</h2><section>{{.Error}}</section></div>{{end}}
+    {{if .Note}}<p role="status">{{.Note}}</p>{{end}}
+  </section>
+</div>
+
+<div class="card" role="region" aria-labelledby="results-heading">
+  <header><h2 id="results-heading">{{if .Searched}}Matching events{{else}}Newest events{{end}}</h2></header>
+  <section>
+  {{if .Rows}}
+    <table class="table table-stack" id="ledger-results">
+      <caption class="sr-only">{{if .Searched}}Matching events{{else}}Newest events{{end}}</caption>
+      <thead><tr><th scope="col">Seq</th><th scope="col">When</th><th scope="col">Event</th><th scope="col">Run</th><th scope="col">Project</th><th scope="col">Op</th><th scope="col">Request</th><th scope="col">Detail</th><th scope="col">Text</th></tr></thead>
+      <tbody>
+      {{range .Rows}}
+        <tr><th scope="row">{{.Seq}}</th><td data-label="When">{{template "t" .When}}</td><td data-label="Event"><span class="badge" data-tone="{{.Tone}}"><code>{{.Event}}</code></span></td><td data-label="Run">{{.Run}}</td><td data-label="Project">{{.Project}}</td><td data-label="Op">{{.Op}}</td><td data-label="Request">{{.Req}}</td><td class="wrap" data-label="Detail">{{.Detail}}</td><td class="wrap" data-label="Text">{{.Text}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  {{else if not .Error}}
+    <p class="empty">{{if .Searched}}No event matches.{{else}}The ledger is empty.{{end}}</p>
+  {{end}}
+  </section>
+</div>
+{{end}}

@@ -1,0 +1,12 @@
+$ chap deploy 0588aa4ee0116267162e895016bcfda9ec3a3e2c --project acme-shop --reason "ship the checkout fix"
+exit: 3
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"deploy","params":{"sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c"},"project":"acme-shop","reason":"ship the checkout fix","target":{"adapter":"wsl-host","ref":"pilot"}}
+--- stdout
+--- stderr
+DENIED merge on acme/shop#214 (orchestrator main)
+cause: OP_APPROVAL_REQUIRED
+why: pr.merge needs an approval for this exact head
+request: chap request op pr.merge --reason "<why the merge is needed>"

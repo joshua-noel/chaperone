@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 23,
+  "prev_hash": "sha256:318470c68b009693a73f46fec2e49aa142668695d04a4413777ae10fcc86c959",
+  "hash": "sha256:d5e444dac8301ae17b05ecc679b87eef94e6655f7391bc58ede540155c2af746",
+  "time_unix_nano": "1792797700000000000",
+  "trace_id": "0b6f2d1a084fc007e6a2f5e302ace42e",
+  "span_id": "cbafc57021bfa0b6",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "stop.clear",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-9c21",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.stop.id": "s-1x7k3m",
+    "factory.clear.by": "operator",
+    "factory.clear.mode": "manual"
+  }
+}

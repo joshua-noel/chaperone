@@ -1,0 +1,7 @@
+$ chap health
+exit: 4
+--- request
+(none)
+--- stdout
+--- stderr
+chap: no token: CHAP_RUN_TOKEN is not set and there is no orchestrator token file at /home/agent/missing.token

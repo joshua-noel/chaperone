@@ -1,0 +1,31 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 3,
+  "prev_hash": "sha256:efe7ca294800e319cc29cab3030e8c1f7b161d9c065fea09d25454e35cfdddf9",
+  "hash": "sha256:da2d6d3afbcaa6e01b1423d409cecb119481ec262543f4c8a01a66d3fbd82833",
+  "time_unix_nano": "1792792814400000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "3e9746d2a8b086ff",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "grant",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.token.jti": "n8Gf3kQ2xV7bTz1LwA9cYd",
+    "factory.token.exp": 1792798320,
+    "factory.brief.sha256": "sha256:7ed2358fdd424519b90502f453c9ab84266b75d6c17db83fdb89511dd61d67c1",
+    "factory.isolation": "gvisor",
+    "factory.profile.digest": "sha256:79ade8ad9c78968f3b423865eb8c300cb34e816b416cac840d2b4fe9de29c2aa",
+    "factory.scope.ops": [
+      "pr.open",
+      "branch.push"
+    ]
+  }
+}

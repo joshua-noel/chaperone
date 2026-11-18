@@ -1,0 +1,8 @@
+$ chap issue open --title x --repo example-org/storefront
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --label is required (chapd refuses an issue without source:error-watcher)
+usage: chap issue open --title <t> --label source:error-watcher [--label <l>] [--body <b> | --body-file <f>] [--repo owner/name]

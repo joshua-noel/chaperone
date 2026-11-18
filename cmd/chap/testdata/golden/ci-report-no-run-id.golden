@@ -1,0 +1,7 @@
+$ chap ci report --project chaperone
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: usage: chap ci report <run-id> [--dry-run]

@@ -1,0 +1,54 @@
+$ chap manual --profile docs --json
+exit: 0
+--- request
+GET /v0/catalog?profile=docs
+auth: run
+--- stdout
+{
+  "ops": [
+    {
+      "class": "routine",
+      "enabled": true,
+      "needs_approval": false,
+      "op": "health",
+      "reversibility": "reversible",
+      "summary": "Read the pilot's readiness status.",
+      "surface": "op",
+      "usage": "chap health"
+    },
+    {
+      "class": "routine",
+      "enabled": true,
+      "needs_approval": false,
+      "op": "logs",
+      "reversibility": "reversible",
+      "summary": "Read recent log lines from a fixed source.",
+      "surface": "op",
+      "usage": "chap logs \u003cweb|worker|db|tunnel\u003e [--lines \u003cn\u003e]"
+    },
+    {
+      "class": "routine",
+      "enabled": true,
+      "needs_approval": false,
+      "op": "pr.open",
+      "reversibility": "reversible",
+      "summary": "Open a pull request from the run's branch.",
+      "surface": "op",
+      "usage": "chap pr open --title \u003ct\u003e [--branch \u003cb\u003e] [--base \u003cb\u003e] [--body \u003cb\u003e] [--draft]"
+    },
+    {
+      "class": "routine",
+      "enabled": true,
+      "needs_approval": false,
+      "op": "pr.update",
+      "reversibility": "reversible",
+      "summary": "Update a PR title or body, or update its branch.",
+      "surface": "op",
+      "usage": "chap pr update \u003cn\u003e --expected-head \u003csha\u003e [--title \u003ct\u003e] [--body \u003cb\u003e]"
+    }
+  ],
+  "policy_version": "baseline-2026.10.1",
+  "profile": "docs",
+  "project": "acme-shop"
+}
+--- stderr

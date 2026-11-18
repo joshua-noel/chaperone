@@ -1,0 +1,11 @@
+$ chap vault status
+exit: 0
+--- request
+GET /v0/vault/status
+auth: orchestrator
+--- stdout
+vault: initialized, 3 secrets
+  github/app-key
+  google/oauth-client
+  ntfy/topic
+--- stderr

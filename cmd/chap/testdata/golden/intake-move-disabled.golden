@@ -1,0 +1,12 @@
+$ chap intake move SHOP-12 --state Blocked --project storefront
+exit: 3
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"intake.move","params":{"state":"Blocked"},"project":"storefront","target":{"adapter":"linear","ref":"SHOP-12"}}
+--- stdout
+--- stderr
+DENIED op deploy (profile code, run r-7f3a)
+cause: OP_DISABLED
+why: deploy is disabled by policy for acme-shop
+request: not possible, policy does not allow asking

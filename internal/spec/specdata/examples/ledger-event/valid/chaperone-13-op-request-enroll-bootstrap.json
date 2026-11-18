@@ -1,0 +1,28 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 13,
+  "prev_hash": "sha256:336d04605f45c141ce50fec456b14b754ec9bda69613d1f4e3b2dfe37d838db8",
+  "hash": "sha256:4778c02268cf6ba64230e444b3d929505e62548b362ebdba7a953e70faa49f9a",
+  "time_unix_nano": "1792803600000000000",
+  "trace_id": "b368a14e69fc73207793b281c4391491",
+  "span_id": "3d7a91c05e2b48f6",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "op.request",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "project": "chaperone",
+  "attributes": {
+    "factory.request_id": "q-5e8b3k",
+    "factory.op_hash": "sha256:89db66e2ffddc9b410ccf7efa207720d6d070fabbef6b5bf5ac7c76491a2bc62",
+    "factory.op": "approvers.enroll",
+    "factory.reversibility": "compensable",
+    "factory.requester.kind": "orchestrator",
+    "factory.orchestrator.id": "operator"
+  },
+  "body": "First approver enrolled at the machine with chapd enroll; no approver exists yet, so there is no op.approve."
+}

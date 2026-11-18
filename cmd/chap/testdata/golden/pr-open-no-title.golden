@@ -1,0 +1,8 @@
+$ chap pr open
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --title is required
+usage: chap pr open --title <t> [--body <b> | --body-file <f>] [--draft] [--branch <b>] [--base <b>] [--repo owner/name]

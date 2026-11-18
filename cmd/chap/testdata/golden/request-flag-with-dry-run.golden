@@ -1,0 +1,7 @@
+$ chap pr merge 214 --head 0588aa4ee0116267162e895016bcfda9ec3a3e2c --repo acme/shop --request --reason x --dry-run
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --request and --dry-run do not go together

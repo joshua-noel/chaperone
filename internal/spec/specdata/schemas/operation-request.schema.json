@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory-spec.invalid/v0/operation-request.schema.json",
+  "title": "Operation request",
+  "description": "A request to Chaperone to perform one high-impact operation. op_hash is SHA-256 over the RFC 8785 (JCS) form of the object {spec_version, project, op, target, params}, written 'sha256:<hex>'. Chaperone recomputes it on receipt and rejects a mismatch. Every approval binds to op_hash, so an approval for one action can never authorise another. params are specific to each op kind (schemas live with the kind's adapter in Chaperone) and are opaque to this schema.",
+  "type": "object",
+  "properties": {
+    "spec_version": {
+      "$ref": "common.schema.json#/$defs/spec_version"
+    },
+    "type": {
+      "const": "op.request"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^q-[0-9a-z]{6,32}$"
+    },
+    "requester": {
+      "description": "Who asks. A run (authenticated by its run token) or the orchestrator acting in its own session. The 'run' form carries the claims Chaperone verified, not what the agent says.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "run"
+            },
+            "run_id": {
+              "$ref": "common.schema.json#/$defs/run_id"
+            },
+            "token_jti": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,64}$"
+            },
+            "profile": {
+              "$ref": "common.schema.json#/$defs/run_profile"
+            }
+          },
+          "required": [
+            "kind",
+            "run_id",
+            "token_jti",
+            "profile"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "orchestrator"
+            },
+            "id": {
+              "$ref": "common.schema.json#/$defs/orchestrator_id"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "project": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "op": {
+      "$ref": "common.schema.json#/$defs/op_kind"
+    },
+    "target": {
+      "description": "What the operation acts on: the target adapter and a reference the adapter understands (repo and PR, deploy target and SHA, recipient list id).",
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,38}$"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "adapter",
+        "ref"
+      ],
+      "additionalProperties": false
+    },
+    "params": {
+      "description": "Op-specific parameters, exactly as they will be executed.",
+      "type": "object"
+    },
+    "op_hash": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "reason": {
+      "description": "Free text from the requester, shown on the approval card. Untrusted; never used for authorization.",
+      "$ref": "common.schema.json#/$defs/short_text"
+    },
+    "requested_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "expires_at": {
+      "description": "After this instant the request is dead and can no longer be approved.",
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "traceparent": {
+      "description": "Advisory W3C Trace Context of the caller's span. Outside op_hash: it changes with every attempt, so it can never be part of what an approval binds, and it is never used for authorization. For a run requester the trace-id SHOULD be the run's derived trace id (docs/spec.md section 8); a missing, malformed or foreign one is ignored and recorded as a trace.gap event.",
+      "$ref": "common.schema.json#/$defs/traceparent"
+    }
+  },
+  "required": [
+    "spec_version",
+    "type",
+    "request_id",
+    "requester",
+    "project",
+    "op",
+    "target",
+    "params",
+    "op_hash",
+    "requested_at",
+    "expires_at"
+  ],
+  "additionalProperties": false
+}

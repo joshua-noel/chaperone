@@ -1,0 +1,1695 @@
+openapi: 3.1.0
+info:
+  title: Chaperone chapd API
+  version: 0.1.0
+  summary: The local HTTP contract of chapd, the access broker for AI coding agents.
+  description: |
+    `chap`, the git proxy, the adapters and the approvals engine build against
+    this file. It follows factory-spec **v0.1.1**: request,
+    approval, denial and ledger-event documents are the spec's own schemas
+    (`internal/spec/specdata/schemas/`, referenced below, not copied), so a
+    change of the spec is a change of the contract.
+
+    ## Where chapd listens
+
+    `http://127.0.0.1:55398`, loopback only. The console (L1-06) shares the
+    port under `/console/` and is not part of this contract. Every route here
+    is under `/v0/` except the git proxy mount `/git/`.
+
+    ## Who is calling: exactly one credential
+
+    A request carries **one** `Authorization: Bearer <token>` header and
+    nothing else that names a caller. The token alone decides who the caller is
+    (ADR-005, ADR-007); a body member that names a run, a profile or an
+    orchestrator is never read, and one that disagrees with the token is
+    refused (`OP_PARAMS_INVALID`).
+
+    | Token | Verifier | Caller |
+    | --- | --- | --- |
+    | `chap_orch_<base64url, 32 bytes>` (opaque) | orchestrator verifier (hash lookup, ADR-007) | the orchestrator, `requester.kind = orchestrator` |
+    | anything else (a JWT, `typ factory-run+jwt`) | run-token verifier (ADR-005) | a run, `requester.kind = run` |
+
+    The prefix routes the token; the two verifiers never share a parser. A
+    request that presents two `Authorization` headers, a comma-joined value, a
+    second credential in a query string, or both kinds of token is refused with
+    `TOKEN_INVALID` (HTTP 401) and nothing is executed: it is a run **or** the
+    orchestrator, never both. The git proxy additionally accepts the run token
+    as the HTTP Basic password (user name ignored), because `git` cannot send a
+    bearer header from a URL; the orchestrator token is not accepted there.
+
+    Control calls from the runner (`POST /v0/runs`, `.../end`) carry a **control
+    JWT** (`typ factory-ctl+jwt`) in the body, not a bearer token (ADR-005).
+    `GET /v0/runs/{id}` has no body, so its control JWT (`act run.status`)
+    is the one `Authorization: Bearer` value (security scheme `controlJwt`).
+    `chap-host` uses a third credential, the **host token**, valid only under
+    `/v0/host/`. A credential of one kind presented on a route meant for
+    another is `TOKEN_INVALID`.
+
+    ## Refusals are denials
+
+    Every refusal of an authenticated caller is a body that validates against
+    the spec's `denial.schema.json` (component `Denial`), is written to the
+    ledger as a `denial` event in the same transaction as the op state it
+    belongs to, and carries `why` and `request`
+    (`request.possible: true` plus the exact `chap request ...` line, or
+    `possible: false`). A run's denial carries `run_id` and `profile`; the
+    orchestrator's carries `orchestrator_id` and **neither** `run_id` nor
+    `profile`. `project` is the request's project when the request names one,
+    else (a call such as `GET /v0/ops` that has none) the token's project: the
+    run's own, or the first project in the orchestrator's scope.
+    `policy_version` is present on every denial that a policy rule produced.
+
+    **One exception.** A caller that cannot be identified (no token, a token
+    that is not well formed, a signature that does not verify, a `chap_orch_`
+    value with no row) has no `project`, `run_id` or `orchestrator_id` to put in
+    a denial, and the spec's schema requires them. That caller gets
+    `AuthError` (HTTP 401, `cause_code` `TOKEN_INVALID`), and nothing is
+    attached to any run's ledger. A token that verified but is expired or
+    revoked is identified, so it gets a full `Denial` (surface `token`,
+    `TOKEN_EXPIRED` or `TOKEN_REVOKED`). The orchestrator verifier does not
+    tell "unknown" from "malformed".
+
+    ### HTTP status of a denial
+
+    | Status | Cause codes |
+    | --- | --- |
+    | 400 | `OP_PARAMS_INVALID` (shape, `op_hash` mismatch, body disagrees with token, unknown op, unknown `kind`) |
+    | 401 | `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED` |
+    | 403 | `OP_NOT_IN_TOKEN`, `OP_DISABLED`, `OP_APPROVAL_REQUIRED`, `OP_APPROVAL_DENIED`, `OP_APPROVAL_EXPIRED`, `OP_POLICY_REFUSED`, `SCOPE_PATH`, `SCOPE_BRANCH`, `REDACTION_BLOCKED` |
+    | 409 | `APPROVAL_HASH_MISMATCH`, `APPROVAL_CONSUMED` |
+    | 429 | `OP_POLICY_REFUSED` produced by a rate limit (`Retry-After` is set; `why` names the limit) |
+    | 503 | `APPROVAL_UNAVAILABLE`, `APPROVAL_INTEGRITY_FAILED`, `DISPLAY_MISMATCH` (faults on the approval side), and any ledger failure (an op never runs when its ledger event did not commit; the body is `Unavailable`, not a denial, because no denial could be ledgered either) |
+
+    `thrash` counts repeats of the same `(surface, action)` for the caller
+    inside `window_seconds` (default 300). It rises with every refusal of the
+    same attempt; `flagged` turns true at the policy threshold (default 3) and
+    marks the timeline. Approval-side faults never count (the schema pins their
+    `count` to 1). chapd records the flag; the `THRASH` stop itself is raised by
+    the runner's scheduler.
+
+    ## One op, one request id, one life
+
+    `POST /v0/ops` makes an **Op**: the spec's operation request plus its
+    state. chapd builds the full request document itself (it mints
+    `request_id`, takes `requester` from the token, sets `requested_at` and
+    `expires_at`), computes `op_hash` with the spec's JCS rule over
+    `{spec_version, project, op, target, params}`, and, when the caller sent
+    an `op_hash`, refuses a different value.
+
+    States (ticket L1-07, plus `unconfirmed` from spec section 5, "Execution"):
+
+    ```
+    requested ─┬─► denied                                   (terminal; the denial body)
+               ├─► pending_approval ─┬─► allowed ─┐
+               │                     ├─► denied   │         (the approver said no)
+               │                     ├─► expired  │
+               │                     └─► cancelled│
+               └─► allowed ◄──────────────────────┘
+                     │ ├─► refused    (a precondition failed at release)
+                     │ ├─► expired | cancelled
+                     ▼
+                  executing ─┬─► succeeded
+                             ├─► failed
+                             ├─► refused     (the host refused the grant)
+                             └─► unconfirmed ─► succeeded | failed
+    ```
+
+    The database enforces exactly these edges (trigger on `ops.state`); nothing
+    else is possible, whatever the code does. Every op that passed shape
+    validation has a row, including the denied ones, so a refusal is as
+    traceable as a success.
+
+    * `refused`: nothing was released: a precondition said no after the op had
+      passed policy (CI red, head moved). `outcome=refused` in the ledger, no
+      `execution_id`.
+    * `unconfirmed`: dispatched under an `execution_id`, no receipt (crash,
+      timeout, adapter error or panic). chapd never starts a second execution;
+      it asks the service, or repeats the call with the same `execution_id`, and
+      then writes one final `succeeded` or `failed` under the same id. After a
+      restart an op found in `executing` becomes `unconfirmed`.
+    * `expired` and `cancelled` write `op.result` with `outcome=refused` and a
+      cause code (`OP_APPROVAL_EXPIRED`, `CANCELLED_BY_REQUESTER`, `RUN_ENDED`):
+      nothing was released.
+    * Terminal: `denied`, `succeeded`, `failed`, `refused`, `expired`, `cancelled`.
+    * `allowed` and `executing` have no event of their own (the spec has no event
+      name for them); `op.request` opens the life, `denial` or `op.result` closes it.
+    * Every transition and its ledger event commit in one SQLite transaction; if
+      the ledger append fails, the transition does not happen and the call fails
+      closed (503). A result that cannot be ledgered leaves the op `executing`;
+      the next start turns it into `unconfirmed`.
+
+    The orchestrator's events carry `factory.requester.kind: orchestrator`,
+    `factory.orchestrator.id` (the op row's orchestrator id; `operator` for what
+    the operator does at the machine) and no `run_id` (factory-spec v0.1.1,
+    section 5, "Who the orchestrator is").
+
+
+    ### Approvals: the three calls
+
+    1. `POST /v0/ops` for an op that needs a human (class `high` or `critical`,
+       or a `gated` op whose preconditions need one, such as a medium or high
+       risk tier PR, or a gate file) and **without** `approval_id` answers
+       `403 OP_APPROVAL_REQUIRED`. The denial's `request.command` is the exact
+       `chap request op ...` line.
+    2. `POST /v0/approvals` (that command) with the same op body creates the
+       **approval card** and answers `202` with an Op in `pending_approval`.
+       Identical `op_hash` already pending for the same caller: the same Op
+       and approval come back and **no second push** goes out (dedupe, ADR-004
+       section 6).
+    3. The operator approves or denies **only in the console** (a WebAuthn
+       assertion with user verification, ADR-004). **No route of this API
+       approves, denies or edits an approval**, and a token of any kind that
+       tries to is `POLICY_BREACH`. When the approval is given, chapd releases the op
+       itself (`allowed`, then `executing`, one `execution_id` assigned before
+       the adapter is called); the caller follows it with `GET /v0/ops/{id}`.
+       Resubmitting through `POST /v0/ops` with `approval_id` is the idempotent
+       way to ask again: the same Op comes back, nothing runs twice. If the
+       approval's `op_hash` differs from the new request's, `409
+       APPROVAL_HASH_MISMATCH` (the approval stays unused); an approval that
+       has already released an op is `409 APPROVAL_CONSUMED`.
+
+    Approvals are valid 5 minutes after the decision; the request lives 30
+    minutes (15 for `deploy`), then `OP_APPROVAL_EXPIRED`. Pending caps
+    (2 per run, 5 per project, 10 in total) refuse the request with
+    `OP_POLICY_REFUSED` (429) and raise the `APPROVAL_FLOOD` stop for the run.
+
+    ## The catalog and the policy version
+
+    Every op is **disabled by default**. The catalog (`GET /v0/catalog`) says
+    which are enabled for the caller, their class and reversibility, and
+    carries the `chap manual` text (`api/manual.yaml`). `policy_version` names
+    the policy pack in force: it is on every `op.result` event, on every
+    approval, and on every `Op` once evaluated. A policy change starts a new
+    version; an approval given under an older version is refused with
+    `OP_POLICY_REFUSED` and a new approval is needed.
+
+    ## Redaction
+
+    No response contains a secret. Every body passes through the redaction
+    registry; a response that would leak is replaced by `REDACTION_BLOCKED`.
+
+    The same holds for what a caller sends: a request whose target, params,
+    reason or path holds a secret (a registered value or a secret-shaped
+    string) is refused with `REDACTION_BLOCKED` (403). The denial names nothing
+    of the request (target `-`, a fixed `why`), no op row is stored, and the
+    secret is in no ledger event, log line or response. Every denial is
+    checked the same way before it is stored or sent.
+  license:
+    name: Apache 2.0
+    identifier: Apache-2.0
+servers:
+  - url: http://127.0.0.1:55398
+    description: chapd on the server (loopback only)
+security:
+  - bearer: []
+tags:
+  - name: ops
+  - name: approvals
+  - name: runs
+  - name: catalog
+  - name: ledger
+  - name: host
+  - name: git
+  - name: system
+paths:
+  /v0/status:
+    get:
+      tags: [system]
+      operationId: getStatus
+      summary: Liveness and "who am I".
+      description: |
+        What `chap` reads first: the caller as chapd sees it, the policy version
+        and the git proxy base. Needs a valid token (so it also tests the
+        credential). Never returns a secret.
+      responses:
+        "200":
+          description: The caller and the server.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /v0/ops:
+    post:
+      tags: [ops]
+      operationId: submitOp
+      summary: Ask for one operation (`chap pr merge`, `chap deploy`, ...).
+      description: |
+        Creates an Op. Refusals are denials (see the status table). A routine or
+        gated op that passes policy is released at once: the call waits up to
+        `wait` seconds (default 20, max 55) for a terminal state and otherwise
+        answers `202` with the Op in `executing`; follow it with `GET
+        /v0/ops/{id}?wait=`. With `dry_run: true` nothing is created, executed
+        or ledgered except a denial: the answer is a `DryRunVerdict` (used by
+        `chap pr merge --dry-run` and shadow mode).
+
+        Idempotency: the same caller sending the same `op_hash` while an Op of
+        that hash is non-terminal gets that Op back (`202`), never a second one;
+        the database allows one live Op per caller and `op_hash`.
+      parameters:
+        - $ref: "#/components/parameters/Wait"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpSubmit"
+            examples:
+              prMergeByRun:
+                summary: pr.merge from a run (spec example hash)
+                value:
+                  op: pr.merge
+                  project: acme-shop
+                  target: { adapter: github, ref: "acme/shop#214" }
+                  params:
+                    base: main
+                    head_sha: 0588aa4ee0116267162e895016bcfda9ec3a3e2c
+                    method: squash
+                  op_hash: "sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415"
+                  reason: CI green on this head
+      responses:
+        "200":
+          description: A terminal Op (executed, or the existing terminal Op), or a dry-run verdict.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Op"
+                  - $ref: "#/components/schemas/DryRunVerdict"
+        "202":
+          description: Accepted and not terminal yet (`allowed`, `executing`, `unconfirmed`, or `pending_approval`), including the existing live Op of a repeated `op_hash`.
+          headers:
+            Location: { $ref: "#/components/headers/OpLocation" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Op"
+        "400": { $ref: "#/components/responses/Denied" }
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "409": { $ref: "#/components/responses/Denied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    get:
+      tags: [ops]
+      operationId: listOps
+      summary: The caller's own Ops, newest first.
+      description: A run sees the Ops of its own `run_id`; the orchestrator sees the Ops it requested. Nobody sees another caller's Ops.
+      parameters:
+        - name: state
+          in: query
+          schema: { $ref: "#/components/schemas/OpState" }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of Ops.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpPage"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+  /v0/ops/{id}:
+    parameters:
+      - $ref: "#/components/parameters/OpId"
+    get:
+      tags: [ops]
+      operationId: getOp
+      summary: One Op, optionally waiting for it to change.
+      description: |
+        With `wait=N` the call holds for up to N seconds (max 55) until the state
+        differs from the one the caller last saw (`since_state`), or the Op is
+        terminal. Another caller's Op is `404`, as is an unknown id (the two
+        look the same).
+      parameters:
+        - $ref: "#/components/parameters/Wait"
+        - name: since_state
+          in: query
+          schema: { $ref: "#/components/schemas/OpState" }
+      responses:
+        "200":
+          description: The Op.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Op"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/ops/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/OpId"
+    post:
+      tags: [ops]
+      operationId: cancelOp
+      summary: Withdraw an Op that has not started executing.
+      description: |
+        Valid in `pending_approval` and `allowed`. The pending approval is
+        cancelled in the same transaction (`op.approve` with decision `denied`,
+        reason "cancelled by requester"). An Op already `executing` cannot be
+        cancelled: `409`, body `Conflict`.
+      responses:
+        "200":
+          description: The cancelled Op.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Op"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The Op is executing or already terminal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conflict"
+  /v0/approvals:
+    post:
+      tags: [approvals]
+      operationId: requestApproval
+      summary: "`chap request op ...`: create the approval card for an op."
+      description: |
+        Same body as `POST /v0/ops`, plus `kind: op`. Runs the same checks
+        (token scope, enabled, params, **preconditions**: a failed precondition
+        such as red CI or a stale backup is refused here and **cannot be
+        approved away**). When they pass, creates the Op in `pending_approval`
+        and its approval card, and answers `202`. Wakes the phone (ntfy) once
+        per `op_hash`.
+
+        `kind` is `op` only in Phase 1. The spec's `net`, `pkg` and `scope`
+        requests belong to the runner's surfaces: any other value is `400
+        OP_PARAMS_INVALID`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalRequest"
+      responses:
+        "202":
+          description: The card exists; the Op is `pending_approval`.
+          headers:
+            Location: { $ref: "#/components/headers/OpLocation" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Op"
+        "400": { $ref: "#/components/responses/Denied" }
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    get:
+      tags: [approvals]
+      operationId: listApprovals
+      summary: "`chap approve list`: the caller's own approvals."
+      description: Pending and recent approvals of the caller's own requests. The card text is **not** here; it is shown only in the console.
+      parameters:
+        - name: state
+          in: query
+          schema: { $ref: "#/components/schemas/ApprovalState" }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of approval summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalPage"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+  /v0/approvals/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, pattern: "^a-[0-9a-z]{6,32}$" }
+    get:
+      tags: [approvals]
+      operationId: getApproval
+      summary: One approval of the caller's own request.
+      parameters:
+        - $ref: "#/components/parameters/Wait"
+        - name: since_state
+          in: query
+          schema: { $ref: "#/components/schemas/ApprovalState" }
+      responses:
+        "200":
+          description: The approval summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalSummary"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/runs:
+    post:
+      tags: [runs]
+      operationId: registerRun
+      summary: the runner registers a run (control JWT).
+      description: |
+        ADR-005 "Revocation at run end", step 1. The body carries the control
+        JWT (`typ factory-ctl+jwt`, `aud chaperone`, `act run.start`, `exp` at
+        most 60 s ahead, single-use `jti`) and the run token it announces. No
+        bearer token. Handler: `internal/runtoken` (L1-04), mounted by chapd.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunRegister"
+      responses:
+        "201":
+          description: "The run is registered (`state: active`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "401":
+          description: The control token was refused (`TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "409":
+          description: The run is already registered, or the control `jti` was used.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conflict"
+    get:
+      tags: [runs]
+      operationId: listRuns
+      summary: Runs known to chapd (orchestrator only).
+      description: "A run token is refused with `OP_NOT_IN_TOKEN` (surface `token`): agents do not list runs."
+      parameters:
+        - name: state
+          in: query
+          schema: { $ref: "#/components/schemas/RunState" }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of runs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunPage"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/runs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [runs]
+      operationId: getRunStatus
+      summary: the runner reads the state of a run it registered (control JWT, `act run.status`).
+      description: |
+        LF-2. How the runner learns that Chaperone ended a run (an operator stop,
+        `POLICY_BREACH`, `THRASH`, the reaper) before the token's `exp`. The
+        caller sends a control JWT (`typ factory-ctl+jwt`, `aud chaperone`,
+        `act run.status`, `run_id` equal to `{id}`, `exp` at most 60 s ahead,
+        single-use `jti`) as the one `Authorization: Bearer` value, signed by a
+        non-interim key of the pinned set. Mint a fresh one for every call.
+
+        The answer is `state`, `ended_at`, `cause_code` and `expires_at`, and
+        nothing else: no project, profile, scope or token. A run revoked by an
+        operator or a stop is `state: ended` with its stop-table `cause_code`
+        (`OPERATOR_STOP_RUN`, `OPERATOR_STOP_ALL`, `TIME_EXCEEDED`, ...); a run
+        that ended normally has `cause_code: null`.
+
+        A control JWT reads only runs its own issuer registered. An unknown
+        run, an interim run and another issuer's run all answer `404`. A run
+        token, the orchestrator token and every other credential are refused
+        `401 TOKEN_INVALID`; the orchestrator reads runs at `GET /v0/runs`.
+        Nothing is written to the ledger.
+      security:
+        - controlJwt: []
+      responses:
+        "200":
+          description: The run's state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunStatus"
+        "401":
+          description: The credential is not a valid control JWT for this run (`TOKEN_INVALID`, `TOKEN_EXPIRED`), or its `jti` was already used.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/runs/{id}/end:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [runs]
+      operationId: endRun
+      summary: the runner ends a run (control JWT, `act run.end`).
+      description: |
+        One transaction: `state=ended`, the `jti` into the revocation set,
+        the run's pending approvals cancelled (`op.approve` `denied`, reason
+        "run ended"), `run.end` and `token.revoke` events. After commit: GitHub
+        installation tokens minted for the run are revoked, caches wiped, open
+        git-proxy streams closed. The next request with the run's token is
+        `TOKEN_REVOKED`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunEnd"
+      responses:
+        "200":
+          description: The run is ended (also when it had already ended).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "401":
+          description: The control token was refused.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/runs/{id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [runs]
+      operationId: revokeRun
+      summary: "`chap runs revoke <run>`: operator revoke (orchestrator token only)."
+      description: |
+        Removes authority, so it needs no approval (ADR-007 item 7). Stop code
+        `OPERATOR_STOP_RUN`; `token.revoke` with reason `operator`. Revoking
+        every active run is `POST /v0/runs/revoke-all` (`OPERATOR_STOP_ALL`).
+        The console's "Stop all" button calls the same library function.
+      responses:
+        "200":
+          description: The run is revoked and ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/runs/revoke-all:
+    post:
+      tags: [runs]
+      operationId: revokeAllRuns
+      summary: "`chap runs revoke --all`: stop every active run (orchestrator token only)."
+      responses:
+        "200":
+          description: How many runs were revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked: { type: integer, minimum: 0 }
+                  stop_code: { const: OPERATOR_STOP_ALL }
+                required: [revoked, stop_code]
+                additionalProperties: false
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/dev-tokens:
+    post:
+      tags: [runs]
+      operationId: mintInterimToken
+      summary: "`chap dev-token`: mint an interim run token (orchestrator token only)."
+      description: |
+        ADR-005 "Phase 1 interim issuer". Only a caller with a valid
+        orchestrator token whose scope has `mint_interim`, and only while
+        `allow_interim` is true. `minutes` at most 120; profile `host-interim`
+        ceiling. The token is returned **once**, in this response, and is never
+        logged (redaction registry). Handler: `runtoken.Interim.Mint` (L1-04).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DevTokenRequest"
+      responses:
+        "201":
+          description: The token and the claims it carries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevToken"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/catalog:
+    get:
+      tags: [catalog]
+      operationId: getCatalog
+      summary: The op catalog and the `chap manual` data, narrowed to what the caller may use.
+      description: |
+        Without `profile`: the caller's **effective** ops, that is the token's
+        ops (`task_scope.ops` for a run, `scope.ops` for the orchestrator)
+        intersected with the ops enabled in the catalog and the project policy,
+        each with its class, reversibility and manual text. `chap manual` renders
+        this. `all=true` (orchestrator only, used by the console and `chap
+        manual --all`) adds the disabled ops with `enabled: false`.
+
+        With `profile=<name>` (a profile kind or `host-interim`): the ops that
+        profile allows and that are enabled, for the caller's project. This is
+        what `chap manual --profile docs` prints; a typical profile's manual is
+        under 1 KB. An unknown profile is `400 OP_PARAMS_INVALID`.
+        The text comes from `api/manual.yaml`.
+      parameters:
+        - name: profile
+          in: query
+          schema: { $ref: "#/components/schemas/Profile" }
+        - name: all
+          in: query
+          schema: { type: boolean, default: false }
+        - name: project
+          in: query
+          description: Orchestrator only (a run's project is its token's). Defaults to the first project in scope.
+          schema: { type: string, pattern: "^[a-z][a-z0-9-]{1,38}$" }
+      responses:
+        "200":
+          description: The catalog view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Catalog"
+        "400": { $ref: "#/components/responses/Denied" }
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/ledger:
+    get:
+      tags: [ledger]
+      operationId: queryLedger
+      summary: Search the ledger.
+      description: |
+        Events, oldest first, exactly as written (spec `ledger-event`, already
+        redacted at write time). A run may read only events with its own
+        `run_id`. The orchestrator reads the whole chain, whatever the project
+        of an event, so a read with no filter has no gap in `seq` and the
+        chain can be checked from it; a filter (`run_id`, `request_id`,
+        `event_name`, `from`, `to`) leaves gaps by design. Cursor is the `seq`
+        of the last event.
+      parameters:
+        - name: run_id
+          in: query
+          schema: { type: string, pattern: "^r-[0-9a-z]{4,32}$" }
+        - name: request_id
+          in: query
+          schema: { type: string, pattern: "^q-[0-9a-z]{6,32}$" }
+        - name: event_name
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          description: RFC 3339 instant, inclusive.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          description: RFC 3339 instant, exclusive.
+          schema: { type: string, format: date-time }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerPage"
+        "400": { $ref: "#/components/responses/Denied" }
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/ledger/verify:
+    post:
+      tags: [ledger]
+      operationId: verifyLedger
+      summary: "`chap ledger verify`: walk the hash chain (orchestrator token only)."
+      description: |
+        Library behind it: `internal/ledger` `Verify` (L1-02). A broken chain
+        raises the stop `LEDGER_CHAIN_BROKEN`. `against_export` also compares
+        the SQLite chain with the daily JSONL export.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                against_export: { type: boolean, default: false }
+              additionalProperties: false
+      responses:
+        "200":
+          description: The verdict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerVerdict"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/vault/status:
+    get:
+      tags: [system]
+      operationId: getVaultStatus
+      summary: "`chap vault status` (orchestrator token only). Names and counts, never a value."
+      responses:
+        "200":
+          description: Vault state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultStatus"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/host/events:
+    get:
+      tags: [host]
+      operationId: hostEvents
+      summary: chap-host long-poll (Server-Sent Events). Host token only.
+      description: |
+        The stream `chap-host` (L1-14) holds open. It authenticates with the
+        **host token** (`Authorization: Bearer`), read from a file in the
+        operator's profile that the agent account cannot read; a run token or
+        orchestrator token is `TOKEN_INVALID`. chapd never sends a grant down an
+        unauthenticated stream. A reconnecting host receives the current
+        `approvals.pending` count first and any still-valid, not yet
+        acknowledged `grant`.
+
+        Events (`text/event-stream`):
+
+        * `approvals.pending`: data `{"count": N}`. Wakes a toast. No
+          parameters, no link.
+        * `grant`: data `{"grant": "lg1.<payload>.<signature>", "op_id": "<q-...>"}`.
+          The **execution grant** (`internal/grant`, ChapHost): an Ed25519
+          signature by chapd over `{v, op, op_hash, run_id | orchestrator_id,
+          runbook, script_sha256, args, nonce, iat, exp}`, exp at most 5
+          minutes after iat; wire form at most 4096 bytes; `chap-host` pins chapd's
+          grant-signing public key (copied at install, never fetched over
+          HTTP). Runbooks in Phase 1: `deploy` (arg `sha`, 40 lowercase hex) and
+          `logs.pilot` (arg `source`: `web`, `worker`, `db`, `tunnel`);
+          `host.scripts.refresh` joins with its adapter. chapd signs a grant only
+          for an op in `executing` whose approval (or policy) allows it.
+      security:
+        - hostToken: []
+      responses:
+        "200":
+          description: An event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          description: Not the host token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+  /v0/host/runs/{op_id}/output:
+    parameters:
+      - name: op_id
+        in: path
+        required: true
+        schema: { type: string, pattern: "^q-[0-9a-z]{6,32}$" }
+    post:
+      tags: [host]
+      operationId: hostOutput
+      summary: chap-host streams a runbook's output (already redacted by the host filter).
+      description: chapd redacts it again before it is stored or shown, and discards it unless the Op is `executing`.
+      security:
+        - hostToken: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: Accepted.
+        "401":
+          description: Not the host token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "409":
+          description: The Op is not `executing`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conflict"
+  /v0/host/runs/{op_id}/result:
+    parameters:
+      - name: op_id
+        in: path
+        required: true
+        schema: { type: string, pattern: "^q-[0-9a-z]{6,32}$" }
+    post:
+      tags: [host]
+      operationId: hostResult
+      summary: chap-host reports how the runbook ended.
+      description: |
+        Moves the Op out of `executing` (`succeeded`, `failed`, or `refused`
+        when the host refused the grant) in one transaction with its `op.result`
+        event. A second report for the same Op is `409`.
+      security:
+        - hostToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HostResult"
+      responses:
+        "204":
+          description: Recorded.
+        "401":
+          description: Not the host token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "409":
+          description: The Op is not `executing`, or a result was already recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conflict"
+  /git/{owner}/{repo}.git/info/refs:
+    parameters:
+      - $ref: "#/components/parameters/GitOwner"
+      - $ref: "#/components/parameters/GitRepo"
+    get:
+      tags: [git]
+      operationId: gitInfoRefs
+      summary: Git smart-HTTP discovery (`?service=git-upload-pack` or `git-receive-pack`).
+      description: |
+        Mount of the git proxy (L1-09, ADR-002 "Push path"). Not under `/v0/`
+        because it is the URL `git` itself calls: `chap git setup` writes
+        `url.http://127.0.0.1:55398/git/.insteadOf`. Run token only (Bearer, or
+        Basic with the token as password). Only the repository in the token's
+        `task_scope.repo` is served; any other repository is `SCOPE_PATH`
+        (surface `scope`). `OP_NOT_IN_TOKEN` when the op `branch.push` is not
+        in the token; `SCOPE_BRANCH` for a ref other than `task_scope.branch`.
+        Refusals answer in the spec's three-line text form
+        (`DENIED ...`, `why: ...`, `request: ...`, `text/plain`) with the
+        denial's id in `X-Chaperone-Denial-Id`, because `git` prints a text body;
+        `Accept: application/json` gets the `Denial`. No GitHub credential ever
+        appears in a request or response header seen by the client.
+      parameters:
+        - name: service
+          in: query
+          required: true
+          schema: { enum: [git-upload-pack, git-receive-pack] }
+      responses:
+        "200":
+          description: The ref advertisement, streamed.
+          content:
+            application/x-git-upload-pack-advertisement: { schema: { type: string, format: binary } }
+            application/x-git-receive-pack-advertisement: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/GitRefused" }
+        "403": { $ref: "#/components/responses/GitRefused" }
+  /git/{owner}/{repo}.git/git-upload-pack:
+    parameters:
+      - $ref: "#/components/parameters/GitOwner"
+      - $ref: "#/components/parameters/GitRepo"
+    post:
+      tags: [git]
+      operationId: gitUploadPack
+      summary: Fetch (read). Streamed through to GitHub with the injected token.
+      requestBody:
+        required: true
+        content:
+          application/x-git-upload-pack-request: { schema: { type: string, format: binary } }
+      responses:
+        "200":
+          description: The pack, streamed.
+          content:
+            application/x-git-upload-pack-result: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/GitRefused" }
+        "403": { $ref: "#/components/responses/GitRefused" }
+  /git/{owner}/{repo}.git/git-receive-pack:
+    parameters:
+      - $ref: "#/components/parameters/GitOwner"
+      - $ref: "#/components/parameters/GitRepo"
+    post:
+      tags: [git]
+      operationId: gitReceivePack
+      summary: Push. Only `task_scope.branch`, one ref, no delete, no tag, no push-cert.
+      description: |
+        The proxy reads the update-request's command list up to the first
+        flush-pkt (gzip and chunked bodies handled), refuses before any pack
+        byte is forwarded (`SCOPE_BRANCH`), and streams the pack with the
+        installation token injected. Writes `op.request`/`op.result` for
+        `branch.push` in the ledger like any op (owned by L1-09; the op state
+        machine above applies).
+      requestBody:
+        required: true
+        content:
+          application/x-git-receive-pack-request: { schema: { type: string, format: binary } }
+      responses:
+        "200":
+          description: The receive-pack report, streamed.
+          content:
+            application/x-git-receive-pack-result: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/GitRefused" }
+        "403": { $ref: "#/components/responses/GitRefused" }
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: |
+        A run token (JWT, EdDSA, ADR-005) or an orchestrator token
+        (`chap_orch_...`, ADR-007). Routed by prefix. Exactly one credential
+        per request.
+    controlJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A the runner control JWT (`typ factory-ctl+jwt`, `act run.status`), single
+        use, valid for 60 s at most. Only `GET /v0/runs/{id}` accepts it as a
+        bearer; `POST /v0/runs` and `.../end` carry theirs in the body.
+    hostToken:
+      type: http
+      scheme: bearer
+      description: The `chap-host` credential. Valid only under `/v0/host/`.
+  parameters:
+    OpId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^q-[0-9a-z]{6,32}$" }
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^r-[0-9a-z]{4,32}$" }
+    GitOwner:
+      name: owner
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$" }
+    GitRepo:
+      name: repo
+      in: path
+      required: true
+      description: The repository name without `.git`.
+      schema: { type: string, pattern: "^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$" }
+    Wait:
+      name: wait
+      in: query
+      description: Seconds to hold the call for a state change. 0 to 55; default 0 (20 for the op submit of an allowed op).
+      schema: { type: integer, minimum: 0, maximum: 55 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: The `next_cursor` of the previous page. Opaque to the client.
+      schema: { type: string, maxLength: 128 }
+  headers:
+    OpLocation:
+      description: Relative URL of the Op, `/v0/ops/{id}`.
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds until the rate limit allows another call.
+      schema: { type: integer, minimum: 1 }
+  responses:
+    Denied:
+      description: |
+        A structured denial (spec `denial.schema.json`): `cause_code`, `why`, `request`, `thrash`.
+        Written to the ledger as a `denial` event in the same transaction as any op state it caused.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Denial"
+          examples:
+            opDisabled:
+              value:
+                spec_version: "0"
+                type: denial
+                denial_id: d-3n8w2k
+                run_id: r-7f3a
+                project: acme-shop
+                profile: code
+                at: "2026-10-24T09:12:40Z"
+                surface: op
+                action: { verb: request, target: deploy }
+                cause_code: OP_DISABLED
+                why: deploy is disabled by policy for acme-shop
+                request: { possible: false }
+                thrash: { count: 1, window_seconds: 300, flagged: false }
+                policy_version: baseline-2026.10.1
+            orchestratorApprovalRequired:
+              value:
+                spec_version: "0"
+                type: denial
+                denial_id: d-6q2n8r
+                project: acme-shop
+                at: "2026-10-24T09:12:40Z"
+                surface: op
+                action: { verb: merge, target: "acme/shop#214" }
+                cause_code: OP_APPROVAL_REQUIRED
+                why: pr.merge needs an approval for this exact head
+                request:
+                  possible: true
+                  command: chap request op pr.merge --reason "<why the merge is needed>"
+                thrash: { count: 1, window_seconds: 300, flagged: false }
+                orchestrator_id: main
+    RateLimited:
+      description: A per-run rate limit or pending cap. A `Denial` (`OP_POLICY_REFUSED`) with `Retry-After`.
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Denial"
+    Unauthenticated:
+      description: The caller could not be identified.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AuthError"
+    DeniedOrUnauthenticated:
+      description: A `Denial` when the token is identified (expired, revoked), else an `AuthError`.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/Denial"
+              - $ref: "#/components/schemas/AuthError"
+    NotFound:
+      description: No such object for this caller (another caller's object looks the same).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/NotFound"
+    Unavailable:
+      description: |
+        chapd failed closed: the ledger (or the approval store) could not commit, so nothing ran.
+        Not a denial: the schema requires an event, and the event is what failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Unavailable"
+    GitRefused:
+      description: |
+        A refusal on the git proxy: text form (`text/plain`) by default, `Denial` JSON on
+        `Accept: application/json`. `X-Chaperone-Denial-Id` is set when a denial was written.
+      headers:
+        X-Chaperone-Denial-Id:
+          schema: { type: string, pattern: "^d-[0-9a-z]{6,32}$" }
+      content:
+        text/plain:
+          schema: { type: string, maxLength: 1200 }
+          example: |
+            DENIED push agent/other (profile code, run r-7f3a)
+            why: only refs/heads/agent/r-7f3a is allowed for this run
+            request: chap request scope --reason "<why the task needs it>"
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Denial"
+  schemas:
+    Denial:
+      $ref: "../internal/spec/specdata/schemas/denial.schema.json"
+    OperationRequest:
+      description: The spec's request document, as chapd stores and ledgers it.
+      $ref: "../internal/spec/specdata/schemas/operation-request.schema.json"
+    LedgerEvent:
+      $ref: "../internal/spec/specdata/schemas/ledger-event.schema.json"
+    AuthError:
+      description: The caller could not be identified, so no denial (which needs a project and a run or orchestrator) can be written.
+      type: object
+      properties:
+        type: { const: auth_error }
+        cause_code: { const: TOKEN_INVALID }
+        why: { type: string, minLength: 1, maxLength: 500 }
+        request:
+          type: object
+          properties:
+            possible: { const: false }
+          required: [possible]
+          additionalProperties: false
+      required: [type, cause_code, why, request]
+      additionalProperties: false
+    Unavailable:
+      type: object
+      properties:
+        type: { const: unavailable }
+        why: { type: string, minLength: 1, maxLength: 500 }
+        retryable: { type: boolean }
+      required: [type, why, retryable]
+      additionalProperties: false
+    NotFound:
+      type: object
+      properties:
+        type: { const: not_found }
+        why: { type: string, minLength: 1, maxLength: 500 }
+      required: [type, why]
+      additionalProperties: false
+    Conflict:
+      type: object
+      properties:
+        type: { const: conflict }
+        why: { type: string, minLength: 1, maxLength: 500 }
+        state: { type: string }
+      required: [type, why]
+      additionalProperties: false
+    Profile:
+      description: A profile kind, or `host-interim` (spec common `run_profile`).
+      enum: [code, docs, research, review, deploy-watch, data-op, ci, host-interim]
+    OpState:
+      enum:
+        - requested
+        - denied
+        - pending_approval
+        - allowed
+        - executing
+        - succeeded
+        - refused
+        - failed
+        - expired
+        - cancelled
+        - unconfirmed
+    OpClass:
+      enum: [routine, gated, high, critical]
+    Reversibility:
+      enum: [reversible, compensable, irreversible]
+    ApprovalState:
+      enum: [pending, approved, denied, expired, cancelled, consumed]
+    RunState:
+      enum: [active, ended, revoked]
+    Target:
+      type: object
+      properties:
+        adapter: { type: string, pattern: "^[a-z][a-z0-9-]{0,38}$" }
+        ref: { type: string, minLength: 1, maxLength: 300 }
+      required: [adapter, ref]
+      additionalProperties: false
+    OpSubmit:
+      description: |
+        What the caller sends. Only these members: chapd adds the requester, the
+        request id, the times, and recomputes `op_hash`. An unknown member, or
+        `project` different from the run token's project, is `OP_PARAMS_INVALID`.
+        `params` are exactly what will be executed (hashed as I-JSON: duplicate
+        keys and numbers above 2^53 are rejected before hashing). Their shape is
+        per op (the adapter ticket's schema); `components.schemas.ParamsPrMerge`
+        etc. below are the Phase 1 shapes.
+      type: object
+      properties:
+        op:
+          type: string
+          pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$"
+          maxLength: 64
+        project:
+          description: Required for the orchestrator (it has no project). A run may omit it; if present it must equal the token's.
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,38}$"
+        target: { $ref: "#/components/schemas/Target" }
+        params: { type: object }
+        op_hash:
+          description: Optional. When present chapd refuses (`OP_PARAMS_INVALID`) a value that differs from the one it computes.
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        reason:
+          description: Shown on the approval card, marked untrusted. Never used for authorization.
+          type: string
+          minLength: 1
+          maxLength: 500
+        approval_id:
+          description: "Resume under this approval (see \"Approvals: the three calls\"). Must belong to the caller and bind this `op_hash`."
+          type: string
+          pattern: "^a-[0-9a-z]{6,32}$"
+        traceparent:
+          description: Advisory W3C trace context, outside `op_hash`.
+          type: string
+          pattern: "^00-(?!0{32}-)[0-9a-f]{32}-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$"
+        dry_run:
+          description: Evaluate policy and preconditions only. Nothing is created or executed.
+          type: boolean
+          default: false
+      required: [op, target, params]
+      additionalProperties: false
+    ApprovalRequest:
+      description: |
+        `chap request op ...`: the op body of `OpSubmit` plus `kind: op` and a
+        required `reason`. No `approval_id` and no `dry_run` (a card is never a
+        dry run, and a request for approval cannot name one).
+      type: object
+      properties:
+        kind: { const: op }
+        op:
+          type: string
+          pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$"
+          maxLength: 64
+        project:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,38}$"
+        target: { $ref: "#/components/schemas/Target" }
+        params: { type: object }
+        op_hash:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        traceparent:
+          type: string
+          pattern: "^00-(?!0{32}-)[0-9a-f]{32}-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$"
+      required: [kind, op, target, params, reason]
+      additionalProperties: false
+    Check:
+      description: One policy precondition and its result (the card's checks).
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        passed: { type: boolean }
+        detail: { type: string, maxLength: 300 }
+      required: [name, passed]
+      additionalProperties: false
+    DryRunVerdict:
+      type: object
+      properties:
+        type: { const: dry_run }
+        would_allow: { type: boolean }
+        outcome:
+          description: "`allow`: would be released now. `approval`: would need a card. `refuse`: a precondition or policy says no (the denial is attached)."
+          enum: [allow, approval, refuse]
+        op_hash: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        class: { $ref: "#/components/schemas/OpClass" }
+        policy_version: { type: string, minLength: 1, maxLength: 64 }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/Check" }
+        denial: { $ref: "#/components/schemas/Denial" }
+      required: [type, would_allow, outcome, op_hash, class, policy_version, checks]
+      additionalProperties: false
+    RequesterView:
+      description: Who asked, as chapd verified it. A run has `run_id` and `profile`; the orchestrator has `orchestrator_id` and neither of those.
+      oneOf:
+        - type: object
+          properties:
+            kind: { const: run }
+            run_id: { type: string, pattern: "^r-[0-9a-z]{4,32}$" }
+            profile: { $ref: "#/components/schemas/Profile" }
+          required: [kind, run_id, profile]
+          additionalProperties: false
+        - type: object
+          properties:
+            kind: { const: orchestrator }
+            orchestrator_id: { type: string, pattern: "^[a-z][a-z0-9._-]{0,62}$" }
+          required: [kind, orchestrator_id]
+          additionalProperties: false
+    ApprovalSummary:
+      description: What the requester may see of an approval. Never the card text, nonce or challenge.
+      type: object
+      properties:
+        id: { type: string, pattern: "^a-[0-9a-z]{6,32}$" }
+        request_id: { type: string, pattern: "^q-[0-9a-z]{6,32}$" }
+        op: { type: string }
+        op_hash: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        state: { $ref: "#/components/schemas/ApprovalState" }
+        class: { $ref: "#/components/schemas/OpClass" }
+        critical: { type: boolean }
+        policy_version: { type: string, minLength: 1, maxLength: 64 }
+        created_at: { type: string, format: date-time }
+        decided_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+      required: [id, request_id, op, op_hash, state, class, critical, policy_version, created_at, expires_at]
+      additionalProperties: false
+    Op:
+      type: object
+      properties:
+        id:
+          description: The spec `request_id`.
+          type: string
+          pattern: "^q-[0-9a-z]{6,32}$"
+        state: { $ref: "#/components/schemas/OpState" }
+        op: { type: string }
+        project: { type: string, pattern: "^[a-z][a-z0-9-]{1,38}$" }
+        target: { $ref: "#/components/schemas/Target" }
+        op_hash: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        requester: { $ref: "#/components/schemas/RequesterView" }
+        class: { $ref: "#/components/schemas/OpClass" }
+        reversibility: { $ref: "#/components/schemas/Reversibility" }
+        policy_version: { type: string, minLength: 1, maxLength: 64 }
+        reason: { type: string, maxLength: 500 }
+        requested_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        approval: { $ref: "#/components/schemas/ApprovalSummary" }
+        execution_id:
+          description: Assigned before the adapter is called; absent until release and always absent on `refused`.
+          type: string
+          pattern: "^x-[0-9a-z]{6,32}$"
+        outcome:
+          enum: [succeeded, refused, failed, unconfirmed]
+        external_ref:
+          description: The service's own id (PR URL, deploy id). Never a secret. Absent when `unconfirmed`.
+          type: string
+          minLength: 1
+          maxLength: 300
+        result:
+          description: Op-specific result, already redacted (for example the `pr.merge` verdict `checks`).
+          type: object
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/Check" }
+        denial: { $ref: "#/components/schemas/Denial" }
+      required: [id, state, op, project, target, op_hash, requester, class, reversibility, requested_at, expires_at, updated_at]
+      additionalProperties: false
+    OpPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Op" }
+        next_cursor: { type: [string, "null"] }
+      required: [items, next_cursor]
+      additionalProperties: false
+    ApprovalPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ApprovalSummary" }
+        next_cursor: { type: [string, "null"] }
+      required: [items, next_cursor]
+      additionalProperties: false
+    Status:
+      type: object
+      properties:
+        version: { type: string }
+        policy_version: { type: string, minLength: 1, maxLength: 64 }
+        requester: { $ref: "#/components/schemas/RequesterView" }
+        project: { type: string, pattern: "^[a-z][a-z0-9-]{1,38}$" }
+        token_expires_at: { type: string, format: date-time }
+        approvals:
+          description: "`available` when the approvals engine (L1-12) is running; `unavailable` before it exists (ops that need a card are then refused `OP_APPROVAL_REQUIRED`)."
+          enum: [available, unavailable]
+        allow_interim:
+          description: Whether interim run tokens are accepted (ADR-005; flipped to false at cut-over to the runner).
+          type: boolean
+        git_proxy: { type: string, const: /git/ }
+        approver_credentials:
+          description: "Live approver (Windows Hello / WebAuthn) credentials enrolled in the console. Orchestrator callers only; absent for run tokens. `chap doctor` warns when it is 0."
+          type: integer
+          minimum: 0
+      required: [version, policy_version, requester, project, token_expires_at, approvals, allow_interim, git_proxy]
+      additionalProperties: false
+    CatalogEntry:
+      type: object
+      properties:
+        op: { type: string }
+        class: { $ref: "#/components/schemas/OpClass" }
+        reversibility: { $ref: "#/components/schemas/Reversibility" }
+        surface:
+          description: "`op` = POST /v0/ops; `git` = the git proxy mount."
+          enum: [op, git]
+        enabled:
+          description: Always true unless `all=true` was asked (orchestrator).
+          type: boolean
+        needs_approval:
+          description: True for class high and critical. A gated op may still need one per request (see its denial).
+          type: boolean
+        summary: { type: string, maxLength: 60 }
+        usage: { type: string, maxLength: 100 }
+      required: [op, class, reversibility, surface, enabled, needs_approval, summary, usage]
+      additionalProperties: false
+    Catalog:
+      type: object
+      properties:
+        policy_version: { type: string, minLength: 1, maxLength: 64 }
+        project: { type: string, pattern: "^[a-z][a-z0-9-]{1,38}$" }
+        profile: { $ref: "#/components/schemas/Profile" }
+        ops:
+          description: Sorted by `op`.
+          type: array
+          items: { $ref: "#/components/schemas/CatalogEntry" }
+      required: [policy_version, project, ops]
+      additionalProperties: false
+    RunRegister:
+      type: object
+      properties:
+        control: { type: string, description: "Compact control JWT, typ factory-ctl+jwt, act run.start." }
+        token: { type: string, description: "Compact run token (JWT) for the run being registered." }
+      required: [control, token]
+      additionalProperties: false
+    RunEnd:
+      type: object
+      properties:
+        control: { type: string, description: "Compact control JWT, typ factory-ctl+jwt, act run.end." }
+        outcome:
+          description: How the run ended; absent means `done`. `killed` needs `cause_code`.
+          enum: [done, failed, killed, blocked]
+        cause_code:
+          description: A stop-table code (required for `killed`).
+          type: string
+          maxLength: 48
+        actual_tokens:
+          description: Model tokens the runner metered; Chaperone does not meter them. Absent means 0.
+          type: integer
+          minimum: 0
+      required: [control]
+      additionalProperties: false
+    RunStatus:
+      description: What `GET /v0/runs/{id}` returns. Exactly these four members.
+      type: object
+      properties:
+        state: { enum: [active, ended] }
+        ended_at:
+          description: When the run ended; `null` while active.
+          type: [string, "null"]
+          format: date-time
+        cause_code:
+          description: "The stop-table code the run ended under (an operator stop, a stop, the reaper's `TIME_EXCEEDED`); `null` for an active run and for one that ended normally."
+          type: [string, "null"]
+          maxLength: 48
+        expires_at: { type: string, format: date-time, description: "The run token's `exp`." }
+      required: [state, ended_at, cause_code, expires_at]
+      additionalProperties: false
+    Run:
+      type: object
+      properties:
+        run_id: { type: string, pattern: "^r-[0-9a-z]{4,32}$" }
+        project: { type: string, pattern: "^[a-z][a-z0-9-]{1,38}$" }
+        profile: { $ref: "#/components/schemas/Profile" }
+        state: { $ref: "#/components/schemas/RunState" }
+        interim: { type: boolean }
+        expires_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        end_reason: { type: string, maxLength: 200 }
+      required: [run_id, project, profile, state, interim, expires_at]
+      additionalProperties: false
+    RunPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Run" }
+        next_cursor: { type: [string, "null"] }
+      required: [items, next_cursor]
+      additionalProperties: false
+    DevTokenRequest:
+      type: object
+      properties:
+        project: { type: string, pattern: "^[a-z][a-z0-9-]{1,38}$" }
+        profile: { const: host-interim }
+        repo: { type: string, pattern: "^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$" }
+        base: { type: string, maxLength: 200 }
+        branch: { type: string, maxLength: 200 }
+        paths:
+          type: array
+          items: { type: string, maxLength: 200 }
+        ops:
+          type: array
+          items: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$" }
+        minutes: { type: integer, minimum: 1, maximum: 120 }
+      required: [project, repo, base, branch, paths, ops, minutes]
+      additionalProperties: false
+    DevToken:
+      type: object
+      properties:
+        token: { type: string, description: The run token. Shown once. }
+        run_id: { type: string, pattern: "^r-[0-9a-z]{4,32}$" }
+        jti: { type: string }
+        expires_at: { type: string, format: date-time }
+      required: [token, run_id, jti, expires_at]
+      additionalProperties: false
+    LedgerPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/LedgerEvent" }
+        next_cursor: { type: [string, "null"] }
+      required: [items, next_cursor]
+      additionalProperties: false
+    LedgerVerdict:
+      type: object
+      properties:
+        ok: { type: boolean }
+        chain: { type: string }
+        head_seq: { type: integer, minimum: 0 }
+        head_hash: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        checked_export: { type: boolean }
+        problems:
+          type: array
+          items: { type: string, maxLength: 300 }
+      required: [ok, chain, head_seq, head_hash, checked_export, problems]
+      additionalProperties: false
+    VaultStatus:
+      type: object
+      properties:
+        initialized: { type: boolean }
+        secret_count: { type: integer, minimum: 0 }
+        names:
+          type: array
+          items: { type: string }
+      required: [initialized, secret_count, names]
+      additionalProperties: false
+    HostResult:
+      type: object
+      properties:
+        exit_code: { type: integer }
+        outcome: { enum: [succeeded, failed, timeout, refused] }
+        code:
+          description: Only when `outcome` is `refused`, for example `GRANT_EXPIRED`, `HOST_BUSY`.
+          type: string
+          maxLength: 48
+      required: [exit_code, outcome]
+      additionalProperties: false
+    ParamsPrOpen:
+      description: Phase 1 shape for `pr.open` (owned by L1-09). `head` must equal the token's `task_scope.branch`, `base` its `task_scope.base`.
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        body: { type: string, maxLength: 20000 }
+        head: { type: string }
+        base: { type: string }
+        draft: { type: boolean }
+      required: [title, head, base]
+      additionalProperties: false
+    ParamsPrUpdate:
+      description: Phase 1 shape for `pr.update` (owned by L1-10). `expected_head_sha` is required.
+      type: object
+      properties:
+        number: { type: integer, minimum: 1 }
+        expected_head_sha: { type: string, pattern: "^[0-9a-f]{40}$" }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        body: { type: string, maxLength: 20000 }
+        update_branch: { type: boolean }
+      required: [number, expected_head_sha]
+      additionalProperties: false
+    ParamsPrMerge:
+      description: "Phase 1 shape for `pr.merge` (owned by L1-10; the spec's reference example). Target is `{adapter: github, ref: \"owner/repo#N\"}`."
+      type: object
+      properties:
+        base: { type: string }
+        head_sha: { type: string, pattern: "^[0-9a-f]{40}$" }
+        method: { const: squash }
+      required: [base, head_sha, method]
+      additionalProperties: false
+    ParamsIssueOpen:
+      description: "Phase 1 shape for `issue.open`. Target is `{adapter: github, ref: \"owner/repo\"}`; the repository must be the project's. `labels` must include `source:error-watcher`. Only the orchestrator token asks."
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        body: { type: string, maxLength: 10000 }
+        labels: { type: array, minItems: 1, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
+      required: [title, labels]
+      additionalProperties: false
+    ParamsIssueComment:
+      description: "Phase 1 shape for `issue.comment`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`."
+      type: object
+      properties:
+        body: { type: string, minLength: 1, maxLength: 10000 }
+      required: [body]
+      additionalProperties: false
+    ParamsIssueReopen:
+      description: "Phase 1 shape for `issue.reopen`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`. No params."
+      type: object
+      additionalProperties: false
+    ParamsPrView:
+      description: "Phase 1 shape for `pr.view` (ADR-002 amendment 12). Target is `{adapter: github, ref: \"owner/repo#N\"}`; the repository must be the project's. No params. Read-only; only the orchestrator token asks. The result holds number, title, body (cut at 64 KiB, `body_truncated`), state, draft, merged, author, labels, head {ref, sha, repo, fork}, base {ref, sha}, mergeable (null while GitHub computes it), mergeable_state, url and the counts."
+      type: object
+      additionalProperties: false
+    ParamsPrDiff:
+      description: "Phase 1 shape for `pr.diff` (ADR-002 amendment 12). Target as for `pr.view`. The result holds `diff` (cut at a line end at 256 KiB: `truncated`, `size`, `returned`, `cap`) and the `head_sha` it was read at. With `expected_head_sha` the op fails, and says the new head, if the head moved."
+      type: object
+      properties:
+        expected_head_sha: { type: string, pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" }
+      additionalProperties: false
+    ParamsPrChecks:
+      description: "Phase 1 shape for `pr.checks` (ADR-002 amendment 12). Target as for `pr.view`. The result holds the latest check run of each name on the head commit (id, name, status, conclusion, app_id, url, started_at) and a `summary` of counts (total, passed, failed, pending, other)."
+      type: object
+      properties:
+        expected_head_sha: { type: string, pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" }
+      additionalProperties: false
+    ParamsPrFiles:
+      description: "Phase 1 shape for `pr.files` (ADR-002 amendment 12). Target as for `pr.view`. One page of the changed files (no patches; `pr.diff` has them): filename, previous_filename, status, additions, deletions, has_patch. GitHub lists at most 3000 files."
+      type: object
+      properties:
+        page: { type: integer, minimum: 1, default: 1 }
+        per_page: { type: integer, minimum: 1, maximum: 100, default: 30 }
+        expected_head_sha: { type: string, pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" }
+      additionalProperties: false
+    ParamsHealth:
+      type: object
+      additionalProperties: false
+    ParamsLogs:
+      description: Owned by L1-11. `source` is one of a fixed set.
+      type: object
+      properties:
+        source: { enum: [web, worker, db, tunnel] }
+        lines: { type: integer, minimum: 1, maximum: 500 }
+      required: [source]
+      additionalProperties: false
+    ParamsCiReport:
+      description: "ADR-002 amendment 10. Target is `{adapter: runner, ref: \"<run_id>\"}`, the same run ID as `run_id`. Chaperone reads the repository, the exact commit and the outcome from its own record of the run; the request carries nothing else. Orchestrator only; a `ci` run that has ended."
+      type: object
+      properties:
+        run_id: { type: string, pattern: "^r-[0-9a-z]{4,32}$" }
+      required: [run_id]
+      additionalProperties: false
+    ParamsIntakeList:
+      description: "Phase 1 shape for `intake.list`. Target is `{adapter: linear, ref: \"<team key>\"}`; the team must be the project's `linear.team`. Only the orchestrator token asks. `refresh` asks for a live read (answered from the cache when the last read is under 30 s old); `closed` also returns completed and canceled items (always a live read). Titles, descriptions and comments in the result are untrusted text."
+      type: object
+      properties:
+        refresh: { type: boolean }
+        closed: { type: boolean }
+      additionalProperties: false
+    ParamsIntakeComment:
+      description: "Phase 1 shape for `intake.comment`. Target is `{adapter: linear, ref: \"<issue identifier>\"}`, for example `SHOP-12`; the issue must be in the project's `linear.team` and carry the `linear.label` label when the comment is posted."
+      type: object
+      properties:
+        body: { type: string, minLength: 1, maxLength: 4000 }
+      required: [body]
+      additionalProperties: false
+    ParamsIntakeMove:
+      description: "Phase 1 shape for `intake.move`. Target is `{adapter: linear, ref: \"<issue identifier>\"}`. `state` must be one of the project's `linear.states` and a state of the issue's team."
+      type: object
+      properties:
+        state: { type: string, minLength: 1, maxLength: 80 }
+      required: [state]
+      additionalProperties: false
+    ParamsIntakeStates:
+      description: "Phase 1 shape for `intake.states`. Target is `{adapter: linear, ref: \"<team key>\"}`. No params."
+      type: object
+      additionalProperties: false
+    ParamsDeploy:
+      description: "Owned by L1-15. Target is `{adapter: wsl-host, ref: \"<target>\"}`."
+      type: object
+      properties:
+        sha: { type: string, pattern: "^[0-9a-f]{40}$" }
+      required: [sha]
+      additionalProperties: false

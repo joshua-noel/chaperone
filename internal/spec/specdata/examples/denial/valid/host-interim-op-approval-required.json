@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "type": "denial",
+  "denial_id": "d-8k4m1v",
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "profile": "host-interim",
+  "at": "2026-10-23T22:20:05Z",
+  "surface": "op",
+  "action": {
+    "verb": "request",
+    "target": "deploy"
+  },
+  "cause_code": "OP_APPROVAL_REQUIRED",
+  "why": "deploy needs an approval for this exact SHA",
+  "request": {
+    "possible": true,
+    "command": "chap request op deploy --reason \"<why the deploy is needed>\""
+  },
+  "thrash": {
+    "count": 1,
+    "window_seconds": 300,
+    "flagged": false
+  }
+}

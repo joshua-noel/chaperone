@@ -1,0 +1,28 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 9,
+  "prev_hash": "sha256:f4e5dc0138cf785056fd8d1f4b06b3a1126d0aa58968d8bb121b4a0257a037d1",
+  "hash": "sha256:c68e6dde481dcd41d65603a7e335e503e46249806fdf44c125576c8921d1dbd6",
+  "time_unix_nano": "1792792850000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "282ec7906b32bd81",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "net.allow",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "server.address": "npm.factory.internal",
+    "server.port": 443,
+    "network.transport": "tcp",
+    "factory.net.would_deny": false,
+    "factory.net.bytes_out": 2210,
+    "factory.net.bytes_in": 48211
+  }
+}

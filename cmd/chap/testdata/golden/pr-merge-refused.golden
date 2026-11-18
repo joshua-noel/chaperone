@@ -1,0 +1,17 @@
+$ chap pr merge 214 --head 0588aa4ee0116267162e895016bcfda9ec3a3e2c --repo acme/shop
+exit: 5
+--- request
+POST /v0/ops
+auth: run
+{"op":"pr.merge","params":{"base":"main","head_sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c","method":"squash"},"target":{"adapter":"github","ref":"acme/shop#214"}}
+--- stdout
+pr.merge acme/shop#214: refused
+id: q-3k9d2m  class: gated  policy: baseline-2026.10.1
+checks:
+  FAIL verify: in_progress on 0588aa4
+  ok   behind_by: 0
+DENIED pr.merge on acme/shop#214 (profile code, run r-7f3a)
+cause: OP_POLICY_REFUSED
+why: verify is not success on the exact head
+request: not possible, policy does not allow asking
+--- stderr

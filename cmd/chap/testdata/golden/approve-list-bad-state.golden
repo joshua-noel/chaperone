@@ -1,0 +1,8 @@
+$ chap approve list --state done
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --state must be pending, approved, denied, expired, cancelled or consumed
+usage: chap approve list [--state pending|approved|denied|expired|cancelled|consumed] [--limit <n>] [--cursor <c>]

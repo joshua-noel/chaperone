@@ -1,0 +1,26 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 1,
+  "prev_hash": "sha256:6939b8c5b03cbf8fd3c77c8e33f72813e9e8bc5de73ea3121dddb59f0022b64b",
+  "hash": "sha256:2af24bdfa477ff367115595dc97b34129aa978227e306b8936140358543ab345",
+  "time_unix_nano": "1792792810000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "4c71526f68c80bcd",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "brief.accept",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.brief.sha256": "sha256:7ed2358fdd424519b90502f453c9ab84266b75d6c17db83fdb89511dd61d67c1",
+    "factory.profile.name": "code",
+    "factory.profile.version": "1.0.0",
+    "factory.lane": "normal"
+  }
+}

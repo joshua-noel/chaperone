@@ -1,0 +1,34 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 4,
+  "prev_hash": "sha256:7a8257de7841d74baf6c48af6bd1844b540763d46e9a19459487575ad4d872a2",
+  "hash": "sha256:b6f3c0271c576859d1b9045c473449e10ddd61f2d700116f35ab84bfc64f5b3d",
+  "time_unix_nano": "1792796070000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "4f2386de83a789e8",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "report.verify",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.report.sha256": "sha256:b279e169eb1782948e501032d928cc770d21c95b8a20a46e8faafedb9c116d49",
+    "factory.verify.claims": [
+      {
+        "claim": "PR acme/shop#214 is open at the stated head",
+        "verdict": "confirmed"
+      },
+      {
+        "claim": "retry test passed ten times",
+        "verdict": "unverifiable"
+      }
+    ],
+    "factory.verify.refuted": 0
+  }
+}

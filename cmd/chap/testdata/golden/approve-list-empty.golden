@@ -1,0 +1,8 @@
+$ chap approve list --state pending --limit 5
+exit: 0
+--- request
+GET /v0/approvals?limit=5&state=pending
+auth: run
+--- stdout
+no approvals
+--- stderr

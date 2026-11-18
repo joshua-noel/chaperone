@@ -1,0 +1,1 @@
+{"type":"dry_run","would_allow":true,"outcome":"allow","op_hash":"sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415","class":"gated","policy_version":"baseline-2026.10.1","checks":[{"name":"verify","passed":true,"detail":"success on 0588aa4"}]}

@@ -1,0 +1,7 @@
+$ chap ledger verify --anchor --anchor-file /restore/none.jsonl
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: cannot read --anchor-file /restore/none.jsonl: file does not exist

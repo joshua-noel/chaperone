@@ -1,0 +1,9 @@
+$ chap ledger verify
+exit: 0
+--- request
+POST /v0/ledger/verify
+auth: orchestrator
+{"against_export":false}
+--- stdout
+ledger ok: chain chaperone.main, head seq 1042, hash sha256:abababababababababababababababababababababababababababababababab
+--- stderr

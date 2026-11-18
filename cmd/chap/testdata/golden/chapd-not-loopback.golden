@@ -1,0 +1,7 @@
+$ chap health
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: CHAP_URL must point at the loopback address (127.0.0.1, ::1 or localhost)

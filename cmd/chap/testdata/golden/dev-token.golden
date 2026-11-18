@@ -1,0 +1,12 @@
+$ chap dev-token --project acme-shop --repo acme/shop --branch agent/r-9a2b --path docs/** --path README.md --op pr.open --op health --minutes 90 --out run.token
+exit: 0
+--- request
+POST /v0/dev-tokens
+auth: orchestrator
+{"base":"main","branch":"agent/r-9a2b","minutes":90,"ops":["pr.open","health"],"paths":["docs/**","README.md"],"profile":"host-interim","project":"acme-shop","repo":"acme/shop"}
+--- file
+run.token (120 bytes)
+--- stdout
+run r-9a2b token written to run.token (fingerprint e2fa8b33), expires 2026-10-24T10:30:00Z
+hand it to the run as CHAP_RUN_TOKEN, read from that file
+--- stderr

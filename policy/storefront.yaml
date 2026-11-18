@@ -1,0 +1,38 @@
+# Example project policy: what Chaperone may merge for the example project "Storefront" (ADR-002).
+# Copy this file to policy/<your-project>.yaml and replace the values.
+#
+# A project file cannot turn an op on; the baseline does that. This block is
+# what makes pr.merge and pr.update usable for the project at all: without it
+# the adapters refuse every request (OP_POLICY_REFUSED).
+project: storefront
+
+pr:
+  # The repository of the project. A request for any other repository is refused.
+  repo: example-org/storefront
+  # PRs merge into this branch only (a request naming another base is refused).
+  base: feat/d1-private-pilot
+  # `verify` is always required. Add check names here to require more.
+  extra_checks: []
+  # Paths the baseline classifier does not know. The strongest tier wins, so a
+  # glob here can raise a path but never lower one the baseline calls high.
+  tiers:
+    high: []
+    medium: []
+    low: []
+  # A local CI result (ci.report, ADR-002 amendment 10) must be present besides `verify`: `also` means verify AND the
+  # `local-ci` check posted by Chaperone's own App on the exact head. (`instead` would drop verify: not used.)
+  local_ci:
+    mode: also
+    check: local-ci
+
+# The operator-board intake: the Linear team and label the orchestrator may read and write, and
+# the states `intake.move` may set. Take the values from `chap intake states`. The label is the board's
+# exact name (Linear's label filter matches it exactly). A mistake in this block makes every op of the
+# project refuse (a project file is all or nothing).
+linear:
+  team: SHOP
+  label: agent
+  states:
+    - In Progress
+    - Waiting/Blocked
+    - Done

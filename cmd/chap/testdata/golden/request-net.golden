@@ -1,0 +1,12 @@
+$ chap request net api.example.com --reason "fetch the API schema"
+exit: 3
+--- request
+POST /v0/approvals
+auth: run
+{"kind":"net","op":"net","params":{"host":"api.example.com"},"reason":"fetch the API schema","target":{"adapter":"runner","ref":"api.example.com"}}
+--- stdout
+--- stderr
+DENIED op api.example.com (profile code, run r-7f3a)
+cause: OP_PARAMS_INVALID
+why: kind net is not served by chapd in Phase 1; the runner owns it
+next: read the why line: if it names something you can correct, correct the request and ask again; if not, stop and say so

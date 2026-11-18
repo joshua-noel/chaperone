@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "type": "op.request",
+  "request_id": "q-5h8w3c",
+  "requester": {
+    "kind": "run",
+    "run_id": "r-7f3a",
+    "token_jti": "n8Gf3kQ2xV7bTz1LwA9cYd",
+    "profile": "host-interim"
+  },
+  "project": "acme-shop",
+  "op": "deploy",
+  "target": {
+    "adapter": "ssh-host",
+    "ref": "staging"
+  },
+  "params": {
+    "sha": "0588aa4ee0116267162e895016bcfda9ec3a3e2c",
+    "backup_verified_at": "2026-10-23T21:45:00Z"
+  },
+  "reason": "Phase 1: a host-token run may request a deploy; it always needs an approval.",
+  "requested_at": "2026-10-23T22:50:00Z",
+  "expires_at": "2026-10-23T23:50:00Z",
+  "op_hash": "sha256:c7c016271803c7a847afe1db2d8cc7a65aa4f90aee52b181f748e7cba216b59f"
+}

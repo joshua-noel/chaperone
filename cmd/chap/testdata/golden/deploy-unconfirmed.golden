@@ -1,0 +1,13 @@
+$ chap deploy 0588aa4ee0116267162e895016bcfda9ec3a3e2c
+exit: 7
+--- request
+POST /v0/ops
+auth: run
+{"op":"deploy","params":{"sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c"},"target":{"adapter":"wsl-host","ref":"pilot"}}
+--- stdout
+deploy pilot: unconfirmed
+id: q-9z8y7x  class: high  policy: baseline-2026.10.1
+execution: x-2q3w4e
+sent, no receipt yet; chapd will settle it, do not retry
+follow: chap op show q-9z8y7x --wait 30
+--- stderr

@@ -1,0 +1,8 @@
+$ chap runs revoke --all
+exit: 0
+--- request
+POST /v0/runs/revoke-all
+auth: orchestrator
+--- stdout
+revoked 3 active runs (OPERATOR_STOP_ALL)
+--- stderr

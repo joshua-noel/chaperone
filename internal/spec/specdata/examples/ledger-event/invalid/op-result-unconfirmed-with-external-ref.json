@@ -1,0 +1,29 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 9,
+  "prev_hash": "sha256:14733fbad5bec5105fb494bb1261d23141f6f08629fcb355d2815ed056ac3b8d",
+  "hash": "sha256:cfaa189627b802f2a176a04b508f5e8fbf8f1a35a7667157444b8dcf2cb2efb7",
+  "time_unix_nano": "1792800260000000000",
+  "trace_id": "7b20021983ca55afd82274eae2fbc73a",
+  "span_id": "6b0e8f2d4a1c7953",
+  "severity_number": 13,
+  "severity_text": "WARN",
+  "event_name": "op.result",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "project": "acme-shop",
+  "attributes": {
+    "factory.request_id": "q-9d1t7w",
+    "factory.op_hash": "sha256:38159f26aeb226fefd69af55175315c4ece4532338e511d8e91cf77d81905848",
+    "factory.execution_id": "x-4t8k2n",
+    "factory.outcome": "unconfirmed",
+    "factory.policy_version": "baseline-2026.10.1",
+    "factory.requester.kind": "orchestrator",
+    "factory.external_ref": "ssh-host:staging/releases/035954c"
+  },
+  "body": "Dispatched; the connection dropped before the host sent a receipt."
+}

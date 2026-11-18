@@ -1,0 +1,8 @@
+$ chap runs revoke 7f3a
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the run id must look like r-xxxx
+usage: chap runs revoke <r-id> | --all

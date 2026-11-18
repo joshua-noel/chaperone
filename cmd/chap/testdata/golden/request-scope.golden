@@ -1,0 +1,12 @@
+$ chap request scope --reason "needs the docs folder"
+exit: 3
+--- request
+POST /v0/approvals
+auth: run
+{"kind":"scope","op":"scope","params":{},"reason":"needs the docs folder","target":{"adapter":"runner","ref":"task_scope"}}
+--- stdout
+--- stderr
+DENIED op api.example.com (profile code, run r-7f3a)
+cause: OP_PARAMS_INVALID
+why: kind net is not served by chapd in Phase 1; the runner owns it
+next: read the why line: if it names something you can correct, correct the request and ask again; if not, stop and say so

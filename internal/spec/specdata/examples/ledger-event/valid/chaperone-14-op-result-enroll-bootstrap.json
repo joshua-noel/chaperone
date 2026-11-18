@@ -1,0 +1,28 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 14,
+  "prev_hash": "sha256:4778c02268cf6ba64230e444b3d929505e62548b362ebdba7a953e70faa49f9a",
+  "hash": "sha256:6e3b2c878eb353fa227ea2d342ad11bb027993025a02c617529a9fda3f938d3b",
+  "time_unix_nano": "1792803605000000000",
+  "trace_id": "b368a14e69fc73207793b281c4391491",
+  "span_id": "b84e1a6c9027d35f",
+  "severity_number": 13,
+  "severity_text": "WARN",
+  "event_name": "op.result",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "project": "chaperone",
+  "attributes": {
+    "factory.request_id": "q-5e8b3k",
+    "factory.op_hash": "sha256:89db66e2ffddc9b410ccf7efa207720d6d070fabbef6b5bf5ac7c76491a2bc62",
+    "factory.execution_id": "x-5w2k8d",
+    "factory.outcome": "succeeded",
+    "factory.policy_version": "baseline-2026.10.1",
+    "factory.requester.kind": "orchestrator",
+    "factory.orchestrator.id": "operator"
+  }
+}

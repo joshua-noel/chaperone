@@ -1,0 +1,23 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 23,
+  "prev_hash": "sha256:a1949985b1c7f21dd8bb8472d9fe60f399f9751c872216e8e5dcf83158317f1b",
+  "hash": "sha256:f51b9267ec08b328fab2db7aa8a401819eab26a917d36ac58191fad35733ff0b",
+  "time_unix_nano": "1792806600000000000",
+  "trace_id": "b368a14e69fc73207793b281c4391491",
+  "span_id": "1e5a7d3c9b0f2864",
+  "severity_number": 13,
+  "severity_text": "WARN",
+  "event_name": "console.refused",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "attributes": {
+    "factory.console.ceremony": "login",
+    "factory.console.reason": "origin_mismatch",
+    "factory.console.rp_id": "localhost"
+  }
+}

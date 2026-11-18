@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 12,
+  "prev_hash": "sha256:f9ba6278da33e2c79f1fd096f822d4e31844c24fcaab0e98ebcfe025b8b0e4f9",
+  "hash": "sha256:336d04605f45c141ce50fec456b14b754ec9bda69613d1f4e3b2dfe37d838db8",
+  "time_unix_nano": "1792801201000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "c4ab986f9401081a",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "run.start",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.profile.name": "host-interim",
+    "factory.profile.version": "0.0.0",
+    "factory.isolation": "host"
+  }
+}

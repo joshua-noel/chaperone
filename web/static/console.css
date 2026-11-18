@@ -1,0 +1,405 @@
+/*
+ * Chaperone console. Basecoat (vendor/basecoat.min.css) supplies the components;
+ * this file sets the identity (tokens) and lays out the page. Nothing here is
+ * inline or loaded from elsewhere: the Content-Security-Policy allows 'self'.
+ *
+ * Colour: a calm neutral base, one primary (ink blue), one warm secondary (the
+ * parchment and sepia of the doorway drawing), and four state colours that are
+ * kept apart on purpose: success (green), warning (amber), danger (red) and info
+ * (cyan). A state is never colour alone: its badge or heading always says it in
+ * words. The two scales below are the only sizes the pages use.
+ *
+ * The palette is a handful of hue/chroma variables (--chap-hue and the --chap-*-h
+ * values), so a different palette is a short override and not a new file.
+ */
+
+/* ---- 1. Tokens ---------------------------------------------------------- */
+:root {
+  /* Spacing: a 4 px base, doubling after 16. */
+  --chap-space-1: .25rem;
+  --chap-space-2: .5rem;
+  --chap-space-3: .75rem;
+  --chap-space-4: 1rem;
+  --chap-space-5: 1.5rem;
+  --chap-space-6: 2rem;
+  --chap-space-7: 3rem;
+  --chap-space-8: 4rem;
+
+  /* Type: a 1.2 ratio from the 14 px UI size. */
+  --chap-text-xs: .75rem;
+  --chap-text-sm: .875rem;
+  --chap-text-md: 1rem;
+  --chap-text-h2: 1.125rem; /* card titles */
+  --chap-text-lg: 1.25rem;
+  --chap-text-xl: 1.5rem;
+  --chap-leading-tight: 1.25;
+  --chap-leading-body: 1.5;
+
+  --chap-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --chap-mono: "Cascadia Mono", ui-monospace, Consolas, "SF Mono", Menlo, monospace;
+
+  --chap-measure: 72rem;   /* widest page */
+  --chap-narrow: 46rem;    /* sign-in and enrol */
+  --chap-radius: .5rem;
+
+  /* Palette. Hue is the OKLCH angle; every colour below is built from these. */
+  --chap-hue: 255;            /* neutrals: a faint blue cast */
+  --chap-neutral-c: .006;
+  --chap-primary-h: 255;      /* ink blue */
+  --chap-primary-c: .14;
+  --chap-warm-h: 62;          /* ochre and sepia from the drawing */
+  --chap-warm-c: .11;
+  --chap-success-h: 150;
+  --chap-warning-h: 78;
+  --chap-danger-h: 27;
+  --chap-info-h: 232;
+
+  /* Basecoat reads these names, so overriding them recolours every component. */
+  --background: oklch(97.6% .004 var(--chap-hue));
+  --foreground: oklch(19% .02 var(--chap-hue));
+  --card: oklch(100% 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(100% 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(42% var(--chap-primary-c) var(--chap-primary-h));        /* 8.6:1 on white */
+  --primary-foreground: oklch(99% 0 0);
+  --secondary: oklch(95% .008 var(--chap-hue));
+  --secondary-foreground: oklch(30% .03 var(--chap-hue));
+  --muted: oklch(95.5% var(--chap-neutral-c) var(--chap-hue));
+  --muted-foreground: oklch(46% .025 var(--chap-hue));                     /* 6.8:1 on white */
+  --accent: oklch(94% .02 var(--chap-primary-h));
+  --accent-foreground: oklch(28% .08 var(--chap-primary-h));
+  --destructive: oklch(50% .21 var(--chap-danger-h));                      /* 6.6:1 on white */
+  --border: oklch(90% .008 var(--chap-hue));
+  --input: oklch(86% .01 var(--chap-hue));
+  --ring: oklch(55% .16 var(--chap-primary-h));
+
+  /* Warm secondary: -ink is for text, the plain one for marks and rules, -bg for a wash. */
+  --chap-warm: oklch(63% var(--chap-warm-c) var(--chap-warm-h));
+  --chap-warm-ink: oklch(45% .1 var(--chap-warm-h));
+  --chap-warm-bg: oklch(95.5% .035 calc(var(--chap-warm-h) + 18));
+
+  /* State colours: -ink text and rule, -bg tint, -line border. Each pair keeps 4.5:1 or better. */
+  --chap-success-ink: oklch(41% .11 var(--chap-success-h));
+  --chap-success-bg: oklch(95.5% .04 var(--chap-success-h));
+  --chap-success-line: oklch(80% .08 var(--chap-success-h));
+  --chap-warning-ink: oklch(44% .1 var(--chap-warning-h));
+  --chap-warning-bg: oklch(96% .06 calc(var(--chap-warning-h) + 8));
+  --chap-warning-line: oklch(82% .1 calc(var(--chap-warning-h) + 2));
+  --chap-danger-ink: var(--destructive);
+  --chap-danger-bg: oklch(96% .03 var(--chap-danger-h));
+  --chap-danger-line: oklch(82% .09 var(--chap-danger-h));
+  --chap-info-ink: oklch(42% .1 var(--chap-info-h));
+  --chap-info-bg: oklch(95.5% .03 var(--chap-info-h));
+  --chap-info-line: oklch(80% .06 var(--chap-info-h));
+  --chap-neutral-ink: var(--muted-foreground);
+  --chap-neutral-bg: var(--muted);
+  --chap-neutral-line: var(--border);
+
+  --chap-shade: oklch(20% .02 var(--chap-hue) / .16);
+  --chap-art-filter: none;
+}
+
+.dark {
+  --background: oklch(15% .012 var(--chap-hue));
+  --foreground: oklch(95% .008 var(--chap-hue));
+  --card: oklch(19% .014 var(--chap-hue));
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(78% .11 var(--chap-primary-h));
+  --primary-foreground: oklch(17% .03 var(--chap-primary-h));
+  --secondary: oklch(26% .016 var(--chap-hue));
+  --secondary-foreground: oklch(92% .01 var(--chap-hue));
+  --muted: oklch(24% .014 var(--chap-hue));
+  --muted-foreground: oklch(72% .02 var(--chap-hue));
+  --accent: oklch(30% .04 var(--chap-primary-h));
+  --accent-foreground: oklch(95% .02 var(--chap-primary-h));
+  --destructive: oklch(72% .17 calc(var(--chap-danger-h) - 5));
+  --border: oklch(100% 0 0 / .11);
+  --input: oklch(100% 0 0 / .17);
+  --ring: oklch(72% .13 var(--chap-primary-h));
+
+  --chap-warm: oklch(74% var(--chap-warm-c) var(--chap-warm-h));
+  --chap-warm-ink: oklch(80% .1 var(--chap-warm-h));
+  --chap-warm-bg: oklch(27% .04 calc(var(--chap-warm-h) + 18));
+
+  --chap-success-ink: oklch(80% .13 var(--chap-success-h));
+  --chap-success-bg: oklch(27% .05 var(--chap-success-h));
+  --chap-success-line: oklch(44% .09 var(--chap-success-h));
+  --chap-warning-ink: oklch(83% .12 calc(var(--chap-warning-h) + 8));
+  --chap-warning-bg: oklch(28% .05 calc(var(--chap-warning-h) + 4));
+  --chap-warning-line: oklch(48% .09 var(--chap-warning-h));
+  --chap-danger-ink: var(--destructive);
+  --chap-danger-bg: oklch(27% .06 var(--chap-danger-h));
+  --chap-danger-line: oklch(48% .12 var(--chap-danger-h));
+  --chap-info-ink: oklch(81% .1 var(--chap-info-h));
+  --chap-info-bg: oklch(27% .045 var(--chap-info-h));
+  --chap-info-line: oklch(46% .07 var(--chap-info-h));
+
+  --chap-shade: oklch(0% 0 0 / .5);
+  --chap-art-filter: brightness(.82) contrast(1.05);
+}
+
+/* ---- 2. Base ------------------------------------------------------------ */
+html { color-scheme: light; }
+html.dark { color-scheme: dark; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--chap-sans);
+  font-size: var(--chap-text-sm);
+  line-height: var(--chap-leading-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+code, pre, .mono { font-family: var(--chap-mono); font-size: .8125rem; }
+code { overflow-wrap: anywhere; }
+a:not(.btn) { color: var(--primary); text-underline-offset: .2em; }
+
+h1 { font-size: var(--chap-text-xl); font-weight: 600; line-height: var(--chap-leading-tight); letter-spacing: -.01em; }
+.card > section h3 { font-size: var(--chap-text-sm); font-weight: 600; margin: 0 0 var(--chap-space-1); }
+
+.muted { color: var(--muted-foreground); }
+/* The UTC time localtime.js adds after a local time. One unit, so it wraps whole at 390 px. */
+.utc { font-size: var(--chap-text-xs); white-space: nowrap; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.btn:focus-visible, .input:focus-visible, .textarea:focus-visible { outline: none; } /* Basecoat draws its own ring */
+
+/* ---- 3. Shell: header, nav, main ---------------------------------------- */
+.skip-link { position: absolute; left: -999px; top: 0; padding: var(--chap-space-2) var(--chap-space-4); background: var(--background); z-index: 10; }
+.skip-link:focus { left: 0; }
+
+.shell-header {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--chap-space-2) var(--chap-space-5);
+  padding: var(--chap-space-3) var(--chap-space-5);
+  background: var(--card);
+  border-top: 3px solid var(--primary);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: inline-flex; align-items: center; gap: var(--chap-space-2); color: var(--foreground); text-decoration: none; font-weight: 600; font-size: var(--chap-text-md); letter-spacing: .01em; }
+.brand svg { width: 2rem; height: 1.5rem; flex: none; }
+.brand .mark-bracket { stroke: var(--primary); }
+.brand .mark-line { stroke: var(--chap-warm); }
+.shell-origin { font-family: var(--chap-mono); font-size: var(--chap-text-xs); color: var(--muted-foreground); }
+
+.shell-nav { display: flex; flex-wrap: wrap; gap: var(--chap-space-1); margin-left: auto; }
+.shell-nav a { padding: var(--chap-space-1) var(--chap-space-3); border-radius: calc(var(--chap-radius) - 2px); text-decoration: none; color: var(--foreground); }
+.shell-nav a:hover { background: var(--muted); }
+.shell-nav a[aria-current="page"] { background: var(--accent); color: var(--accent-foreground); font-weight: 600; }
+
+.shell-main {
+  display: flex; flex-direction: column; gap: var(--chap-space-5);
+  max-width: var(--chap-measure);
+  margin: var(--chap-space-6) auto var(--chap-space-8);
+  padding: 0 var(--chap-space-5);
+  outline: none;
+}
+.shell-main > * { min-width: 0; }
+.shell-main > h1 { margin-bottom: calc(var(--chap-space-2) * -1); }
+/* A live region with nothing in it takes no room (the flex gap would count it twice). */
+.shell-main > [aria-live]:empty { margin-block: calc(var(--chap-space-5) / -2); }
+
+/* ?embed=1 (theme.js): inside another application the console's header and nav are not drawn, and the page uses the
+   whole frame. Layout only; the frame guard does not depend on it. */
+html[data-embed] .shell-header, html[data-embed] .skip-link { display: none; }
+html[data-embed] .shell-main { margin: var(--chap-space-3) auto var(--chap-space-4); max-width: none; padding: 0 var(--chap-space-3); }
+/* Shown when a browser cannot say that a button is visible (frame-guard.js). */
+.frame-note { margin: var(--chap-space-3); padding: var(--chap-space-3); border: 1px solid var(--border); border-radius: var(--chap-radius); background: var(--muted); }
+/* A held control looks held: the frame guard's hold in a frame (data-frame-visible="0") and the top-level hold (data-held).
+   No opacity: IntersectionObserver v2 would call a faded button not visible, and it could never arm.
+   !important is deliberate: this is a state override that has to win over every variant, hover, focus and ring rule of
+   Basecoat (a held Deny must not turn red on hover or focus), whatever their specificity or layer. It sets colour,
+   background, border, shadow, outline colour and the ring colour. A held control can still take keyboard focus and shows a
+   neutral ring then (the ordinary button ring colour), never the destructive one. Guarded by scripts/held-style/check.cjs. */
+html[data-framed] [data-frame-visible="0"],
+html [data-held="1"][aria-disabled="true"] {
+  color: var(--muted-foreground) !important; background-color: var(--muted) !important; border-color: var(--border) !important;
+  box-shadow: none !important; outline-color: var(--border) !important; --tw-ring-color: var(--ring) !important;
+  cursor: not-allowed;
+}
+html[data-framed] [data-frame-visible="0"]:focus-visible,
+html [data-held="1"][aria-disabled="true"]:focus-visible {
+  border-color: var(--ring) !important; box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent) !important;
+}
+
+/* ---- 4. Cards, forms, buttons ------------------------------------------- */
+.card { box-shadow: none; border: 1px solid var(--border); border-radius: var(--chap-radius); }
+.card > header :is(h2, h3) { font-size: var(--chap-text-h2); font-weight: 600; line-height: var(--chap-leading-tight); }
+/* Colour: a short ochre bar leads each card title (the line from the logo mark). */
+.card:not(.approval) > header h2::before {
+  content: ""; display: inline-block; width: .25rem; height: 1em; margin-right: var(--chap-space-2);
+  border-radius: 2px; background: var(--chap-warm); vertical-align: -.125em;
+}
+.card > footer { gap: var(--chap-space-2); flex-wrap: wrap; }
+/* Tables and the like can be wider than a phone: the section scrolls, the card does not. */
+.card > section { overflow-x: auto; }
+.card > section :where(p, ul) + :where(p, ul, form, div, h3) { margin-top: var(--chap-space-3); }
+
+.card > section > [aria-live]:not(:empty) { margin-top: var(--chap-space-4); }
+
+.form { display: grid; gap: var(--chap-space-4); max-width: 26rem; }
+.form-wide { max-width: 40rem; }
+.form-grid { max-width: none; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); align-items: end; }
+.form-grid > .actions { grid-column: 1 / -1; }
+.form fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: var(--chap-space-2); }
+.form legend { font-weight: 600; margin-bottom: var(--chap-space-1); }
+.form label { color: var(--foreground); font-weight: 500; line-height: var(--chap-leading-body); }
+.form label:has(> input) { font-weight: 400; gap: var(--chap-space-2); }
+.form .btn { justify-self: start; }
+.grid { display: grid; }
+.gap-2 { gap: var(--chap-space-2); }
+.secret-input { font-family: var(--chap-mono); -webkit-text-security: disc; }
+.input::placeholder, .textarea::placeholder { color: var(--muted-foreground); opacity: .8; }
+
+#status { margin-top: var(--chap-space-4); min-height: 1.5rem; }
+#status.error { color: var(--destructive); }
+
+/* Destructive buttons: keep the text readable on the tint. */
+.btn[data-variant="destructive"] { color: var(--destructive); }
+.btn[data-variant="destructive"]:hover { color: var(--destructive); }
+
+.actions { display: flex; flex-wrap: wrap; gap: var(--chap-space-2); align-items: center; }
+
+/* Alerts: Basecoat lays the body out as a grid, which breaks a sentence around <code>. */
+.alert > section { display: block; }
+.alert > h2 { font-size: var(--chap-text-sm); font-weight: 600; }
+
+/* ---- 5. Tables ----------------------------------------------------------- */
+.table { font-variant-numeric: tabular-nums; border-collapse: collapse; }
+.table caption { color: var(--muted-foreground); padding-top: var(--chap-space-2); font-size: var(--chap-text-xs); text-align: left; }
+.table th { color: var(--foreground); }
+.table thead th {
+  height: 2rem; font-size: var(--chap-text-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--primary);
+}
+.table tbody th[scope="row"] { font-weight: 500; }
+.table th, .table td { padding: var(--chap-space-2) var(--chap-space-2); }
+.table th:first-child, .table td:first-child { padding-left: 0; }
+.table th:last-child, .table td:last-child { padding-right: 0; }
+.table td.wrap { white-space: normal; min-width: 10rem; }
+#ledger-results td.wrap { min-width: 8rem; overflow-wrap: anywhere; }
+.table td.off { color: var(--muted-foreground); }
+.table tr:hover { background: transparent; }
+/* The Operations catalog: the plain sentence about an op sits under its name, so no column is pushed off the page. */
+#catalog th[scope="row"] { vertical-align: top; white-space: normal; }
+#catalog td { vertical-align: top; }
+@media (min-width: 40.01rem) {
+  #catalog th[scope="row"] { min-width: 14rem; max-width: 24rem; }
+  #catalog td { white-space: nowrap; }
+}
+#catalog .op-what { display: block; margin-top: var(--chap-space-1); font-weight: 400; font-size: var(--chap-text-xs); color: var(--muted-foreground); white-space: normal; overflow-wrap: anywhere; }
+#catalog .op-what code { color: var(--foreground); }
+
+/* ---- 6. Empty states ----------------------------------------------------- */
+.empty {
+  display: flex; align-items: center; justify-content: center; gap: var(--chap-space-3);
+  padding: var(--chap-space-5) var(--chap-space-4);
+  border: 1px dashed var(--input); border-radius: var(--chap-radius);
+  color: var(--muted-foreground); text-align: center;
+}
+.empty::before { content: "[ ]" / ""; font-family: var(--chap-mono); color: var(--chap-warm-ink); letter-spacing: .1em; }
+
+/* ---- 7. Sign-in and enrol: the doorway ----------------------------------- */
+.shell-main > .threshold { width: 100%; max-width: var(--chap-narrow); align-self: center; margin-top: var(--chap-space-4); }
+.threshold { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: var(--chap-space-5); align-content: start; }
+.threshold > figure { grid-row: 1 / 3; margin: calc(var(--chap-space-5) * -1) 0; display: flex; flex-direction: column; background: var(--muted); }
+.threshold > figure img { flex: 1; min-height: 0; width: 100%; object-fit: cover; object-position: 50% 30%; filter: var(--chap-art-filter); }
+.threshold > figure figcaption { padding: var(--chap-space-2) var(--chap-space-3); font-size: var(--chap-text-xs); line-height: 1.35; color: var(--muted-foreground); border-top: 1px solid var(--border); }
+.threshold > header, .threshold > section { grid-column: 2; }
+.threshold > header .tagline { font-size: var(--chap-text-sm); }
+.threshold > header { padding-inline-start: 0; }
+.threshold > section { padding-inline-start: 0; }
+
+/* ---- 8. Phone ------------------------------------------------------------ */
+@media (max-width: 40rem) {
+  .shell-header { padding: var(--chap-space-3) var(--chap-space-4); }
+  /* One row, edge to edge, scrolling when it must: the page itself never grows wider than the screen. */
+  .shell-header { row-gap: var(--chap-space-1); }
+  .shell-nav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 0; margin-inline: calc(var(--chap-space-4) * -1); padding-inline: var(--chap-space-3); width: calc(100% + var(--chap-space-4) * 2); }
+  .shell-nav::-webkit-scrollbar { display: none; }
+  .shell-nav a { flex: none; padding: var(--chap-space-1) var(--chap-space-2); }
+  .shell-main { margin-top: var(--chap-space-5); padding: 0 var(--chap-space-4); }
+  .card > header, .card > section, .card > footer { padding-inline: var(--chap-space-4); }
+  .card { padding-block: var(--chap-space-4); gap: var(--chap-space-4); }
+  .form, .form-wide { max-width: none; }
+  .form .btn { justify-self: stretch; }
+  .threshold { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .threshold > figure { grid-row: auto; margin: calc(var(--chap-space-4) * -1) 0 0; flex-direction: column; }
+  .threshold > figure img { flex: none; height: 7rem; }
+  .threshold > header, .threshold > section { grid-column: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; scroll-behavior: auto !important; }
+}
+
+.field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--chap-space-4); }
+
+/* A scrolling section shows a soft edge on the side that has more (no script needed). */
+.card > section {
+  background:
+    linear-gradient(to right, var(--card) 30%, transparent) 0 0 / 2rem 100% no-repeat local,
+    linear-gradient(to left, var(--card) 30%, transparent) 100% 0 / 2rem 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, var(--chap-shade), transparent) 0 0 / .75rem 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--chap-shade), transparent) 100% 0 / .75rem 100% no-repeat scroll;
+}
+
+/* Phone: a table marked table-stack becomes one block per row, each cell led by its column name. */
+@media (max-width: 40rem) {
+  .table-stack, .table-stack tbody, .table-stack tr, .table-stack td, .table-stack th { display: block; }
+  .table-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .table-stack tr { display: flex; flex-direction: column; gap: var(--chap-space-1); padding: var(--chap-space-3) 0; }
+  .table-stack tbody tr:last-child { border-bottom-width: 1px; }
+  .table-stack tr:last-child { padding-bottom: 0; border-bottom-width: 0; }
+  .table-stack tbody tr:first-child { padding-top: 0; }
+  .table-stack th[scope="row"] { order: -1; height: auto; padding: 0 0 var(--chap-space-1); font-size: var(--chap-text-sm); }
+  .table-stack td { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: var(--chap-space-3); padding: 0; white-space: normal; }
+  .table-stack td::before {
+    content: attr(data-label); color: var(--muted-foreground);
+    font-size: var(--chap-text-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; line-height: 1.6;
+  }
+  .table-stack td:empty { display: none; }
+  .table-stack td.wrap { min-width: 0; }
+  .table-stack td .btn { justify-self: start; }
+}
+
+
+/* A secret that was never rotated or used shows a dash, not a hole. */
+#secrets td:empty::after { content: "\2013" / ""; color: var(--muted-foreground); }
+
+/* ---- 9. State colours ------------------------------------------------------ */
+/* data-tone picks a state colour for a badge or an alert; the words stay on the element. */
+[data-tone="success"] { --tone-ink: var(--chap-success-ink); --tone-bg: var(--chap-success-bg); --tone-line: var(--chap-success-line); }
+[data-tone="warning"] { --tone-ink: var(--chap-warning-ink); --tone-bg: var(--chap-warning-bg); --tone-line: var(--chap-warning-line); }
+[data-tone="danger"]  { --tone-ink: var(--chap-danger-ink);  --tone-bg: var(--chap-danger-bg);  --tone-line: var(--chap-danger-line); }
+[data-tone="info"]    { --tone-ink: var(--chap-info-ink);    --tone-bg: var(--chap-info-bg);    --tone-line: var(--chap-info-line); }
+[data-tone="warm"]    { --tone-ink: var(--chap-warm-ink);    --tone-bg: var(--chap-warm-bg);    --tone-line: var(--chap-warm); }
+[data-tone="neutral"] { --tone-ink: var(--chap-neutral-ink); --tone-bg: var(--chap-neutral-bg); --tone-line: var(--chap-neutral-line); }
+
+.badge[data-tone] { background: var(--tone-bg); color: var(--tone-ink); border-color: var(--tone-line); }
+/* Colour never stands alone: each state colour also gets a mark, and the word is always in the badge. */
+.badge[data-tone]::before { margin-right: .3em; font-weight: 700; }
+.badge[data-tone="success"]::before { content: "\2713" / ""; }
+.badge[data-tone="warning"]::before { content: "\25B2" / ""; font-size: .7em; }
+.badge[data-tone="danger"]::before  { content: "\2715" / ""; }
+.badge[data-tone="info"]::before    { content: "\25CF" / ""; font-size: .6em; vertical-align: .1em; }
+.badge code { font-size: inherit; font-weight: 600; color: inherit; background: transparent; padding: 0; }
+.alert[data-tone] {
+  background: var(--tone-bg); color: var(--foreground);
+  border-color: var(--tone-line); border-left: 4px solid var(--tone-ink);
+}
+.alert[data-tone] > h2 { color: var(--tone-ink); }
+.alert[data-tone] > svg { color: var(--tone-ink); }
+
+/* A pending merge card that would be refused now (stale.go): a warning above the card text, outside it. */
+.approval-stale { padding: var(--chap-space-3); border: 1px solid var(--border); border-left: 4px solid var(--chap-warm); border-radius: var(--chap-radius); background: var(--muted); }

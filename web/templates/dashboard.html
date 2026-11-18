@@ -1,0 +1,82 @@
+{{define "content"}}
+<h1>Signed in as {{.Approver}}</h1>
+
+<div class="card" role="region" aria-labelledby="stop-heading">
+  <header>
+    <h2 id="stop-heading">Stop all</h2>
+    <p>Revokes every active run at once ({{.ActiveRuns}} active). Each run's token is refused from its next request and its waiting approvals are cancelled. The orchestrator token is not touched.</p>
+  </header>
+  <section>
+    <button class="btn" data-variant="destructive" type="button" id="stop-all" hx-post="/stop-all" hx-target="#stop-all-result" hx-swap="innerHTML"
+      hx-confirm="Stop all runs now? Every active run is revoked and cannot be resumed.">Stop all runs</button>
+    <div id="stop-all-result" aria-live="polite"></div>
+  </section>
+</div>
+
+<div class="card" role="region" aria-labelledby="pending-heading">
+  <header><h2 id="pending-heading">Pending approvals</h2></header>
+  <section>
+  {{if .Pending}}
+    <table class="table table-stack">
+      <caption class="sr-only">Approvals waiting for a decision</caption>
+      <thead><tr><th scope="col">Risk</th><th scope="col">Request</th><th scope="col">Project</th><th scope="col">Decide before</th></tr></thead>
+      <tbody>
+      {{range .Pending}}
+        <tr><th scope="row"><span class="badge" data-tone="{{.RiskTone}}">{{.Risk}}</span></th><td data-label="Request"><a href="/approvals#title-{{.ID}}">{{.Who}} wants to {{.What}}</a>{{if .Stale}} <span class="badge" data-tone="warning" title="{{.Stale}}">may be stale</span>{{end}}</td><td data-label="Project">{{.Project}}</td><td data-label="Decide before">{{template "t" .Expires}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <p class="empty">Nothing is waiting for a decision.</p>
+  {{end}}
+  </section>
+  {{if .Pending}}
+  <footer><a class="btn" href="/approvals">Review and decide</a></footer>
+  {{end}}
+</div>
+
+<div class="card" role="region" aria-labelledby="health-heading">
+  <header><h2 id="health-heading">Health</h2></header>
+  <section>
+    <table class="table table-stack">
+      <caption class="sr-only">Health of chapd's parts</caption>
+      <thead><tr><th scope="col">Part</th><th scope="col">State</th><th scope="col">Detail</th></tr></thead>
+      <tbody>
+      {{range .Health}}
+        <tr><th scope="row">{{.Name}}</th><td data-label="State"><span class="badge" data-tone="{{if eq .State "OK"}}success{{else if eq .State "WARN"}}warning{{else}}danger{{end}}">{{.State}}</span></td><td class="wrap" data-label="Detail">{{.Detail}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<div class="card" role="region" aria-labelledby="denials-heading">
+  <header><h2 id="denials-heading">Recent denials</h2></header>
+  <section>
+  {{if .Denials}}
+    <table class="table table-stack">
+      <caption class="sr-only">The newest denials in the ledger, newest first</caption>
+      <thead><tr><th scope="col">When</th><th scope="col">Cause</th><th scope="col">Surface</th><th scope="col">Who</th><th scope="col">Project</th><th scope="col">What</th></tr></thead>
+      <tbody>
+      {{range .Denials}}
+        <tr><td data-label="When">{{template "t" .When}}</td><th scope="row"><span class="badge" data-tone="danger"><code>{{.Code}}</code></span></th><td data-label="Surface">{{.Surface}}</td><td data-label="Who">{{.Who}}</td><td data-label="Project">{{.Project}}</td><td class="wrap" data-label="What">{{if .Plain}}<strong>{{.Plain}}</strong><br>{{end}}{{.Text}}{{if .Next}}<br><span class="muted">Next: {{.Next}}</span>{{end}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <p class="empty">No denials have been recorded.</p>
+  {{end}}
+  </section>
+</div>
+
+<div class="card" role="region" aria-labelledby="passkeys-heading">
+  <header>
+    <h2 id="passkeys-heading">Passkeys</h2>
+    <p>The credentials that can sign in to this console.</p>
+  </header>
+  <section>{{template "passkeys" .Credentials}}</section>
+  <footer>
+    <button class="btn" data-variant="outline" type="button" hx-post="/logout">Sign out</button>
+  </footer>
+</div>
+{{end}}

@@ -1,0 +1,12 @@
+$ chap health
+exit: 3
+--- request
+POST /v0/ops
+auth: run
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+DENIED op pr.merge (profile docs, run r-7f3a)
+cause: OP_NOT_IN_TOKEN
+why: pr.merge is not in this run's token
+request: chap request scope --reason "<why the task needs pr.merge>"

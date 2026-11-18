@@ -1,0 +1,9 @@
+$ chap runs revoke r-7f3a
+exit: 0
+--- request
+POST /v0/runs/r-7f3a/revoke
+auth: orchestrator
+--- stdout
+run r-7f3a (acme-shop, code): revoked
+reason: operator
+--- stderr

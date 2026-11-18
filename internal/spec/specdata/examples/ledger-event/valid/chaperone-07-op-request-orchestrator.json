@@ -1,0 +1,27 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 7,
+  "prev_hash": "sha256:a9a89926be42c410336f700c3a37d8847f9ec7d75887b9e7e52f01ca652ba778",
+  "hash": "sha256:dbcdd82d36a2089d6b6b87cfac0a22dd66650cbb5b32ed4124df3496651a44e6",
+  "time_unix_nano": "1792800200000000000",
+  "trace_id": "b368a14e69fc73207793b281c4391491",
+  "span_id": "749523e7eb55dec7",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "op.request",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "project": "acme-shop",
+  "attributes": {
+    "factory.request_id": "q-9d1t7w",
+    "factory.op": "deploy",
+    "factory.op_hash": "sha256:38159f26aeb226fefd69af55175315c4ece4532338e511d8e91cf77d81905848",
+    "factory.reversibility": "compensable",
+    "factory.requester.kind": "orchestrator",
+    "factory.orchestrator.id": "main"
+  }
+}

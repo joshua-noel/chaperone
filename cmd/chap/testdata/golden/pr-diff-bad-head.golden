@@ -1,0 +1,8 @@
+$ chap pr diff 214 --expected-head main --repo example-org/storefront
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --expected-head must be a 40-character lowercase hex sha
+usage: chap pr diff <n> [--expected-head <sha>] [--repo owner/name] [--dry-run]

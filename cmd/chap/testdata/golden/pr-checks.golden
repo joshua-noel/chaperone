@@ -1,0 +1,17 @@
+$ chap pr checks 214 --repo example-org/storefront --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"pr.checks","params":{},"project":"storefront","target":{"adapter":"github","ref":"example-org/storefront#214"}}
+--- stdout
+pr.checks example-org/storefront#214: succeeded
+id: q-7c1d05  class: routine  policy: baseline-2026.10.1
+execution: x-4a5b6c
+external_ref: https://github.com/example-org/storefront/pull/214
+checks on #214 at head 0588aa4ee0116267162e895016bcfda9ec3a3e2c: 3 run(s): 1 passed, 1 failed, 1 pending, 0 other
+CHECK     STATUS       CONCLUSION  APP     STARTED
+lint      in_progress  -           15368   2026-11-01T09:00:00Z
+local-ci  completed    failure     424242  2026-11-01T09:01:00Z
+verify    completed    success     15368   2026-11-01T09:02:00Z
+--- stderr

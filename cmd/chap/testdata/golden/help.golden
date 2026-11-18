@@ -1,0 +1,49 @@
+$ chap help
+exit: 0
+--- request
+(none)
+--- stdout
+usage: chap <command> [flags]
+
+commands:
+  logo               show the CHAPERONE banner
+  mcp                serve the ops as MCP tools over stdio (Claude Code, Codex, Cursor)
+  version
+  approve list       list your own approval requests (approving is done in the console)
+  ci report          post a finished ci run's result to GitHub as a check run (orchestrator only)
+  deploy             deploy a commit to the pilot (needs one approval)
+  dev-token          mint an interim run token into a file (orchestrator only)
+  doctor             check the server's Chaperone install (from a normal, not elevated, terminal)
+  drive share        share one Drive file with allowlisted recipients (needs approval)
+  git setup          route git's GitHub traffic through chapd's git proxy
+  health             read the pilot's readiness status
+  intake comment     comment on a labelled operator-board item
+  intake list        list the board items labelled for the orchestrator
+  intake move        move a labelled operator-board item to a listed state
+  intake states      list the board team's states and which a move may use
+  issue comment      comment on an issue labelled source:error-watcher
+  issue open         open an issue labelled source:error-watcher
+  issue reopen       reopen an issue labelled source:error-watcher
+  ledger verify      walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only)
+  logs               read recent log lines from a fixed source
+  mail send          send one email to allowlisted recipients (needs approval)
+  manual             what this caller may ask for, with usage
+  op show            show one op, optionally waiting for it to change
+  pr checks          read the check runs on a PR's head commit (orchestrator only)
+  pr diff            read a PR's unified diff, capped at 256 KiB (orchestrator only)
+  pr files           list a PR's changed files, one page at a time (orchestrator only)
+  pr merge           merge a PR when verify is green on its exact head
+  pr open            open a pull request from the run's branch
+  pr update          update a PR's title or body, or its branch
+  pr view            read a PR's title, body, state, head, base, mergeability (orchestrator only)
+  request net        ask for network access (a the runner surface)
+  request op         create the approval card for an op
+  request pkg        ask for a package (a the runner surface)
+  request scope      ask for a wider task scope (a the runner surface)
+  runs revoke        revoke one run, or every active run (orchestrator only)
+  vault status       vault state: names and counts, never a value (orchestrator only)
+
+commands that call chapd take --json (the server's JSON, nothing else on stdout).
+token: CHAP_RUN_TOKEN, else the orchestrator token file. chapd: CHAP_URL (default http://127.0.0.1:55398).
+exit: 0 ok, 2 usage, 3 denied, 4 auth, 5 op not ok, 6 chapd unavailable, 7 pending, 8 not found or conflict, 1 other.
+--- stderr

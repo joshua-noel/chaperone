@@ -1,0 +1,5 @@
+# Checksums (migrations) and CI scripts must not change with the checkout's line endings.
+* text=auto eol=lf
+*.exe binary
+# Vendored files are kept byte for byte so `go mod vendor` reproduces them exactly.
+vendor/** -text linguist-generated=true

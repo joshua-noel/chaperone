@@ -1,0 +1,12 @@
+{
+  "op": "pr.merge",
+  "project": "acme-shop",
+  "target": { "adapter": "github", "ref": "acme/shop#214" },
+  "params": {
+    "base": "main",
+    "head_sha": "0588aa4ee0116267162e895016bcfda9ec3a3e2c",
+    "method": "squash"
+  },
+  "op_hash": "sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415",
+  "reason": "CI green on this head"
+}

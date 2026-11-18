@@ -1,0 +1,11 @@
+# chaperone-sandbox: the practice repository for Chaperone itself. Merges into main.
+project: chaperone-sandbox
+
+pr:
+  repo: joshua-noel/chaperone-sandbox
+  base: main
+  extra_checks: []
+  tiers:
+    high: []
+    medium: []
+    low: []

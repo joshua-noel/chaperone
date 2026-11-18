@@ -1,0 +1,12 @@
+/dist/
+*.exe
+*.test
+*.db
+*.db-wal
+*.db-shm
+
+# a stray "dev/null" file from a Windows shell redirect
+/dev/
+
+# agent worktrees (house rule: worktrees live in .tmp/<task>)
+/.tmp/

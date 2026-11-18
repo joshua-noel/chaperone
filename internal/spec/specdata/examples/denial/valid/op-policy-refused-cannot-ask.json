@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "type": "denial",
+  "denial_id": "d-7m1x4z",
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "profile": "code",
+  "at": "2026-10-23T22:20:05Z",
+  "surface": "op",
+  "action": {
+    "verb": "merge",
+    "target": "acme/shop#214"
+  },
+  "cause_code": "OP_POLICY_REFUSED",
+  "why": "verify is not success on the exact head",
+  "request": {
+    "possible": false
+  },
+  "thrash": {
+    "count": 3,
+    "window_seconds": 300,
+    "flagged": true
+  },
+  "policy_version": "baseline-2026.10.1"
+}

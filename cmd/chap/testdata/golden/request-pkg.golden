@@ -1,0 +1,12 @@
+$ chap request pkg left-pad-ng@2.0.1 --reason needed
+exit: 3
+--- request
+POST /v0/approvals
+auth: run
+{"kind":"pkg","op":"pkg","params":{"package":"left-pad-ng@2.0.1"},"reason":"needed","target":{"adapter":"runner","ref":"left-pad-ng@2.0.1"}}
+--- stdout
+--- stderr
+DENIED op api.example.com (profile code, run r-7f3a)
+cause: OP_PARAMS_INVALID
+why: kind net is not served by chapd in Phase 1; the runner owns it
+next: read the why line: if it names something you can correct, correct the request and ask again; if not, stop and say so

@@ -1,0 +1,71 @@
+{
+  "spec_version": "0",
+  "layer": "generic",
+  "profile": "code",
+  "version": "1.0.0",
+  "summary": "Change code in one repo and open a pull request, inside the the runner VM (T0).",
+  "weight": "heavy",
+  "isolation": "vm",
+  "toolchain_manifest": {
+    "sha256": "2f1c0f6a8e5b4d3c7a9e1b0d6c5f4a3e2d1c0b9a8f7e6d5c4b3a29180716f5e4"
+  },
+  "prompt": {
+    "path": "profiles/code/prompt.md",
+    "sha256": "sha256:bd7e782dd914339a8e336a166d6ccc7508e09a19c2eb1ca98c1dfd45bfb302e7"
+  },
+  "branch_prefix": "agent/",
+  "network": {
+    "enforcement": "deny",
+    "allow": [
+      {
+        "host": "chaperone.factory.internal",
+        "ports": [
+          443
+        ],
+        "purpose": "chap CLI and git through Chaperone"
+      },
+      {
+        "host": "npm.factory.internal",
+        "ports": [
+          443
+        ],
+        "purpose": "npm mirror with cooldown"
+      },
+      {
+        "host": "pypi.factory.internal",
+        "ports": [
+          443
+        ],
+        "purpose": "PyPI mirror with cooldown"
+      },
+      {
+        "host": "models.factory.internal",
+        "ports": [
+          443
+        ],
+        "purpose": "model gateway"
+      }
+    ]
+  },
+  "ops": {
+    "allow": [
+      "pr.open",
+      "branch.push",
+      "health",
+      "logs"
+    ]
+  },
+  "services": {
+    "allow": [
+      "postgres",
+      "redis"
+    ]
+  },
+  "limits": {
+    "cpus": 2,
+    "memory_mb": 4096,
+    "disk_mb": 10240,
+    "wall_minutes": 90,
+    "pids": 512
+  }
+}

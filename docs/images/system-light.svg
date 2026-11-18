@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 44 1040 472" width="1040" height="472" role="img" aria-labelledby="sys-light-title sys-light-desc">
+<title id="sys-light-title">How Chaperone, the runner and the agents fit together</title>
+<desc id="sys-light-desc">Agents run in a virtual machine with no keys. They ask Chaperone on the server through an SSH tunnel. Chaperone holds the keys, acts on GitHub and Google, and asks your phone for approval.</desc>
+<defs>
+<style>
+text{font-family:ui-sans-serif,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;fill:#1f2328}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.name{font-size:14px;font-weight:600}
+.sub{font-size:11px;fill:#59636e}
+.ztitle{font-size:11px;font-weight:600;letter-spacing:.08em;fill:#59636e}
+.lbl{font-size:10.5px;letter-spacing:.04em;fill:#59636e}
+.lbla{font-size:10.5px;letter-spacing:.04em;font-weight:600;fill:#004b97}
+.line{fill:none;stroke:#59636e;stroke-width:1.5}
+.linea{fill:none;stroke:#004b97;stroke-width:2}
+.dash{stroke-dasharray:5 4}
+.node{fill:#ffffff;stroke:#59636e;stroke-width:1.25}
+.focal{fill:#e6eff9;stroke:#004b97;stroke-width:2}
+.zone{fill:rgba(140,149,159,0.10);stroke:#8c959f;stroke-width:1.25;stroke-dasharray:6 4}
+.zvm{fill:rgba(154,103,0,0.07);stroke:#9a6700;stroke-width:1.5;stroke-dasharray:6 4}
+</style>
+<marker id="sys-light-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M1 1L9 5L1 9z" fill="#59636e"/></marker>
+<marker id="sys-light-aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M1 1L9 5L1 9z" fill="#004b97"/></marker>
+</defs>
+
+<!-- zones -->
+<rect class="zvm" x="24" y="56" width="224" height="392" rx="8"/>
+<rect class="zone" x="288" y="56" width="424" height="392" rx="8"/>
+<rect class="zone" x="816" y="56" width="200" height="240" rx="8"/>
+<text class="ztitle mono" x="40" y="80">AGENT VM</text><text class="sub mono" x="40" y="98">Hyper-V virtual machine</text>
+<text class="ztitle mono" x="304" y="80">THE SERVER</text><text class="sub mono" x="304" y="98">keys, rules, approvals</text>
+<text class="ztitle mono" x="832" y="80">OUTSIDE</text>
+<text class="sub mono" x="40" y="414">Holds no keys.</text><text class="sub mono" x="40" y="430">Only short-lived tokens.</text>
+<!-- connectors -->
+<path class="line" d="M312 144 L240 144"/>
+<path class="line" d="M152 144 L144 144 Q136 144 136 152 L136 188" marker-end="url(#sys-light-ah)"/>
+<text class="lbl mono" x="196" y="148" text-anchor="middle">START RUNS</text>
+<path class="line" d="M228 232 L320 232"/>
+<path class="line" d="M440 232 L520 232" marker-end="url(#sys-light-ah)"/>
+<text class="lbl mono" x="380" y="236" text-anchor="middle">ASK VIA TUNNEL</text>
+<path class="line" d="M476 144 L488 144"/>
+<path class="line" d="M560 144 L564 144 Q572 144 572 152 L572 172" marker-end="url(#sys-light-ah)"/>
+<text class="lbl mono" x="524" y="148" text-anchor="middle">RUN TOKEN</text>
+<path class="line" d="M460 352 L490 352"/>
+<path class="line" d="M526 352 L548 352 Q556 352 556 344 L556 292" marker-end="url(#sys-light-ah)"/>
+<text class="lbl mono" x="508" y="356" text-anchor="middle">ASK</text>
+<path class="line" d="M632 172 L632 136 Q632 128 640 128 L718 128"/>
+<path class="line" d="M810 128 L836 128" marker-end="url(#sys-light-ah)"/>
+<text class="lbl mono" x="764" y="132" text-anchor="middle">PUSH, MERGE</text>
+<path class="line" d="M684 232 L718 232"/>
+<path class="line" d="M810 232 L836 232" marker-end="url(#sys-light-ah)"/>
+<text class="lbl mono" x="764" y="236" text-anchor="middle">MAIL, DRIVE</text>
+<path class="linea" d="M836 364 L806 364"/>
+<path class="linea" d="M738 364 L640 364 Q632 364 632 356 L632 292" marker-end="url(#sys-light-aha)"/>
+<text class="lbla mono" x="772" y="368" text-anchor="middle">APPROVE</text>
+<path class="line dash" d="M596 292 L596 388 Q596 396 604 396 L740 396"/>
+<path class="line dash" d="M804 396 L836 396" marker-end="url(#sys-light-ah)"/>
+<text class="lbl mono" x="772" y="400" text-anchor="middle">WAKE UP</text>
+<!-- nodes -->
+<rect class="node" x="44" y="188" width="184" height="88" rx="6"/>
+<text class="name" x="58" y="214">Agents</text>
+<text class="sub mono" x="58" y="234">AI coding agents</text>
+<text class="sub mono" x="58" y="250">run as unprivileged users</text>
+<rect class="node" x="312" y="108" width="164" height="72" rx="6"/>
+<text class="name" x="326" y="134">The runner</text>
+<text class="sub mono" x="326" y="154">starts the runs</text>
+<text class="sub mono" x="326" y="170">and signs their tokens</text>
+<rect class="node" x="312" y="320" width="164" height="64" rx="6"/>
+<text class="name" x="326" y="346">Orchestrator</text>
+<text class="sub mono" x="326" y="366">the lead agent</text>
+<rect class="focal" x="520" y="172" width="164" height="120" rx="6"/>
+<text class="name" x="534" y="198">Chaperone</text>
+<text class="sub mono" x="534" y="218">holds the keys</text>
+<text class="sub mono" x="534" y="234">checks the rules</text>
+<text class="sub mono" x="534" y="250">asks you to approve</text>
+<text class="sub mono" x="534" y="266">keeps the ledger</text>
+<rect class="node" x="836" y="96" width="160" height="64" rx="6"/>
+<text class="name" x="850" y="122">GitHub</text>
+<text class="sub mono" x="850" y="142">code and pull requests</text>
+<rect class="node" x="836" y="200" width="160" height="64" rx="6"/>
+<text class="name" x="850" y="226">Google</text>
+<text class="sub mono" x="850" y="246">mail and Drive</text>
+<rect class="node" x="836" y="340" width="160" height="80" rx="6"/>
+<text class="name" x="850" y="366">Your phone</text>
+<text class="sub mono" x="850" y="386">approve with a passkey</text>
+<!-- legend -->
+<rect class="zone" x="24" y="478" width="22" height="14" rx="3"/><text class="sub mono" x="54" y="489">trust boundary</text>
+<rect class="zvm" x="190" y="478" width="22" height="14" rx="3"/><text class="sub mono" x="220" y="489">untrusted: agents run here</text>
+<path class="line" d="M446 486 L478 486" marker-end="url(#sys-light-ah)"/><text class="sub mono" x="490" y="489">request</text>
+<path class="line dash" d="M580 486 L612 486" marker-end="url(#sys-light-ah)"/><text class="sub mono" x="624" y="489">wake-up, no details</text>
+<path class="linea" d="M836 486 L868 486" marker-end="url(#sys-light-aha)"/><text class="sub mono" x="880" y="489">your approval</text>
+</svg>

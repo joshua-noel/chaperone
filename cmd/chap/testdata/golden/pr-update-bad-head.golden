@@ -1,0 +1,8 @@
+$ chap pr update 214 --expected-head abc --repo acme/shop
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --expected-head must be a 40-character lowercase hex sha
+usage: chap pr update <n> --expected-head <sha> [--title <t>] [--body <b> | --body-file <f>] [--update-branch] [--repo owner/name]

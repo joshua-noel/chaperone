@@ -1,0 +1,51 @@
+{
+  "approval-fault-counted-as-thrash.json": {
+    "keyword": "const",
+    "instancePath": "/thrash/count"
+  },
+  "can-ask-without-command.json": {
+    "keyword": "required",
+    "instancePath": "/request",
+    "params": {
+      "missingProperty": "command"
+    }
+  },
+  "cannot-ask-but-has-command.json": {
+    "keyword": "false schema",
+    "instancePath": "/request/command"
+  },
+  "command-not-chap-request.json": {
+    "keyword": "pattern",
+    "instancePath": "/request/command"
+  },
+  "missing-thrash.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "thrash"
+    }
+  },
+  "missing-why.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "why"
+    }
+  },
+  "neither-run-nor-orchestrator.json": {
+    "keyword": "oneOf",
+    "instancePath": ""
+  },
+  "run-and-orchestrator-both.json": {
+    "keyword": "oneOf",
+    "instancePath": ""
+  },
+  "unknown-cause-code.json": {
+    "keyword": "enum",
+    "instancePath": "/cause_code"
+  },
+  "unknown-surface.json": {
+    "keyword": "enum",
+    "instancePath": "/surface"
+  }
+}

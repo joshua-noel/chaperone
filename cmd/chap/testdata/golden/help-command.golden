@@ -1,0 +1,28 @@
+$ chap pr merge --help
+exit: 0
+--- request
+(none)
+--- stdout
+usage: chap pr merge <n> --head <sha> [--base <b>] [--repo owner/name] [--dry-run]
+merge a PR when verify is green on its exact head
+  -approval string
+    	resume under this approval id (a-...)
+  -base string
+    	base branch (default "main")
+  -dry-run
+    	evaluate policy and preconditions only; merge nothing
+  -head string
+    	the PR's head sha the merge is for (required)
+  -json
+    	print chapd's JSON reply instead of text
+  -project string
+    	project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT]
+  -reason string
+    	why (shown on the approval card, never used for authorization)
+  -repo string
+    	owner/name (default: from the git remote origin)
+  -request
+    	create the approval card for this exact op instead of running it (needs --reason)
+  -wait value
+    	seconds to wait for a final state, 0 to 55 (default: chapd's)
+--- stderr

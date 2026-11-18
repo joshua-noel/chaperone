@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory-spec.invalid/v0/common.schema.json",
+  "title": "Shared definitions",
+  "description": "Building blocks referenced by every other factory-spec schema. Not a document type.",
+  "$defs": {
+    "spec_version": {
+      "description": "factory-spec major version this document was written for. v0 is unstable: any change may break.",
+      "const": "0"
+    },
+    "sha256": {
+      "description": "Tagged lowercase hex SHA-256 digest.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "description": "RFC 3339 instant, UTC, with a literal Z.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)(\\.[0-9]{1,9})?Z$"
+    },
+    "unix_nano": {
+      "description": "Unix time in nanoseconds as a decimal string (OTLP/JSON style; exceeds 2^53 so never a JSON number).",
+      "type": "string",
+      "pattern": "^[1-9][0-9]{18}$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+    },
+    "run_id": {
+      "description": "Identifier of one run. Minted by the runner; the key that links every record about the run.",
+      "type": "string",
+      "pattern": "^r-[0-9a-z]{4,32}$"
+    },
+    "project_id": {
+      "description": "Slug naming a project (one or more repos, environments and deploy targets).",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,38}$"
+    },
+    "orchestrator_id": {
+      "description": "Identifier of an orchestrator session: the orchestrator or 'operator', the operator acting at the server console (docs/spec.md, section 5, 'Operator-recorded ops'). The same value is the request's requester.id, a denial's orchestrator_id and an event's factory.orchestrator.id.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,62}$"
+    },
+    "repo": {
+      "description": "Repository as owner/name on the repo host. Neither part may start with '-' or '.' (option injection, traversal).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$"
+    },
+    "git_ref": {
+      "description": "A branch name. Follows git check-ref-format for the cases that matter to adapters: no leading '-' or '/' (option injection), no '..', no '//', no component starting with '.', no trailing '.' or '/', no '.lock' suffix, no spaces or '@'.",
+      "type": "string",
+      "pattern": "^(?![-/])(?!.*\\.\\.)(?!.*//)(?!.*(^|/)\\.)(?!.*[./]$)(?!.*\\.lock(/|$))[A-Za-z0-9._/-]{1,200}$"
+    },
+    "profile_kind": {
+      "description": "The generic profile kinds (plan: 'The shared contract', item 2). Adding a kind is a spec change.",
+      "enum": [
+        "code",
+        "docs",
+        "research",
+        "review",
+        "deploy-watch",
+        "data-op",
+        "ci"
+      ]
+    },
+    "isolation": {
+      "description": "Isolation tier, matched to risk (plan: 'Staying state of the art'). 'vm' (T0) is a dedicated VM plus a per-run Unix user and cgroup, with no container inside it; its generic profile pins a toolchain manifest instead of an OCI image (profile.schema.json).",
+      "enum": [
+        "container",
+        "gvisor",
+        "microvm",
+        "vm"
+      ]
+    },
+    "op_kind": {
+      "description": "A concrete operation kind: lowercase dotted words, e.g. pr.merge, deploy, mail.send. The catalog of kinds is owned by Chaperone; this pattern only fixes the spelling.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$",
+      "maxLength": 64
+    },
+    "op_kind_pattern": {
+      "description": "An op_kind, or an op_kind prefix ending in '.*' (for example secrets.*). Only profiles use wildcards; tokens and requests never do.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*(\\.\\*)?$",
+      "maxLength": 66
+    },
+    "cause_code": {
+      "description": "UPPER_SNAKE_CASE reason a run was stopped or an action refused. Stop codes are defined by data/stop-table.v0.json; denial codes by denial.schema.json.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$",
+      "maxLength": 48
+    },
+    "hostname": {
+      "description": "A DNS name, or a '*.' wildcard over one. Must end in an alphabetic label, so raw IPv4 addresses never match. One wildcard label only, leftmost.",
+      "type": "string",
+      "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$",
+      "maxLength": 253
+    },
+    "short_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "budget": {
+      "description": "Planned limits for one run. A request in a brief; a grant in a run token.",
+      "type": "object",
+      "properties": {
+        "minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "usd": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "minutes",
+        "tokens"
+      ],
+      "additionalProperties": false
+    },
+    "repo_path_glob": {
+      "description": "Repo-relative path glob. No leading '-' (option injection), no leading '/', no '..', no backslash or drive letter (the charset has none).",
+      "type": "string",
+      "pattern": "^(?![-/])(?!.*\\.\\.)[A-Za-z0-9._*?,@{}\\[\\]/-]{1,200}$"
+    },
+    "run_isolation": {
+      "description": "Isolation a RUN can have: a profile isolation tier, or 'host' (no sandbox; the Phase 1 interim token only). Generic profiles may not declare 'host'.",
+      "enum": [
+        "container",
+        "gvisor",
+        "microvm",
+        "vm",
+        "host"
+      ]
+    },
+    "run_profile": {
+      "description": "Profile name carried by a run: a profile kind, or 'host-interim' (the Phase 1 ceiling for runs on the host without the runner).",
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/profile_kind"
+        },
+        {
+          "const": "host-interim"
+        }
+      ]
+    },
+    "execution_id": {
+      "description": "Identifier of one execution of an approved operation. Assigned by Chaperone at release, before the adapter is called, and charged against the approval's single use. An adapter is idempotent per execution_id: a retry reuses the id and never runs the action a second time.",
+      "type": "string",
+      "pattern": "^x-[0-9a-z]{6,32}$"
+    },
+    "reversibility": {
+      "description": "How an operation can be undone. reversible: discarding or closing the result restores the prior state (or the operation changes nothing). compensable: a documented revert operation exists (pr.merge by a revert PR, deploy by deploying the previous SHA), but the action did happen. irreversible: nothing restores the prior state (mail.send).",
+      "enum": [
+        "reversible",
+        "compensable",
+        "irreversible"
+      ]
+    },
+    "repo_path": {
+      "description": "Repo-relative path of one file (no glob characters). No leading '-' (option injection), no leading '/', no '..', no backslash or drive letter (the charset has none).",
+      "type": "string",
+      "pattern": "^(?![-/])(?!.*\\.\\.)[A-Za-z0-9._,@/-]{1,200}$"
+    },
+    "traceparent": {
+      "description": "W3C Trace Context traceparent, version 00: 00-<32 hex trace-id>-<16 hex parent-id>-<2 hex flags>. Neither id is all zeros.",
+      "type": "string",
+      "pattern": "^00-(?!0{32}-)[0-9a-f]{32}-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$"
+    }
+  }
+}

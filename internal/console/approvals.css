@@ -1,0 +1,136 @@
+/* Approvals screen (L1-12, plain wording: ADR-004 amendment 10). Basecoat supplies components; the tokens and scales are in /static/console.css.
+   The card text is laid out in sections inside .approval-text. Nothing here adds or removes text from it:
+   headings are styled, never hidden, and a folded part is still part of the signed text. */
+
+.approvals-head { margin: 0 0 var(--chap-space-4); }
+.approvals-head h1 { margin: 0; font-size: var(--chap-text-xl); line-height: var(--chap-leading-tight); }
+.approvals-head p { margin: var(--chap-space-1) 0 0; }
+
+/* One request = one card with a one-line summary; the card opens under it. */
+.approval { border-left: 6px solid var(--chap-neutral-line); padding: 0; gap: 0; }
+.approval-risk-low { border-left-color: var(--chap-success-line); }
+.approval-risk-medium { border-left-color: var(--chap-warning-line); }
+.approval-risk-high { border-left-color: var(--chap-danger-line); }
+.approval-risk-critical, .approval-critical { border-left-color: var(--destructive); }
+.approval-critical { border-top: 2px solid var(--destructive); border-right: 2px solid var(--destructive); border-bottom: 2px solid var(--destructive); }
+
+.approval-fold > summary, .approval-line-open { list-style: none; cursor: pointer; }
+.approval-fold > summary::-webkit-details-marker { display: none; }
+.approval-line {
+  display: grid; grid-template-columns: 6.5rem minmax(9rem, 14rem) 1fr auto; align-items: center; gap: var(--chap-space-4);
+  padding: var(--chap-space-4) var(--chap-space-5); line-height: var(--chap-leading-tight);
+}
+.approval-line-open { cursor: default; border-bottom: 1px solid var(--border); }
+.approval-fold > summary.approval-line::after { content: "\25B8"; color: var(--muted-foreground); grid-column: 5; grid-row: 1; margin-left: var(--chap-space-2); }
+.approval-fold[open] > summary.approval-line::after { content: "\25BE"; }
+.approval-fold[open] > summary.approval-line { border-bottom: 1px solid var(--border); }
+.approval-fold > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.approval-fold > summary:hover { background: var(--muted); }
+.line-who { color: var(--muted-foreground); font-size: var(--chap-text-sm); overflow-wrap: anywhere; }
+.line-what { font-size: var(--chap-text-md); font-weight: 600; overflow-wrap: anywhere; }
+.line-wants { font-weight: 400; color: var(--muted-foreground); }
+.line-age { color: var(--muted-foreground); font-size: var(--chap-text-sm); white-space: nowrap; }
+.approval-risk { text-transform: uppercase; letter-spacing: .06em; font-weight: 700; justify-content: center; text-align: center; }
+.approval-critical .badge.approval-risk[data-tone] { background: var(--destructive); color: var(--background); border-color: var(--destructive); }
+.approval-critical .badge.approval-risk::before { content: "" !important; margin: 0; }
+
+.approval-body { padding: var(--chap-space-4) var(--chap-space-5); display: flex; flex-direction: column; gap: var(--chap-space-3); }
+.approval-when { margin: 0; font-size: var(--chap-text-sm); }
+
+/* The card text. */
+.approval-text { overflow-wrap: anywhere; font-family: var(--chap-sans); }
+.approval-text:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.cs { margin: 0 0 var(--chap-space-4); }
+/* Every section's text ends with the card's blank separator line; the negative margin takes that one line back so the gap is the .cs margin alone. */
+.cs-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .9375rem; line-height: 1.55; margin-bottom: -1.55em; }
+.cs-head { margin: 0 0 var(--chap-space-1); font-size: var(--chap-text-xs); font-weight: 700; letter-spacing: .08em; color: var(--muted-foreground); line-height: 1.4; }
+.cs-version { display: block; font-size: var(--chap-text-xs); color: var(--muted-foreground); letter-spacing: .04em; }
+.cs-top { margin-bottom: var(--chap-space-3); }
+.cs-top .cs-body { color: var(--destructive); font-weight: 700; } /* nothing in the card text is ever hidden by a rule: a plain card has only a blank line here */
+.cs-ask { padding: var(--chap-space-4); background: var(--chap-info-bg); border: 1px solid var(--chap-info-line); border-radius: calc(var(--chap-radius) - 2px); }
+.approval-risk-medium .cs-ask { background: var(--chap-warning-bg); border-color: var(--chap-warning-line); }
+.approval-risk-high .cs-ask, .approval-risk-critical .cs-ask { background: var(--chap-danger-bg); border-color: var(--chap-danger-line); }
+.cs-ask .cs-body { font-size: 1.0625rem; }
+.cs-ask .cs-body::first-line { font-weight: 700; }
+.cs-reason .cs-body, .cs-checks .cs-body { font-family: var(--chap-mono); font-size: .8125rem; }
+details.cs > summary.cs-head { cursor: pointer; margin: 0; padding: var(--chap-space-2) 0; }
+details.cs > summary.cs-head::before { content: "\25B8"; display: inline-block; width: 1.25em; }
+details.cs[open] > summary.cs-head::before { content: "\25BE"; }
+details.cs > summary.cs-head:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.cs-tech, .cs-evidence { border-top: 1px solid var(--border); padding-top: var(--chap-space-1); }
+.cs-tech .cs-body, .cs-evidence .cs-body { font-family: var(--chap-mono); font-size: .8125rem; color: var(--muted-foreground); }
+.cs-evidence .cs-body { color: inherit; } /* the whole card is read on the page: no inner scroll box */
+.cs-end { margin: 0; }
+.cs-raw { margin: 0; padding: var(--chap-space-4); background: var(--muted); border: 1px solid var(--border); border-radius: calc(var(--chap-radius) - 2px); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--chap-mono); font-size: .8125rem; line-height: 1.55; }
+
+.approval-fp { font-size: var(--chap-text-xs); }
+.approval-fp summary { cursor: pointer; color: var(--muted-foreground); }
+.approval-fp p { margin: var(--chap-space-1) 0 0; overflow-wrap: anywhere; }
+
+/* Decide: two big buttons, Approve and Deny. */
+.approval-actions {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--chap-space-3); align-items: stretch;
+  padding: var(--chap-space-4) var(--chap-space-5) var(--chap-space-5); border-top: 1px solid var(--border);
+}
+.approval-actions > label { grid-column: 1 / -1; color: var(--muted-foreground); font-size: var(--chap-text-sm); margin-bottom: calc(var(--chap-space-2) * -1); }
+.approval-actions > .input { grid-column: 1 / -1; min-width: 0; }
+.approval-actions > .btn { min-height: 3.5rem; font-size: var(--chap-text-lg); font-weight: 700; justify-content: center; }
+.approval-actions > .number-choices { grid-column: 1 / -1; }
+.approval-actions > .approval-deny { grid-column: 1 / -1; }
+.approval-actions > .approval-approve + .approval-deny { grid-column: auto; }
+.approval-status { margin: 0; padding: 0 var(--chap-space-5) var(--chap-space-4); }
+.approval-status:empty { padding: 0; }
+.approval-status.error { color: var(--destructive); }
+
+.phone-summary { cursor: pointer; padding: var(--chap-space-4) var(--chap-space-5); font-weight: 600; }
+#phone-panel > section { padding: 0 var(--chap-space-5) var(--chap-space-5); }
+
+@media (max-width: 40rem) {
+  .approval-line { grid-template-columns: auto 1fr auto; row-gap: var(--chap-space-1); padding: var(--chap-space-3) var(--chap-space-4); }
+  .approval-line .approval-risk { grid-column: 1; grid-row: 1; }
+  .approval-line .line-age { grid-column: 2; grid-row: 1; text-align: right; }
+  .approval-line .line-who { grid-column: 1 / -1; grid-row: 2; }
+  .approval-line .line-what { grid-column: 1 / -1; grid-row: 3; }
+  .approval-fold > summary.approval-line::after { grid-column: 3; grid-row: 1; }
+  .approval-body { padding: var(--chap-space-3) var(--chap-space-4); }
+  .approval-actions { grid-template-columns: 1fr; padding: var(--chap-space-3) var(--chap-space-4) var(--chap-space-4); }
+  .approval-actions > .approval-approve + .approval-deny { grid-column: 1 / -1; }
+  .approval-status { padding-inline: var(--chap-space-4); }
+  .cs-ask { padding: var(--chap-space-3); }
+}
+
+/* Phone (L1-22): the number on the server card, and the three the phone shows. */
+.phone-code { margin: 0; }
+.phone-code-number { font-size: 2rem; letter-spacing: .1em; padding: 0 .5rem; border: 2px solid var(--border); border-radius: .375rem; }
+.number-choices { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; width: 100%; }
+.number-choices p { flex-basis: 100%; margin: 0; }
+.number-choice { font-size: 2rem; min-width: 5.5rem; min-height: 4rem; }
+#phone-address img { display: block; margin-top: .75rem; image-rendering: pixelated; }
+.approval code, #phone-address code { overflow-wrap: anywhere; }
+.scroll-x { overflow-x: auto; }
+
+.approval-old { grid-column: 1 / -1; margin: 0; padding: var(--chap-space-3); background: var(--chap-warning-bg); border: 1px solid var(--chap-warning-line); border-radius: calc(var(--chap-radius) - 2px); }
+/* What became of an approved request (outcome.go). */
+.outcome-not_run, .outcome-failed { color: var(--destructive); font-weight: 600; }
+.outcome-unknown { color: var(--chap-warning-ink); font-weight: 600; }
+.outcome-ran { color: var(--chap-success-ink); }
+.approval-status .outcome-actions { margin-top: var(--chap-space-2); }
+
+.recent-table td, .recent-table th { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+.recent-table td[data-label="What happened"] { min-width: 16rem; }
+.recent-table thead th { white-space: nowrap; }
+
+/* ?embed=1 (theme.js): inside another application (the dashboard) the card is set tighter so the block the operator signs (the card
+   text and the buttons) is as short as it can be and fits a screen. Layout only: every character of the text is still there,
+   the folds are still folds, and nothing here is a security setting. */
+html[data-embed] .cs-body { font-size: .875rem; line-height: 1.35; margin-bottom: -1.35em; }
+html[data-embed] .cs-top { margin-bottom: var(--chap-space-2); }
+html[data-embed] .cs-ask { padding: var(--chap-space-2) var(--chap-space-3); }
+html[data-embed] .cs-ask .cs-body { font-size: .9375rem; }
+html[data-embed] .cs-reason .cs-body, html[data-embed] .cs-checks .cs-body,
+html[data-embed] .cs-tech .cs-body, html[data-embed] .cs-evidence .cs-body { font-size: .75rem; }
+html[data-embed] .cs-head { margin-bottom: 0; }
+html[data-embed] details.cs > summary.cs-head { padding: var(--chap-space-1) 0; }
+html[data-embed] .approval-actions { gap: var(--chap-space-2); padding-top: var(--chap-space-2); padding-bottom: var(--chap-space-3); }
+html[data-embed] .approval-actions > label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); } /* still read by a screen reader */
+html[data-embed] .approval-actions > .btn { min-height: 2.75rem; font-size: var(--chap-text-md); }

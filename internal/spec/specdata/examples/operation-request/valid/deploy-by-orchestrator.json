@@ -1,0 +1,23 @@
+{
+  "spec_version": "0",
+  "type": "op.request",
+  "request_id": "q-9d1t7w",
+  "requester": {
+    "kind": "orchestrator",
+    "id": "main"
+  },
+  "project": "acme-shop",
+  "op": "deploy",
+  "target": {
+    "adapter": "ssh-host",
+    "ref": "staging"
+  },
+  "params": {
+    "sha": "035954c19afce62e74c3a6603e3abeff1d64c2fc",
+    "backup_verified_at": "2026-10-23T21:45:00Z"
+  },
+  "requested_at": "2026-10-23T22:50:00Z",
+  "expires_at": "2026-10-23T23:50:00Z",
+  "op_hash": "sha256:38159f26aeb226fefd69af55175315c4ece4532338e511d8e91cf77d81905848",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+}

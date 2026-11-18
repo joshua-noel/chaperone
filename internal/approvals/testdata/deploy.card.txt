@@ -1,0 +1,32 @@
+CHAPERONE APPROVAL CARD v3
+
+WHAT YOU ARE ASKED TO APPROVE
+Agent r-7f3a (host-interim) wants to:
+  deploy commit 0588aa4ee011... to pilot
+Risk: HIGH
+If you approve: it runs once. If you deny: nothing runs, and the same request is refused for a while.
+Decide before 2026-10-24 12:15 UTC time (2026-10-24T12:15:00Z). After that the request is dropped.
+
+WHAT CHANGES
+  Project: acme-shop
+  Deploys to: wsl-host / pilot
+  Commit: 0588aa4ee0116267162e895016bcfda9ec3a3e2c
+
+WHY THE REQUESTER ASKS (written by the requester; untrusted)
+    | Ship it.
+
+CHECKS
+  [pass] backup.fresh: verified 2026-10-24T11:40:00Z
+
+EVIDENCE: Commits since the pilot's SHA
+  (from the adapter at request time; untrusted text)
+    | 0588aa4 fix the cart
+    | 3f2e1d0 add the banner
+
+TECHNICAL DETAILS
+Operation: deploy (class high)
+Request: q-5h8w3c
+Op hash: sha256:0efa1ae25b8776a81c9e604a4a44baffa07d40b5f8e38eb0e64c2eaf4c8be56b
+Policy version: baseline-2026.10.1
+
+END OF CARD

@@ -1,0 +1,138 @@
+name: ci
+
+# Slow scans (govulncheck) live in scan.yml, on a weekly schedule. The Windows job
+# runs only after a merge to main or by hand, to keep pull request runs short.
+on:
+  pull_request:
+    branches: [main]
+    # Files no Go test or check reads. docs/manual.md (compared with the `chap`
+    # manual by a test), docs/manualgen/**, docs/dependencies.allow, policy/**
+    # and every workflow file still run CI.
+    paths-ignore:
+      - "docs/adr/**"
+      - "docs/runbooks/**"
+      - "docs/images/**"
+      - "docs/development.md"
+      - "docs/running-chapd.md"
+      - "docs/manual-crosswalk.md"
+      - "README.md"
+      - ".github/CODEOWNERS"
+      - ".github/pull_request_template.md"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/adr/**"
+      - "docs/runbooks/**"
+      - "docs/images/**"
+      - "docs/development.md"
+      - "docs/running-chapd.md"
+      - "docs/manual-crosswalk.md"
+      - "README.md"
+      - ".github/CODEOWNERS"
+      - ".github/pull_request_template.md"
+  # Run both jobs, Windows included, on any branch by hand (Actions tab, or
+  # `gh workflow run ci -r <branch>`), for a PR that touches Windows code.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a PR cancels that PR's older run. Runs on main always finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  linux:
+    name: linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Caches the Go module cache and the build cache, keyed on go.sum. A PR
+      # reads the cache that main saved.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: go mod verify
+        run: |
+          go mod download
+          go mod verify
+
+      - name: vendor drift check
+        run: |
+          go mod tidy -diff
+          go mod vendor
+          if [ -n "$(git status --porcelain -- vendor go.mod go.sum)" ]; then
+            echo "::error::vendor/, go.mod or go.sum differ from 'go mod vendor'. Run it and commit the result."
+            git status --porcelain -- vendor go.mod go.sum | head -20
+            exit 1
+          fi
+
+      - name: allowlist check
+        run: go run ./scripts/allowcheck
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l cmd internal scripts)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go vet (linux)
+        run: go vet ./...
+
+      - name: go vet (windows cross check)
+        run: GOOS=windows go vet ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      - name: build all binaries (linux and windows, CGO off)
+        env:
+          CHAP_VERSION: ci
+        run: scripts/build.sh
+
+      - name: chap version in a clean ubuntu container
+        run: docker run --rm -v "$PWD/dist/linux:/opt/chaperone:ro" ubuntu:24.04 /opt/chaperone/chap version
+
+  # The job runs after a merge to main and on demand, not on a pull request: the
+  # Linux job already cross-vets GOOS=windows on every PR. It uses a GitHub-hosted runner.
+  windows:
+    name: windows
+    needs: linux
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      - name: build all binaries
+        env:
+          CHAP_VERSION: ci
+        run: scripts/build.sh windows
+
+      - name: chap version
+        run: dist/windows/chap.exe version

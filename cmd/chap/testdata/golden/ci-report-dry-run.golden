@@ -1,0 +1,17 @@
+$ chap ci report r-9c1d --project chaperone --dry-run
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"dry_run":true,"op":"ci.report","params":{"run_id":"r-9c1d"},"project":"chaperone","target":{"adapter":"runner","ref":"r-9c1d"}}
+--- stdout
+dry run ci.report r-9c1d: would be released now
+class: routine  policy: baseline-2026.10.1
+op_hash: sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415
+checks:
+  ok   run_project
+  ok   run_profile
+  ok   run_ended: done
+  ok   run_repo: joshua-noel/chaperone
+  ok   run_head: 0588aa4
+--- stderr

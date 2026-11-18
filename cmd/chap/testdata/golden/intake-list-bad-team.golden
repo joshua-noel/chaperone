@@ -1,0 +1,8 @@
+$ chap intake list --team ops
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --team must be a Linear team key such as SHOP
+usage: chap intake list [--refresh] [--closed] [--team <key>]

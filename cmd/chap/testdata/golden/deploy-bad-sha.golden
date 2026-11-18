@@ -1,0 +1,8 @@
+$ chap deploy main
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the sha must be 40 lowercase hex characters
+usage: chap deploy <sha>

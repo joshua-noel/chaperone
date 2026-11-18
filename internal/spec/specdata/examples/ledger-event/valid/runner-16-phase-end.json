@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 16,
+  "prev_hash": "sha256:79456a4f1222b9c2e877323d6b9752bdc9f11540e8f589855211bff80cd026bc",
+  "hash": "sha256:ecebaf90279dcb7818aa785e9ef730e497cb51b44380a16d5189bdc8d083c731",
+  "time_unix_nano": "1792795300000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "13284be3ae043c70",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "phase.end",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.phase": "wait",
+    "factory.phase.duration_ms": 610000,
+    "factory.phase.wait_reason": "approval"
+  }
+}

@@ -1,0 +1,201 @@
+# The `chap manual` data (ticket L1-07, first PR).
+#
+# One entry per operation kind in Chaperone's catalog. chapd serves it through
+# GET /v0/catalog, narrowed to the ops the caller (or the named profile) may
+# use, and `chap manual` renders it. This file is data for the manual and the
+# class table; it never enables anything. Every op is DISABLED by default:
+# enabling one is a change to policy/<project>.yaml (policy PR), never to this
+# file, and the manual shows only enabled ops (chap manual lists no "never"
+# rule that the code does not enforce, L1-23).
+#
+# Size rule: `summary` <= 60 characters, `usage` <= 100, so that the manual for
+# a typical profile (4 ops) renders under 1 KB. A test enforces both.
+#
+# class (spec v0.1.1 section 5, decisions #15 and #21):
+#   routine   inside the token's scope and policy: allowed, no human step
+#   gated     allowed only when its preconditions hold, no human step by default
+#   high      never auto-allowed: needs one approval bound to the exact op_hash
+#   critical  high, plus the CRITICAL card label and an alert on request,
+#             approval and execution. Same single-device approval.
+#             repo.settings, secrets.* and host.scripts.refresh are critical
+#             by decision #21.
+# reversibility: reversible | compensable | irreversible (spec section 5).
+# surface: how the op is asked for.
+#   op   POST /v0/ops (params as in components.schemas.Params* of openapi.yaml)
+#   git  the git proxy mount (/git/...); the op in the token authorises the push
+version: 1
+ops:
+  pr.open:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Open a pull request from the run's branch.
+    usage: chap pr open --title <t> [--branch <b>] [--base <b>] [--body <b>] [--draft]
+  pr.update:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Update a PR title or body, or update its branch.
+    usage: chap pr update <n> --expected-head <sha> [--title <t>] [--body <b>]
+  pr.merge:
+    class: gated
+    reversibility: compensable
+    surface: op
+    summary: Merge a PR when verify is green on its exact head.
+    usage: chap pr merge <n> --head <sha> [--dry-run]
+  pr.view:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read a PR's title, body, state, head, base, mergeability.
+    usage: chap pr view <n> [--repo owner/name]
+  pr.diff:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read a PR's unified diff, capped at 256 KiB.
+    usage: chap pr diff <n> [--expected-head <sha>] [--repo owner/name]
+  pr.checks:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read the check runs on a PR's head commit.
+    usage: chap pr checks <n> [--expected-head <sha>] [--repo owner/name]
+  pr.files:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: List a PR's changed files, one page at a time.
+    usage: chap pr files <n> [--page <p>] [--per-page <n>] [--expected-head <sha>]
+  issue.open:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Open an issue labelled source:error-watcher.
+    usage: chap issue open --title <t> --label source:error-watcher [--body <b>]
+  issue.comment:
+    class: routine
+    reversibility: compensable
+    surface: op
+    summary: Comment on an issue labelled source:error-watcher.
+    usage: chap issue comment <n> --body <b>
+  issue.reopen:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Reopen an issue labelled source:error-watcher.
+    usage: chap issue reopen <n>
+  branch.push:
+    class: routine
+    reversibility: reversible
+    surface: git
+    summary: Push the run's branch through the git proxy.
+    usage: chap git setup; git push origin <branch>
+  health:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read the pilot's readiness status.
+    usage: chap health
+  logs:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read recent log lines from a fixed source.
+    usage: chap logs <web|worker|db|tunnel> [--lines <n>]
+  ci.report:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Post a finished local CI run's result as a check run.
+    usage: chap ci report <run-id>
+  deploy:
+    class: high
+    reversibility: compensable
+    surface: op
+    summary: Deploy a commit to the pilot after one approval.
+    usage: chap deploy <sha>
+  data.apply:
+    class: high
+    reversibility: compensable
+    surface: op
+    summary: Apply a data change after a verified backup and approval.
+    usage: chap request op data.apply --reason <why>
+  mail.send:
+    class: high
+    reversibility: irreversible
+    surface: op
+    summary: Send one email to allowlisted recipients after approval.
+    usage: chap mail send --from <account> --to <a> --subject <s> --body-file <f>
+  drive.share:
+    class: high
+    reversibility: compensable
+    surface: op
+    summary: Share one Drive file with allowlisted recipients.
+    usage: chap drive share <file-id> --from <account> --name <file-name> --to <a> --role <r>
+  intake.list:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: List open board items labelled for the orchestrator.
+    usage: chap intake list [--refresh] [--closed]
+  intake.comment:
+    class: routine
+    reversibility: compensable
+    surface: op
+    summary: Comment on a labelled operator-board item.
+    usage: chap intake comment <SHOP-12> --body <b>
+  intake.move:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Move a labelled operator-board item to a listed state.
+    usage: chap intake move <SHOP-12> --state <name>
+  intake.states:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: List the board team's states and the policy's.
+    usage: chap intake states
+  notion.write:
+    class: high
+    reversibility: compensable
+    surface: op
+    summary: Write one Notion page after approval.
+    usage: chap request op notion.write --reason <why>
+  pr.push.workflow:
+    class: high
+    reversibility: reversible
+    surface: git
+    summary: Push a change to .github/workflows after approval.
+    usage: chap request op pr.push.workflow --reason <why>
+  repo.settings:
+    class: critical
+    reversibility: compensable
+    surface: op
+    summary: Change a repository setting after approval (CRITICAL).
+    usage: chap request op repo.settings --reason <why>
+  secrets.write:
+    class: critical
+    reversibility: compensable
+    surface: op
+    summary: Import or rotate one secret after approval (CRITICAL).
+    usage: chap request op secrets.write --reason <why>
+  host.scripts.refresh:
+    class: critical
+    reversibility: compensable
+    surface: op
+    summary: Refresh the host scripts from main (CRITICAL).
+    usage: chap request op host.scripts.refresh --reason <why>
+  approvers.enroll:
+    class: critical
+    reversibility: compensable
+    surface: op
+    summary: Enrol another approver device (CRITICAL).
+    usage: chap request op approvers.enroll --reason <why>
+  policy.activate:
+    class: critical
+    reversibility: compensable
+    surface: op
+    summary: Activate a new policy pack (CRITICAL).
+    usage: chap request op policy.activate --reason <why>

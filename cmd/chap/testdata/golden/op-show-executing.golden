@@ -1,0 +1,13 @@
+$ chap op show q-9z8y7x --wait 30 --since executing
+exit: 7
+--- request
+GET /v0/ops/q-9z8y7x?since_state=executing&wait=30
+auth: run
+--- stdout
+deploy pilot: executing
+id: q-9z8y7x  class: high  policy: baseline-2026.10.1
+execution: x-2q3w4e
+approval: a-8m2q4x consumed, expires 2026-10-24T09:43:00Z
+not finished
+follow: chap op show q-9z8y7x --wait 30
+--- stderr

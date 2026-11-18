@@ -1,0 +1,24 @@
+{
+  "spec_version": "0",
+  "type": "op.request",
+  "request_id": "q-4k2m9x",
+  "requester": {
+    "kind": "run",
+    "run_id": "r-7f3a",
+    "token_jti": "n8Gf3kQ2xV7bTz1LwA9cYd",
+    "profile": "code"
+  },
+  "project": "acme-shop",
+  "op": "pr.merge",
+  "target": {
+    "adapter": "github",
+    "ref": "acme/shop#214"
+  },
+  "params": [
+    1
+  ],
+  "reason": "CI is green on the exact head; merging the retry fix.",
+  "requested_at": "2026-10-23T22:41:00Z",
+  "expires_at": "2026-10-23T23:41:00Z",
+  "op_hash": "sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415"
+}

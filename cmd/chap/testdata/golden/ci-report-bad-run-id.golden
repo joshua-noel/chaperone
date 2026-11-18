@@ -1,0 +1,8 @@
+$ chap ci report 214 --project chaperone
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: "214" is not a run id like r-7f3a
+usage: chap ci report <run-id> [--dry-run]

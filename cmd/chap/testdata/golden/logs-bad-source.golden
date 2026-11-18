@@ -1,0 +1,8 @@
+$ chap logs syslog
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the source must be one of web, worker, db, tunnel
+usage: chap logs <web|worker|db|tunnel> [--lines <n>]

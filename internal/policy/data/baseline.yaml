@@ -1,0 +1,81 @@
+# Chaperone baseline policy pack (ticket L1-07).
+#
+# This file is the ONLY place an op is turned on. Every op in api/manual.yaml
+# is disabled by default; enabling one is a pull request that flips `enabled`
+# here, reviewed like code (spec section 5: "enabling or changing one is a
+# policy PR"). The adapter tickets flip their own ops: L1-09 pr.open and
+# branch.push, L1-10 pr.merge and pr.update, L1-11 health and logs, L1-15 deploy,
+# L1-16 mail.send and drive.share.
+#
+# A project file, policy/<project>.yaml, can only NARROW this pack: turn an op
+# off, lower a rate, lower a cap. It cannot turn anything on or raise anything;
+# a file that tries is refused as a whole (see policy.LoadProject). The one
+# thing a project file adds is its `pr:` block (merge base, extra checks, tiers);
+# the pr.merge and pr.update adapters refuse a project that has none.
+#
+# `version` is a human label. The policy_version chapd reports is this label
+# plus a digest of these bytes (and of the project file), so a change to either
+# file is a new version even if nobody bumped the label.
+version: baseline-2026.10.1
+
+ops:
+  pr.open:              { enabled: true,  rate_per_minute: 6 }    # L1-09; a run opens a PR from its own branch only
+  pr.update:            { enabled: true,  rate_per_minute: 12 }   # L1-10; refused for a project with no `pr:` block
+  pr.merge:             { enabled: true,  rate_per_minute: 6 }    # L1-10; refused for a project with no `pr:` block
+  branch.push:          { enabled: true,  rate_per_minute: 12 }   # L1-09; the git proxy admits one push to the task branch
+  # Issue ops: for the error watcher's orchestrator token only. No profile below lists
+  # them, so a run can never ask; the adapter also refuses any issue without the label source:error-watcher.
+  issue.open:           { enabled: true,  rate_per_minute: 6,  rate_per_hour: 20 }
+  issue.comment:        { enabled: true,  rate_per_minute: 6,  rate_per_hour: 20 }
+  issue.reopen:         { enabled: true,  rate_per_minute: 6,  rate_per_hour: 20 }
+  # Read-only PR views (ADR-002 amendment 12): on since the operator's policy PR. For the orchestrator token only (no profile lists them);
+  # the repository is the project's `pr.repo`. The caps bound the load on GitHub: one to three API calls and one token per call.
+  pr.view:              { enabled: true,  rate_per_minute: 30, rate_per_hour: 600 }
+  pr.diff:              { enabled: true,  rate_per_minute: 12, rate_per_hour: 240 }
+  pr.checks:            { enabled: true,  rate_per_minute: 30, rate_per_hour: 600 }
+  pr.files:             { enabled: true,  rate_per_minute: 30, rate_per_hour: 600 }
+  health:               { enabled: false, rate_per_minute: 6 }
+  logs:                 { enabled: false, rate_per_minute: 6 }
+  # Operator-board intake: on; each op still refuses a project with no `linear:` block. For the orchestrator's orchestrator token only
+  # (no profile lists them). Each also needs the project's `linear:` block and the vault's Linear secrets.
+  intake.list:          { enabled: true,  rate_per_minute: 12 }
+  intake.comment:       { enabled: true,  rate_per_minute: 6 }
+  intake.move:          { enabled: true,  rate_per_minute: 6 }
+  intake.states:        { enabled: true,  rate_per_minute: 6 }
+  deploy:               { enabled: false, rate_per_minute: 3 }
+  data.apply:           { enabled: false, rate_per_minute: 3 }
+  mail.send:            { enabled: false, rate_per_minute: 3 }
+  drive.share:          { enabled: false, rate_per_minute: 3 }
+  notion.write:         { enabled: false, rate_per_minute: 3 }
+  pr.push.workflow:     { enabled: false, rate_per_minute: 3 }
+  repo.settings:        { enabled: false, rate_per_minute: 3 }
+  secrets.write:        { enabled: false, rate_per_minute: 3 }
+  host.scripts.refresh: { enabled: false, rate_per_minute: 3 }
+  approvers.enroll:     { enabled: false, rate_per_minute: 3 }
+  policy.activate:      { enabled: false, rate_per_minute: 3 }
+  ci.report:            { enabled: true,  rate_per_minute: 6 }    # ADR-002 amendment 10; on, and works only for a project whose `pr:` block has `local_ci`; orchestrator only, a run's ceiling never holds it
+
+# What each profile may ever ask for (a ceiling; a token's own task_scope.ops
+# narrows it further, and a signed generic profile narrows it again). A run on
+# an interim token has no signed profile: host-interim is its only ceiling
+# (ADR-005: pr.*, branch.push, health, logs, plus approval-gated ops).
+profiles:
+  code:         [pr.open, pr.update, branch.push, health, logs]
+  docs:         [pr.open, pr.update, branch.push]
+  research:     [health, logs]
+  review:       [health, logs]
+  deploy-watch: [health, logs]
+  data-op:      [health, logs]
+  ci:           []                                                 # a ci run (the runner room) asks for no op: the host reports its result with ci.report
+  host-interim: [pr.open, pr.update, pr.merge, branch.push, health, logs, deploy, data.apply, mail.send, drive.share, notion.write, pr.push.workflow]
+
+limits:
+  # Repeated denials of the same (surface, action) by one caller. At `threshold`
+  # the denial is flagged (spec: a flag marks the timeline; the runner raises THRASH).
+  thrash: { threshold: 3, window_seconds: 300 }
+  # Pending approvals agents may queue (ADR-004 section 6 item 4). They bound
+  # agents, never the operator.
+  pending: { per_run: 2, per_project: 5, total: 10 }
+  # Lifetime of an unapproved request, in minutes (ADR-004: 30, deploy 15).
+  request_ttl_minutes: 30
+  deploy_ttl_minutes: 15

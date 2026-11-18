@@ -1,0 +1,29 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 11,
+  "prev_hash": "sha256:8d433ea0c0bd82438eddb202dafcc1f3e28169b621c947806b51128a943fa234",
+  "hash": "sha256:f9ba6278da33e2c79f1fd096f822d4e31844c24fcaab0e98ebcfe025b8b0e4f9",
+  "time_unix_nano": "1792801200000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "1811fcb2d7f150dd",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "grant",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.token.jti": "n8Gf3kQ2xV7bTz1LwA9cYd",
+    "factory.token.exp": 1792798320,
+    "factory.brief.sha256": "sha256:7ed2358fdd424519b90502f453c9ab84266b75d6c17db83fdb89511dd61d67c1",
+    "factory.isolation": "host",
+    "factory.scope.ops": [
+      "pr.open"
+    ]
+  }
+}

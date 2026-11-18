@@ -1,0 +1,20 @@
+{
+  "spec_version": "0",
+  "type": "op.request",
+  "request_id": "q-5e8b3k",
+  "requester": {
+    "kind": "orchestrator",
+    "id": "operator"
+  },
+  "project": "chaperone",
+  "op": "approvers.enroll",
+  "target": {
+    "adapter": "chaperone",
+    "ref": "console"
+  },
+  "params": {},
+  "reason": "First approver, enrolled at the machine with chapd enroll: no approver exists yet to approve it.",
+  "requested_at": "2026-10-24T01:00:00Z",
+  "expires_at": "2026-10-24T01:10:00Z",
+  "op_hash": "sha256:89db66e2ffddc9b410ccf7efa207720d6d070fabbef6b5bf5ac7c76491a2bc62"
+}

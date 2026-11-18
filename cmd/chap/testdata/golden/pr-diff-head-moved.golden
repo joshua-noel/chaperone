@@ -1,0 +1,14 @@
+$ chap pr diff 214 --expected-head 0588aa4ee0116267162e895016bcfda9ec3a3e2c --repo example-org/storefront --project storefront
+exit: 5
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"pr.diff","params":{"expected_head_sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c"},"project":"storefront","target":{"adapter":"github","ref":"example-org/storefront#214"}}
+--- stdout
+pr.diff example-org/storefront#214: failed
+id: q-7c1d04  class: routine  policy: baseline-2026.10.1
+execution: x-4a5b6c
+result:
+  error: the head of #214 is not 0588aa4ee011 any more: ask again without expected_head_sha, or with the new head
+  head_sha: 7e1f3c9a2b4d5e6f708192a3b4c5d6e7f8091a2b
+--- stderr

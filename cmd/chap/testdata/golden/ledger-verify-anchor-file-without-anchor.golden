@@ -1,0 +1,8 @@
+$ chap ledger verify --anchor-file /restore/chaperone.main.jsonl
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --anchor-file and --anchor-pub need --anchor
+usage: chap ledger verify [--against-export] [--anchor [--anchor-file <f>]... [--anchor-pub <k>]...]

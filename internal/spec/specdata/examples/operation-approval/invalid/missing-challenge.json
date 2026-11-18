@@ -1,0 +1,53 @@
+{
+  "spec_version": "0",
+  "type": "op.approval",
+  "approval_id": "a-8h3c5p",
+  "request_id": "q-4k2m9x",
+  "run_id": "r-7f3a",
+  "op_hash": "sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415",
+  "decision": "approved",
+  "policy_version": "baseline-2026.10.1",
+  "checks": [
+    {
+      "name": "ci.green_on_exact_head",
+      "passed": true,
+      "detail": "verify = success on the requested head"
+    },
+    {
+      "name": "head.unchanged",
+      "passed": true
+    },
+    {
+      "name": "base.current",
+      "passed": true
+    }
+  ],
+  "shown": {
+    "display_sha256": "sha256:23932fe245e557d8db6fd83b9ddeef27e5377881c2028b1a9d2defed03f9a98e",
+    "channels": [
+      "pc",
+      "phone"
+    ]
+  },
+  "confirmations": [
+    {
+      "channel": "pc",
+      "credential_id": "Zm9vYmFyYmF6cXV4",
+      "assertion_sha256": "sha256:fc467b04454ef2d65eb25cea80cc06ccac8e4cc9cdee092429c3b9a2a872fde1",
+      "at": "2026-10-23T22:42:10Z"
+    },
+    {
+      "channel": "phone",
+      "credential_id": "cGhvbmUta2V5LTAx",
+      "assertion_sha256": "sha256:add18ae45324058d8cd6b12bebda1fa075ce94f7f323424df2a8b21a06a3aaf4",
+      "at": "2026-10-23T22:42:31Z"
+    }
+  ],
+  "approver": {
+    "id": "operator"
+  },
+  "nonce": "q3Vh8sT1mYb0LrKz4pWx9A",
+  "single_use": true,
+  "decided_at": "2026-10-23T22:42:31Z",
+  "expires_at": "2026-10-23T22:52:31Z"
+}

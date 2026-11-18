@@ -1,0 +1,13 @@
+$ chap health
+exit: 3
+--- request
+POST /v0/ops
+auth: run
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+DENIED op health (profile code, run r-7f3a)
+cause: OP_POLICY_REFUSED
+why: rate limit: health allows 6 calls per minute per run; retry in 12 s
+next: wait the time given, then ask again
+retry after 12 s

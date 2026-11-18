@@ -1,0 +1,8 @@
+$ chap intake move SHOP-12
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --state is required
+usage: chap intake move <SHOP-12> --state <name>

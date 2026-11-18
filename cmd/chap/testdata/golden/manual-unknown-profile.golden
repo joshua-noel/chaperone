@@ -1,0 +1,8 @@
+$ chap manual --profile ops
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: unknown profile "ops"
+usage: chap manual [--profile <p>] [--all] [--project <p>]

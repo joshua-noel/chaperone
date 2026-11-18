@@ -1,0 +1,57 @@
+{
+  "approved-despite-failed-check.json": {
+    "keyword": "const",
+    "instancePath": "/checks/0/passed"
+  },
+  "approved-without-confirmation.json": {
+    "keyword": "minItems",
+    "instancePath": "/confirmations"
+  },
+  "batch-approval-field.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "",
+    "params": {
+      "additionalProperty": "request_ids"
+    }
+  },
+  "denied-without-reason.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "reason"
+    }
+  },
+  "malformed-op-hash.json": {
+    "keyword": "pattern",
+    "instancePath": "/op_hash"
+  },
+  "missing-challenge.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "challenge_sha256"
+    }
+  },
+  "missing-nonce.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "nonce"
+    }
+  },
+  "missing-op-hash.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "op_hash"
+    }
+  },
+  "reusable-approval.json": {
+    "keyword": "const",
+    "instancePath": "/single_use"
+  },
+  "unknown-channel.json": {
+    "keyword": "enum",
+    "instancePath": "/confirmations/0/channel"
+  }
+}

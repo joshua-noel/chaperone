@@ -1,0 +1,8 @@
+$ chap op show 214
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the op id must look like q-xxxxxx
+usage: chap op show <q-id> [--wait <s>] [--since <state>]

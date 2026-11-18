@@ -1,0 +1,74 @@
+{
+  "branch-leading-dash.json": {
+    "keyword": "pattern",
+    "instancePath": "/task_scope/branch"
+  },
+  "exp-not-a-number.json": {
+    "keyword": "type",
+    "instancePath": "/exp"
+  },
+  "extra-claim.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "",
+    "params": {
+      "additionalProperty": "admin"
+    }
+  },
+  "runner-token-without-profile-digest.json": {
+    "keyword": "required",
+    "instancePath": "/profile",
+    "params": {
+      "missingProperty": "digest"
+    }
+  },
+  "host-isolation-with-runner-issuer.json": {
+    "keyword": "pattern",
+    "instancePath": "/iss"
+  },
+  "host-token-with-real-profile.json": {
+    "keyword": "const",
+    "instancePath": "/profile/name"
+  },
+  "jti-too-short.json": {
+    "keyword": "pattern",
+    "instancePath": "/jti"
+  },
+  "chaperone-issuer-with-sandbox-isolation.json": {
+    "keyword": "pattern",
+    "instancePath": "/iss"
+  },
+  "missing-brief-hash.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "brief_sha256"
+    }
+  },
+  "missing-task-scope.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "task_scope"
+    }
+  },
+  "path-leading-dash.json": {
+    "keyword": "pattern",
+    "instancePath": "/task_scope/paths/0"
+  },
+  "sub-without-run-prefix.json": {
+    "keyword": "pattern",
+    "instancePath": "/sub"
+  },
+  "unexpanded-branch-placeholder.json": {
+    "keyword": "pattern",
+    "instancePath": "/task_scope/branch"
+  },
+  "wildcard-op-in-scope.json": {
+    "keyword": "pattern",
+    "instancePath": "/task_scope/ops/1"
+  },
+  "wrong-audience.json": {
+    "keyword": "const",
+    "instancePath": "/aud"
+  }
+}

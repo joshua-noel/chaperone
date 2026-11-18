@@ -1,0 +1,16 @@
+$ chap op show q-wcjx67
+exit: 5
+--- request
+GET /v0/ops/q-wcjx67
+auth: run
+--- stdout
+pr.open acme/shop: refused
+id: q-wcjx67  class: routine  policy: baseline-2026.10.1
+checks:
+  ok   repo: acme/shop
+  ok   branches: agent/r-7f3a -> main
+DENIED scope acme/shop (profile code, run r-7f3a)
+cause: SCOPE_PATH
+why: this run's token covers acme/other only, not acme/shop
+next: work only inside the scope this token gives; if the task needs more, stop and say so (a run tells the orchestrator, the orchestrator tells the operator)
+--- stderr

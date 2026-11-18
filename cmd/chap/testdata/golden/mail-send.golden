@@ -1,0 +1,13 @@
+$ chap mail send --from operator@example.com --to a@example.com,b@example.com --to c@example.com --subject Launch --body-file /work/mail.txt --project acme-shop
+exit: 7
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"mail.send","params":{"body":"We shipped.\n","subject":"Launch","to":["a@example.com","b@example.com","c@example.com"]},"project":"acme-shop","target":{"adapter":"google","ref":"operator@example.com"}}
+--- stdout
+mail.send mail: pending_approval
+id: q-5m1a2i  class: high  policy: baseline-2026.10.1
+approval: a-8m2q4x pending, expires 2026-10-24T09:43:00Z
+waiting for the operator to approve in the console; nothing has run
+follow: chap op show q-5m1a2i --wait 30
+--- stderr

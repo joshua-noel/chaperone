@@ -1,0 +1,156 @@
+{{define "passkeys"}}
+<table class="table table-stack">
+  <caption class="sr-only">Passkeys</caption>
+  <thead><tr><th scope="col">Name</th><th scope="col">RP ID</th><th scope="col">Origin</th><th scope="col">Created</th><th scope="col">Last used</th></tr></thead>
+  <tbody>
+  {{range .}}
+    <tr><td data-label="Name">{{.Label}}</td><td data-label="RP ID"><code>{{.RPID}}</code></td><td data-label="Origin"><code>{{.Origin}}</code></td><td data-label="Created">{{template "t" .Created}}</td><td data-label="Last used">{{template "t" .LastUsed}}</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+
+{{/* The result of an action, swapped into a status region. */}}
+{{define "notice"}}
+<div class="alert"{{if .Bad}} data-variant="destructive" data-tone="danger" role="alert"{{else}} data-tone="success" role="status"{{end}}>
+  <h2>{{.Title}}</h2>
+  <section>{{.Text}}</section>
+</div>
+{{end}}
+
+{{define "verify-result"}}
+<div class="alert"{{if .OK}} data-tone="success" role="status"{{else}} data-variant="destructive" data-tone="danger" role="alert"{{end}}>
+  <h2>{{if .OK}}Ledger verified{{else}}Ledger verification FAILED{{end}}</h2>
+  <section>
+    <p>Chain <code>{{.Chain}}</code>: {{.Events}} events, head seq {{.HeadSeq}}, hash <code>{{.HeadHash}}</code>.</p>
+    {{if .Export}}<p>Compared with the JSONL export: exported through seq {{.ExportedThrough}}, {{.Unexported}} newer events not exported yet.</p>{{end}}
+    {{if .Problems}}
+    <ul>
+      {{range .Problems}}<li>{{.}}</li>{{end}}
+    </ul>
+    <p>Do not trust this ledger until the cause is known. Ops fail closed while the chain is broken.</p>
+    {{end}}
+  </section>
+</div>
+{{end}}
+
+{{/* A UTC time (RFC 3339) as a <time>: web/static/localtime.js shows it in the time zone named by the layout's time-zone meta (CHAP_TIMEZONE) and adds the UTC time after it as visible text. */}}
+{{define "t"}}{{if .}}<time datetime="{{.}}">{{.}}</time>{{end}}{{end}}
+
+{{define "run-row"}}
+<tr>
+  <th scope="row"><code>{{.RunID}}</code></th>
+  <td data-label="Project">{{.Project}}</td>
+  <td data-label="Profile">{{.Profile}}{{if .Interim}} (interim){{end}}</td>
+  <td data-label="Started">{{template "t" .Registered}}</td>
+  <td data-label="{{if .Active}}Expires{{else}}Ended{{end}}">{{if .Active}}{{template "t" .Expires}}{{else}}{{template "t" .Ended}}{{end}}</td>
+  <td data-label="{{if .Active}}Action{{else}}How{{end}}">
+  {{if .Active}}
+    {{if .Restricted}}<span class="muted">Re-open to revoke</span>{{else if .Framed}}<a href="/runs?from=frame" target="_blank" rel="noopener">Revoke opens in Chaperone</a>{{else}}<button class="btn" data-variant="destructive" data-size="sm" type="button" hx-post="/runs/{{.RunID}}/revoke" hx-target="closest tr" hx-swap="outerHTML"
+      hx-confirm="Revoke run {{.RunID}}? Its token is refused from its next request." aria-label="Revoke run {{.RunID}}">Revoke</button>{{end}}
+  {{else}}
+    ended: {{.EndReason}}{{if .EndCause}} ({{.EndCause}}){{end}}
+  {{end}}
+  </td>
+</tr>
+{{end}}
+
+{{define "orch-row"}}
+<tr>
+  <th scope="row"><code>{{.ID}}</code></th>
+  <td data-label="Fingerprint"><code>{{.Fingerprint}}</code></td>
+  <td class="wrap" data-label="Projects">{{.Projects}}</td>
+  <td class="wrap" data-label="Ops">{{.Ops}}{{if .MintInterim}} (may mint interim tokens){{end}}</td>
+  <td data-label="Issued">{{template "t" .Issued}}</td>
+  <td data-label="Expires">{{template "t" .Expires}}</td>
+  <td class="wrap" data-label="Status">
+  {{if .Live}}
+    <span class="badge" data-tone="success">live</span>
+    {{if .Restricted}}<span class="muted">Re-open to revoke</span>{{else if .Framed}}<a href="/runs?from=frame" target="_blank" rel="noopener">Revoke opens in Chaperone</a>{{else}}<button class="btn" data-variant="destructive" data-size="sm" type="button" hx-post="/orchestrators/{{.ID}}/revoke" hx-target="closest tr" hx-swap="outerHTML"
+      hx-confirm="Revoke the orchestrator token of {{.ID}}? The orchestrator is refused from its next request and its waiting approvals are cancelled. Issue a new token with chapd orch issue."
+      aria-label="Revoke orchestrator {{.ID}}">Revoke orchestrator</button>{{end}}
+  {{else}}
+    {{.Status}}{{if .RevokedBy}} by {{.RevokedBy}}{{end}}
+  {{end}}
+  </td>
+</tr>
+{{end}}
+
+{{/*
+  The card text, laid out (ADR-004 amendment 10). Every character of the card text appears once, in order, inside the
+  element this fills, and nothing else is text there (no label, no space between tags): the page script hashes that
+  element's textContent and compares it with display_sha256 before it asks for a signature. A folded part (<details>)
+  still counts: its text is in the element. The test TestCardTextOnThePageIsTheSignedText strips the markup and compares the bytes.
+*/}}
+{{define "cardtext" -}}
+{{if .Split -}}
+{{range .Sections -}}
+{{if eq .Key "tech" -}}
+<details class="cs cs-tech"><summary class="cs-head">{{.Heading}}</summary><div class="cs-body">{{.Body}}</div></details>
+{{- else if eq .Key "evidence" -}}
+<details class="cs cs-evidence" open><summary class="cs-head">{{.Heading}}</summary><div class="cs-body">{{.Body}}</div></details>
+{{- else if eq .Key "head" -}}
+<div class="cs cs-top"><span class="cs-version">{{.Heading}}</span><div class="cs-body">{{.Body}}</div></div>
+{{- else if eq .Key "end" -}}
+<div class="cs cs-end"><span class="cs-version">{{.Heading}}</span></div>
+{{- else -}}
+<div class="cs cs-{{.Key}}"><h3 class="cs-head">{{.Heading}}</h3><div class="cs-body">{{.Body}}</div></div>
+{{- end -}}
+{{- end -}}
+{{- else -}}
+<pre class="cs-raw">{{.Text}}</pre>
+{{- end -}}
+{{- end}}
+
+{{/* A page opened in a way that must not hand over a live button (Console.restricted). The argument is the page's own path. Re-open is a link to the page without the mark; it is held like a button (frame-guard.js). */}}
+{{define "restricted-note"}}
+<p class="frame-note" role="status" data-restricted>Opened from another site: buttons are off here. <a href="{{.}}" data-reopen>Re-open here</a> to act.</p>
+{{end}}
+
+{{/* The same for a browser that sends no Sec-Fetch-Site: nothing can lift it, so there is no link. */}}
+{{define "restricted-legacy-note"}}
+<p class="frame-note" role="status" data-restricted>This browser does not say where a page was opened from, so buttons are off here. Open the console in a current browser (Edge, Chrome, Firefox or Safari) to act.</p>
+{{end}}
+
+{{/* What the operator may do about a flagged or unchecked card. A restricted page has no live Approve or Deny; only a page with a way out says to re-open it. A card that only a new card can help (NewCard) is not "you can still decide": release will refuse it. */}}
+{{define "decide-hint"}}{{if .Restricted}}{{if .Legacy}}Approve and Deny are off on this page.{{else}}Re-open the page to decide.{{end}}{{else if .NewCard}}Approving it would not help: deny it, or let it run out.{{else}}You can still decide: it is checked again when it runs, and the orchestrator is told if it did not run.{{end}}{{end}}
+
+{{/* One pending request: a one-line summary (who, what, risk, age) that opens the card, then big Approve and Deny. */}}
+{{define "approval-card"}}
+<article class="card approval approval-risk-{{.Risk}}{{if .Critical}} approval-critical{{end}}" data-approval="{{.ID}}" data-risk="{{.Risk}}" aria-labelledby="title-{{.ID}}">
+  <details class="approval-fold"{{if .Open}} open{{end}}>
+    <summary class="approval-line" id="title-{{.ID}}">
+      <span class="badge approval-risk" data-tone="{{.RiskTone}}">{{.Risk}}</span>
+      <span class="line-who">{{.Who}}</span>
+      <span class="line-what"><span class="line-wants">wants to</span> {{.What}}</span>
+      {{if .Stale}}<span class="badge approval-stale-chip" data-tone="warning">may be stale</span>{{else if .Unchecked}}<span class="badge approval-unchecked-chip" data-tone="neutral">not checked</span>{{end}}
+      <span class="line-age">{{.Age}}</span>
+    </summary>
+    <section class="approval-body">
+      <p class="muted approval-when">Asked {{.Age}} &middot; {{.ExpiresIn}} to decide</p>
+      {{if .Stale}}<p class="approval-stale" role="note"><strong>May be stale:</strong> {{.Stale}} {{template "decide-hint" .}} (This note is not part of the text you sign.)</p>{{else if .Unchecked}}<p class="approval-stale" role="note"><strong>Could not check:</strong> whether this would still run now ({{.Unchecked}}). {{template "decide-hint" .}} (This note is not part of the text you sign.)</p>{{end}}
+      <div class="approval-text" id="card-{{.ID}}" data-display-sha256="{{.DisplaySHA}}">{{template "cardtext" .}}</div>
+      {{if .PhoneCode}}<p class="phone-code">Phone number for this request: <strong class="phone-code-number">{{.PhoneCode}}</strong> <span class="muted">(tap this one on your phone; not part of the text above)</span></p>{{end}}
+      <details class="approval-fp"><summary>Fingerprint of this text</summary><p class="muted">display_sha256 <code>{{.DisplaySHA}}</code><br>This page hashes the text above and checks it against this fingerprint before it asks for your passkey. The passkey signature covers it.</p></details>
+    </section>
+    <footer class="approval-actions">
+      <label for="reason-{{.ID}}">Reason, if you deny</label>
+      <input id="reason-{{.ID}}" class="input" type="text" maxlength="500" autocomplete="off" placeholder="Needed only to deny">
+      {{if .Split}}<button class="btn approval-approve" type="button" data-action="approve"{{if .Restricted}} disabled{{end}}>Approve with Windows Hello</button>{{else}}<p class="approval-old">This request was made by an older version of Chaperone, so it cannot be approved here. Deny it, or let it run out; the orchestrator has to ask again.</p>{{end}}
+      <button class="btn approval-deny" data-variant="destructive" type="button" data-action="deny"{{if .Restricted}} disabled{{end}}>Deny</button>
+    </footer>
+    <p class="approval-status" role="status" aria-live="polite"></p>
+  </details>
+</article>
+{{end}}
+
+{{/* The one artwork: a doorway, shown beside sign-in, enrol and the error page. */}}
+{{define "doorway"}}
+<figure>
+  <img src="/static/art/doorway.jpg" alt="" width="444" height="625" decoding="async">
+  <figcaption>Elevation of Rustic Doric Doorway, after Robert Morris, 18th century. The Metropolitan Museum of Art, CC0.</figcaption>
+</figure>
+{{end}}
+
+{{/* An approval's state as a badge. The word is always shown; the colour only adds to it. "consumed" is the engine's word for an approval the operation used. */}}
+{{define "state-badge"}}<span class="badge" data-tone="{{if eq . "approved"}}success{{else if eq . "denied"}}danger{{else if eq . "pending"}}warning{{else if eq . "consumed"}}info{{else}}neutral{{end}}">{{if eq . "consumed"}}approved and used{{else if eq . "approved"}}approved, not used yet{{else if eq . "cancelled"}}withdrawn{{else}}{{.}}{{end}}</span>{{end}}

@@ -1,0 +1,12 @@
+$ chap issue open --title "TypeError in /api/orders" --label source:error-watcher,bug --body-file /work/body.md --repo example-org/storefront --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"issue.open","params":{"body":"Seen 3 times.\n","labels":["source:error-watcher","bug"],"title":"TypeError in /api/orders"},"project":"storefront","target":{"adapter":"github","ref":"example-org/storefront"}}
+--- stdout
+issue.open example-org/storefront: succeeded
+id: q-8e1a40  class: routine  policy: baseline-2026.10.1
+execution: x-9f2c11
+external_ref: https://github.com/example-org/storefront/issues/301
+--- stderr

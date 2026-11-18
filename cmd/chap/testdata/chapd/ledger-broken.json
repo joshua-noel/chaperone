@@ -1,0 +1,1 @@
+{"ok":false,"chain":"chaperone.main","head_seq":1042,"head_hash":"sha256:abababababababababababababababababababababababababababababababab","checked_export":true,"problems":["seq 877: prev_hash does not match seq 876","export 2026-10-23 has 311 events, chain has 312"]}

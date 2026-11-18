@@ -1,0 +1,9 @@
+$ chap op show q-3k9d2m
+exit: 8
+--- request
+GET /v0/ops/q-3k9d2m
+auth: run
+--- stdout
+--- stderr
+NOT FOUND
+why: no such op for this caller

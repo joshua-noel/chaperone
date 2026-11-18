@@ -1,0 +1,12 @@
+$ chap dev-token --project acme-shop --repo acme/shop --branch b --path docs/** --op pr.open --out run.token
+exit: 3
+--- request
+POST /v0/dev-tokens
+auth: run
+{"base":"main","branch":"b","minutes":60,"ops":["pr.open"],"paths":["docs/**"],"profile":"host-interim","project":"acme-shop","repo":"acme/shop"}
+--- stdout
+--- stderr
+DENIED op pr.merge (profile docs, run r-7f3a)
+cause: OP_NOT_IN_TOKEN
+why: pr.merge is not in this run's token
+request: chap request scope --reason "<why the task needs pr.merge>"

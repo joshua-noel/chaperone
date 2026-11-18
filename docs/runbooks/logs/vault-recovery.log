@@ -1,0 +1,83 @@
+﻿# Run log: runbook vault-recovery.md (recover the vault with the offline identity)
+# Executed 2026-10-24 15:43:40 -04:00 on the server as a normal (not elevated) user, Windows PowerShell 5.1.26100.9711.
+# Scratch root: %USERPROFILE%\AppData\Local\Temp\chapdocs\scratch-vault (a temp dir; D:\Chaperone\data was not touched).
+# Lines starting with 'PS>' are commands exactly as the runbook gives them (paths in variables); '#' lines are notes.
+
+
+# Scratch setup (not runbook steps): a vault made the way install.ps1 -WithVault makes it, with two secrets, and the recovery identity put on a "USB stick" ($S\usb) as the offline place.
+PS> & $chapd vault init -db $db
+Chaperone vault initialised.
+
+RECOVERY IDENTITY - shown once, not stored anywhere on this PC:
+
+  AGE-SECRET-KEY-1<scratch identity, masked in this log>
+
+Copy it to the offline place now (print it, or write it to a USB drive in the
+safe). Anyone who holds it can decrypt every secret in the vault; if you lose
+it and this PC's service profile breaks, the secrets cannot be recovered.
+
+Recovery recipient (public half, stored in the index): age1y2hr0x68a9c5wmlh28d8dpljrz3tuzfprftyck33xk8q3flvgqjsjmrjg9
+PS> & $chapd vault import --name github-app-key --file "$S\app.pem" --delete -db $db
+imported github-app-key (github-app-key), fingerprint 08d616ebc90f572dc89e2d2de1a7f34e
+deleted %USERPROFILE%\AppData\Local\Temp\chapdocs\scratch-vault\app.pem
+# exit code: 0
+PS> & $chapd vault import --name ntfy-topic --kind ntfy-topic --file "$S\topic.txt" --delete -db $db
+imported ntfy-topic (ntfy-topic), fingerprint fb6f933775705e7917e3017b57711b04
+deleted %USERPROFILE%\AppData\Local\Temp\chapdocs\scratch-vault\topic.txt
+# exit code: 0
+PS> & $chapd vault list -db $db
+ID              KIND            PROJECT  FINGERPRINT                       CREATED               LAST USED
+github-app-key  github-app-key           08d616ebc90f572dc89e2d2de1a7f34e  2026-10-24T19:43:44Z  never
+ntfy-topic      ntfy-topic               fb6f933775705e7917e3017b57711b04  2026-10-24T19:43:44Z  never
+# exit code: 0
+
+# THE LOSS. The scratch run cannot reset a Windows account (no administrator). It stands in by overwriting the two DPAPI-wrapped key files with bytes DPAPI cannot unwrap, which is what a reset account sees. The ciphertext files, state.db and the index stay.
+
+# Runbook: step "confirm the vault does not open"
+PS> & $chapd vault list -db $db
+chapd: vault: dpapi-user: CryptUnprotectData: The parameter is incorrect.
+# exit code: 1
+
+# Runbook: step "keep a copy before you change anything"
+PS> Copy-Item -Recurse $root "$root.before-recover"; (Get-ChildItem -Recurse "$root.before-recover" -File).Count
+5
+# exit code: 0
+
+# Runbook: step "the wrong identity is refused and nothing changes"
+PS> "AGE-SECRET-KEY-1<scratch identity, masked in this log>" | & $chapd vault recover -db $db
+chapd: reading the recovery identity (AGE-SECRET-KEY-1...) from standard input
+chapd: vault: that is not this vault's recovery identity: it is not an age identity
+# exit code: 1
+
+# Runbook: step "recover" (the identity comes from the offline copy, on standard input)
+PS> Get-Content $offline | & $chapd vault recover -db $db
+chapd: reading the recovery identity (AGE-SECRET-KEY-1...) from standard input
+recovered: 2 secrets re-keyed to a new service identity (the recovery identity is unchanged)
+start chapd again, then run: chapd vault list
+# exit code: 0
+
+# Runbook: step "check"
+PS> & $chapd vault list -db $db
+ID              KIND            PROJECT  FINGERPRINT                       CREATED               LAST USED
+github-app-key  github-app-key           d5ee2b76e3ff7a097b90a1d87349c986  2026-10-24T19:43:44Z  never
+ntfy-topic      ntfy-topic               883ac5e1ec432acfe94ea9906c2b2211  2026-10-24T19:43:44Z  never
+# exit code: 0
+PS> Get-ChildItem "$root\vault-keys" -Recurse | Select-Object -ExpandProperty FullName | ForEach-Object { $_.Replace($S, "<scratch>") }
+<scratch>\data\vault-keys\retired-20261024T194345Z
+<scratch>\data\vault-keys\vault-fpkey.dpapi
+<scratch>\data\vault-keys\vault-identity.dpapi
+<scratch>\data\vault-keys\retired-20261024T194345Z\vault-fpkey.dpapi
+<scratch>\data\vault-keys\retired-20261024T194345Z\vault-identity.dpapi
+# exit code: 0
+PS> Get-Content $offline | & $chapd vault recover -db $db
+chapd: reading the recovery identity (AGE-SECRET-KEY-1...) from standard input
+chapd: vault: the vault opens normally; nothing to recover
+# exit code: 1
+
+# Start chapd with the vault and ask it for the vault status as the orchestrator would (scratch key set and token as in the orchestrator-token log):
+PS> & $chap vault status
+AUTH FAILED: chapd could not identify the caller
+why: unknown orchestrator token
+request: not possible, policy does not allow asking
+check CHAP_RUN_TOKEN or the orchestrator token file
+# exit code: 4

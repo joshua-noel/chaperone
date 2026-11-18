@@ -1,0 +1,1 @@
+{"spec_version":"0","type":"denial","denial_id":"d-4t5y6u","run_id":"r-7f3a","project":"acme-shop","profile":"code","at":"2026-10-24T09:12:40Z","surface":"op","action":{"verb":"request","target":"deploy"},"cause_code":"OP_DISABLED","why":"disabled; the token was @TOKEN@ and @ORCH@","request":{"possible":false},"thrash":{"count":1,"window_seconds":300,"flagged":false}}

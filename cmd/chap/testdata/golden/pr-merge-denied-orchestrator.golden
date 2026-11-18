@@ -1,0 +1,12 @@
+$ chap pr merge 214 --head 0588aa4ee0116267162e895016bcfda9ec3a3e2c --repo acme/shop --project acme-shop
+exit: 3
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"pr.merge","params":{"base":"main","head_sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c","method":"squash"},"project":"acme-shop","target":{"adapter":"github","ref":"acme/shop#214"}}
+--- stdout
+--- stderr
+DENIED merge on acme/shop#214 (orchestrator main)
+cause: OP_APPROVAL_REQUIRED
+why: pr.merge needs an approval for this exact head
+request: chap request op pr.merge --reason "<why the merge is needed>"

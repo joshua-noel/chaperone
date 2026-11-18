@@ -1,0 +1,8 @@
+$ chap intake comment ops-12 --body x
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the issue must be an identifier such as SHOP-12
+usage: chap intake comment <SHOP-12> [--body <b> | --body-file <f>]

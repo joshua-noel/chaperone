@@ -1,0 +1,7 @@
+$ chap frobnicate
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: unknown command "frobnicate" (chap help lists the commands)

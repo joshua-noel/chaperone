@@ -1,0 +1,20 @@
+$ chap intake comment SHOP-12 --body-file /work/note.md --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"intake.comment","params":{"body":"Picked up by the orchestrator.\n"},"project":"storefront","target":{"adapter":"linear","ref":"SHOP-12"}}
+--- stdout
+intake.comment SHOP-12: succeeded
+id: q-3c4d5e  class: routine  policy: baseline-2026.10.1
+execution: x-5e6f7a
+external_ref: https://linear.app/example/issue/SHOP-12#comment-9f8e7d6c
+result:
+  comment_id: 9f8e7d6c-1b2a-4c3d-8e4f-5a6b7c8d9e0f
+  identifier: SHOP-12
+  url: https://linear.app/example/issue/SHOP-12#comment-9f8e7d6c
+checks:
+  ok   team: SHOP
+  ok   label: claude
+  ok   issue: SHOP-12 is Todo
+--- stderr

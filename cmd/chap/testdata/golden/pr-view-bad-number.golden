@@ -1,0 +1,8 @@
+$ chap pr view x --repo example-org/storefront
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the PR number must be a positive integer
+usage: chap pr view <n> [--repo owner/name] [--dry-run]

@@ -1,0 +1,2099 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory-spec.invalid/v0/ledger-event.schema.json",
+  "title": "Ledger event",
+  "description": "One record in a run ledger. The shape follows the OpenTelemetry log record data model (time_unix_nano, trace_id, span_id, severity, event_name, resource, attributes, body) so it exports to OTLP without translation, with a hash-chain envelope (chain, seq, prev_hash, hash) added for tamper evidence. hash = SHA-256 over the RFC 8785 (JCS) form of the event with the 'hash' member removed, written 'sha256:<hex>'. prev_hash is the previous event's hash in the same chain; the first event (seq 0) uses the all-zero digest. Each writer (the runner, Chaperone) keeps its own chain, written outside any sandbox; events are linked across chains by run_id and trace_id. trace_id is the first 16 bytes of SHA-256(run_id) in lowercase hex, so every component derives the same trace without coordination. Lead time is recorded as phase.end events with phase in queue, setup, run, wait, review. Attributes are closed per event_name: unknown attributes are rejected. Writers: the runner writes run lifecycle, sandbox, network, package and phase events; Chaperone writes op.*, vault.write, console.login, console.refused, report.verify and denials of operations, and also stop.raise/stop.ack/stop.clear for stops it detects (CI_RED, CI_STALE, POLICY_BREACH, TOKEN_MISUSE, APPROVAL_FLOOD). For Phase 1 interim host runs Chaperone writes grant, run.start and run.end itself (isolation 'host', profile 'host-interim').",
+  "type": "object",
+  "properties": {
+    "spec_version": {
+      "$ref": "common.schema.json#/$defs/spec_version"
+    },
+    "chain": {
+      "description": "Chain identifier, one per writer instance, for example 'runner.host-1'.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*$",
+      "maxLength": 64
+    },
+    "seq": {
+      "description": "0-based, increments by exactly 1 within a chain.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "prev_hash": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "hash": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "time_unix_nano": {
+      "$ref": "common.schema.json#/$defs/unix_nano"
+    },
+    "trace_id": {
+      "description": "OTel trace id; see the schema description for its derivation. Not all zeros.",
+      "type": "string",
+      "pattern": "^(?!0{32}$)[0-9a-f]{32}$"
+    },
+    "span_id": {
+      "type": "string",
+      "pattern": "^(?!0{16}$)[0-9a-f]{16}$"
+    },
+    "parent_span_id": {
+      "type": "string",
+      "pattern": "^(?!0{16}$)[0-9a-f]{16}$"
+    },
+    "severity_number": {
+      "description": "OTel severity number: 1-4 TRACE, 5-8 DEBUG, 9-12 INFO, 13-16 WARN, 17-20 ERROR, 21-24 FATAL.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 24
+    },
+    "severity_text": {
+      "enum": [
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "FATAL"
+      ]
+    },
+    "event_name": {
+      "enum": [
+        "brief.accept",
+        "brief.reject",
+        "grant",
+        "phase.end",
+        "run.start",
+        "run.end",
+        "process.exec",
+        "pkg.admit",
+        "pkg.deny",
+        "net.allow",
+        "net.deny",
+        "denial",
+        "model.usage",
+        "credential.use",
+        "token.revoke",
+        "trace.gap",
+        "op.request",
+        "op.approve",
+        "op.result",
+        "vault.write",
+        "console.login",
+        "console.refused",
+        "report.submit",
+        "report.verify",
+        "stop.raise",
+        "stop.ack",
+        "stop.clear",
+        "ledger.anchor"
+      ]
+    },
+    "resource": {
+      "description": "OTel resource: the producing service. Names follow the service.* semantic conventions.",
+      "type": "object",
+      "properties": {
+        "service.name": {
+          "enum": [
+            "runner",
+            "chaperone"
+          ]
+        },
+        "service.version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "service.instance.id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "service.name",
+        "service.instance.id"
+      ],
+      "additionalProperties": false
+    },
+    "run_id": {
+      "$ref": "common.schema.json#/$defs/run_id"
+    },
+    "project": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "attributes": {
+      "type": "object"
+    },
+    "body": {
+      "description": "Optional human-readable line. Redacted: never a secret.",
+      "type": "string",
+      "maxLength": 1000
+    }
+  },
+  "required": [
+    "spec_version",
+    "chain",
+    "seq",
+    "prev_hash",
+    "hash",
+    "time_unix_nano",
+    "trace_id",
+    "span_id",
+    "severity_number",
+    "event_name",
+    "resource",
+    "attributes"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "seq": {
+            "const": 0
+          }
+        },
+        "required": [
+          "seq"
+        ]
+      },
+      "then": {
+        "properties": {
+          "prev_hash": {
+            "const": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "prev_hash": {
+            "not": {
+              "const": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Run-scoped events carry run_id and project. Events with no run (brief.reject, stop.*, ledger.anchor, the console events) may omit run_id. op.request, op.approve, op.result, vault.write and denial carry factory.requester.kind: 'run' requires run_id, 'orchestrator' forbids it. All five still carry project.",
+      "if": {
+        "properties": {
+          "event_name": {
+            "enum": [
+              "brief.reject",
+              "stop.raise",
+              "stop.ack",
+              "stop.clear",
+              "ledger.anchor",
+              "op.request",
+              "op.approve",
+              "op.result",
+              "denial",
+              "vault.write",
+              "console.login",
+              "console.refused"
+            ]
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "else": {
+        "required": [
+          "run_id",
+          "project"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "enum": [
+              "op.request",
+              "op.approve",
+              "op.result",
+              "denial",
+              "vault.write"
+            ]
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "enum": [
+              "op.request",
+              "op.approve",
+              "op.result",
+              "denial",
+              "vault.write"
+            ]
+          },
+          "attributes": {
+            "properties": {
+              "factory.requester.kind": {
+                "const": "run"
+              }
+            },
+            "required": [
+              "factory.requester.kind"
+            ]
+          }
+        },
+        "required": [
+          "event_name",
+          "attributes"
+        ]
+      },
+      "then": {
+        "required": [
+          "run_id"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "enum": [
+              "op.request",
+              "op.approve",
+              "op.result",
+              "denial",
+              "vault.write"
+            ]
+          },
+          "attributes": {
+            "properties": {
+              "factory.requester.kind": {
+                "const": "orchestrator"
+              }
+            },
+            "required": [
+              "factory.requester.kind"
+            ]
+          }
+        },
+        "required": [
+          "event_name",
+          "attributes"
+        ]
+      },
+      "then": {
+        "properties": {
+          "run_id": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "brief.accept"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_brief_accept"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "brief.reject"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_brief_reject"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "grant"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_grant"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "phase.end"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_phase_end"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "run.start"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_run_start"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "run.end"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_run_end"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "process.exec"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_process_exec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "pkg.admit"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_pkg_admit"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "pkg.deny"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_pkg_deny"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "net.allow"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_net_allow"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "net.deny"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_net_deny"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "denial"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_denial"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "model.usage"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_model_usage"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "op.request"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_op_request"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "op.approve"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_op_approve"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "op.result"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_op_result"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "report.submit"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_report_submit"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "report.verify"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_report_verify"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "stop.raise"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_stop_raise"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "stop.ack"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_stop_ack"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "stop.clear"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_stop_clear"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "ledger.anchor"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_ledger_anchor"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "credential.use"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_credential_use"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "token.revoke"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_token_revoke"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "trace.gap"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_trace_gap"
+          }
+        }
+      }
+    },
+    {
+      "description": "The console events are about the console, never about one run.",
+      "if": {
+        "properties": {
+          "event_name": {
+            "enum": [
+              "console.login",
+              "console.refused"
+            ]
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "run_id": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "vault.write"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_vault_write"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "console.login"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_console_login"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_name": {
+            "const": "console.refused"
+          }
+        },
+        "required": [
+          "event_name"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "$ref": "#/$defs/a_console_refused"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "phase": {
+      "description": "Lead-time phases, disjoint and exhaustive from brief acceptance to final review. queue: accepted until a slot in the next scarce stage is granted. setup: slot granted until the agent can start (sandbox, clone, context assembled). run: agent working. wait: run blocked on something outside the agent (CI, an approval, a dependency). review: output ready until a reviewer or human accepts or rejects it (can end after run.end).",
+      "enum": [
+        "queue",
+        "setup",
+        "run",
+        "wait",
+        "review"
+      ]
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "requester_identity": {
+      "description": "An event caused by an orchestrator names it (factory.orchestrator.id); an event caused by a run never does (its run_id is on the envelope).",
+      "if": {
+        "properties": {
+          "factory.requester.kind": {
+            "const": "orchestrator"
+          }
+        },
+        "required": [
+          "factory.requester.kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "factory.orchestrator.id"
+        ]
+      },
+      "else": {
+        "properties": {
+          "factory.orchestrator.id": false
+        }
+      }
+    },
+    "stop_id": {
+      "type": "string",
+      "pattern": "^s-[0-9a-z]{6,32}$"
+    },
+    "a_brief_accept": {
+      "type": "object",
+      "properties": {
+        "factory.brief.sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.profile.name": {
+          "$ref": "common.schema.json#/$defs/profile_kind"
+        },
+        "factory.profile.version": {
+          "$ref": "common.schema.json#/$defs/semver"
+        },
+        "factory.lane": {
+          "enum": [
+            "normal",
+            "express"
+          ]
+        }
+      },
+      "required": [
+        "factory.brief.sha256",
+        "factory.profile.name",
+        "factory.lane"
+      ],
+      "additionalProperties": false
+    },
+    "a_brief_reject": {
+      "type": "object",
+      "properties": {
+        "factory.cause_code": {
+          "enum": [
+            "BRIEF_INVALID",
+            "BRIEF_OPS_EXCEED_PROFILE",
+            "BRIEF_POLICY_REFUSED",
+            "BRIEF_DEPENDENCY_UNKNOWN"
+          ]
+        },
+        "factory.brief.sha256": {
+          "description": "Of the raw submitted bytes when the brief could not be parsed.",
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.errors": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "common.schema.json#/$defs/short_text"
+          }
+        }
+      },
+      "required": [
+        "factory.cause_code",
+        "factory.errors"
+      ],
+      "additionalProperties": false
+    },
+    "a_grant": {
+      "type": "object",
+      "properties": {
+        "factory.token.jti": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,64}$"
+        },
+        "factory.token.exp": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "factory.brief.sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.profile.digest": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.scope.ops": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/op_kind"
+          }
+        },
+        "factory.isolation": {
+          "$ref": "common.schema.json#/$defs/run_isolation"
+        }
+      },
+      "required": [
+        "factory.token.jti",
+        "factory.token.exp",
+        "factory.brief.sha256",
+        "factory.isolation",
+        "factory.scope.ops"
+      ],
+      "additionalProperties": false,
+      "description": "The token grant. factory.profile.digest is required unless factory.isolation is 'host' (interim token: no signed profile), where it must be absent.",
+      "if": {
+        "properties": {
+          "factory.isolation": {
+            "const": "host"
+          }
+        },
+        "required": [
+          "factory.isolation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "factory.profile.digest": false
+        }
+      },
+      "else": {
+        "required": [
+          "factory.profile.digest"
+        ]
+      }
+    },
+    "a_phase_end": {
+      "type": "object",
+      "properties": {
+        "factory.phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "factory.phase.duration_ms": {
+          "$ref": "#/$defs/count"
+        },
+        "factory.phase.wait_reason": {
+          "enum": [
+            "ci",
+            "approval",
+            "dependency",
+            "other"
+          ]
+        }
+      },
+      "required": [
+        "factory.phase",
+        "factory.phase.duration_ms"
+      ],
+      "if": {
+        "properties": {
+          "factory.phase": {
+            "const": "wait"
+          }
+        },
+        "required": [
+          "factory.phase"
+        ]
+      },
+      "then": {
+        "required": [
+          "factory.phase.wait_reason"
+        ]
+      },
+      "else": {
+        "properties": {
+          "factory.phase.wait_reason": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "a_run_start": {
+      "type": "object",
+      "properties": {
+        "factory.profile.name": {
+          "$ref": "common.schema.json#/$defs/run_profile"
+        },
+        "factory.profile.version": {
+          "$ref": "common.schema.json#/$defs/semver"
+        },
+        "factory.isolation": {
+          "$ref": "common.schema.json#/$defs/run_isolation"
+        },
+        "factory.context.files": {
+          "description": "Context files the agent was shown (AGENTS.md, SKILL.md, CLAUDE.md and the like), read from the brief's base commit, each with the SHA-256 of the bytes shown. Absent when none were shown. The profile prompt is not listed: profile.digest already pins it.",
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "$ref": "common.schema.json#/$defs/repo_path"
+              },
+              "sha256": {
+                "$ref": "common.schema.json#/$defs/sha256"
+              }
+            },
+            "required": [
+              "path",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "factory.profile.name",
+        "factory.profile.version",
+        "factory.isolation"
+      ],
+      "additionalProperties": false
+    },
+    "a_run_end": {
+      "description": "Plan against actual, per run.",
+      "type": "object",
+      "properties": {
+        "factory.outcome": {
+          "enum": [
+            "done",
+            "failed",
+            "killed",
+            "blocked"
+          ]
+        },
+        "factory.cause_code": {
+          "$ref": "common.schema.json#/$defs/cause_code"
+        },
+        "factory.plan.minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "factory.plan.tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "factory.actual.minutes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "factory.actual.tokens": {
+          "$ref": "#/$defs/count"
+        }
+      },
+      "required": [
+        "factory.outcome",
+        "factory.plan.minutes",
+        "factory.plan.tokens",
+        "factory.actual.minutes",
+        "factory.actual.tokens"
+      ],
+      "if": {
+        "properties": {
+          "factory.outcome": {
+            "const": "killed"
+          }
+        },
+        "required": [
+          "factory.outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "factory.cause_code"
+        ]
+      },
+      "additionalProperties": false
+    },
+    "a_process_exec": {
+      "type": "object",
+      "properties": {
+        "process.command_line": {
+          "description": "Redacted.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "process.pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "process.exit.code": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "process.command_line",
+        "process.pid"
+      ],
+      "additionalProperties": false
+    },
+    "pkg_base": {
+      "type": "object",
+      "properties": {
+        "factory.pkg.ecosystem": {
+          "enum": [
+            "npm",
+            "pypi",
+            "oci",
+            "other"
+          ]
+        },
+        "factory.pkg.name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 214
+        },
+        "factory.pkg.version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "factory.pkg.age_days": {
+          "description": "Days since the version was published, at decision time.",
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "factory.pkg.ecosystem",
+        "factory.pkg.name",
+        "factory.pkg.version",
+        "factory.pkg.age_days"
+      ]
+    },
+    "a_pkg_admit": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/pkg_base"
+        }
+      ],
+      "properties": {
+        "factory.pkg.ecosystem": true,
+        "factory.pkg.name": true,
+        "factory.pkg.version": true,
+        "factory.pkg.age_days": true
+      },
+      "unevaluatedProperties": false
+    },
+    "a_pkg_deny": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/pkg_base"
+        }
+      ],
+      "properties": {
+        "factory.pkg.ecosystem": true,
+        "factory.pkg.name": true,
+        "factory.pkg.version": true,
+        "factory.pkg.age_days": true,
+        "factory.cause_code": {
+          "enum": [
+            "PKG_IN_COOLDOWN",
+            "PKG_NOT_ADMITTED",
+            "IMAGE_NOT_ADMITTED"
+          ]
+        },
+        "factory.pkg.cooldown_days": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "factory.cause_code"
+      ],
+      "unevaluatedProperties": false
+    },
+    "a_net_allow": {
+      "type": "object",
+      "properties": {
+        "server.address": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "server.port": {
+          "$ref": "#/$defs/port"
+        },
+        "network.transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "factory.net.would_deny": {
+          "description": "true only in log-only enforcement: the request was let through but the allowlist would have refused it. Always false in deny mode.",
+          "type": "boolean"
+        },
+        "factory.cause_code": {
+          "enum": [
+            "NET_HOST_NOT_ALLOWED",
+            "NET_IP_LITERAL",
+            "NET_PRIVATE_RANGE"
+          ]
+        },
+        "factory.net.bytes_out": {
+          "$ref": "#/$defs/count"
+        },
+        "factory.net.bytes_in": {
+          "$ref": "#/$defs/count"
+        }
+      },
+      "required": [
+        "server.address",
+        "server.port",
+        "network.transport",
+        "factory.net.would_deny"
+      ],
+      "if": {
+        "properties": {
+          "factory.net.would_deny": {
+            "const": true
+          }
+        },
+        "required": [
+          "factory.net.would_deny"
+        ]
+      },
+      "then": {
+        "required": [
+          "factory.cause_code"
+        ]
+      },
+      "else": {
+        "properties": {
+          "factory.cause_code": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "a_net_deny": {
+      "type": "object",
+      "properties": {
+        "server.address": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "server.port": {
+          "$ref": "#/$defs/port"
+        },
+        "network.transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "factory.cause_code": {
+          "enum": [
+            "NET_HOST_NOT_ALLOWED",
+            "NET_IP_LITERAL",
+            "NET_PRIVATE_RANGE"
+          ]
+        }
+      },
+      "required": [
+        "server.address",
+        "server.port",
+        "network.transport",
+        "factory.cause_code"
+      ],
+      "additionalProperties": false
+    },
+    "a_denial": {
+      "type": "object",
+      "properties": {
+        "factory.denial.id": {
+          "type": "string",
+          "pattern": "^d-[0-9a-z]{6,32}$"
+        },
+        "factory.surface": {
+          "$ref": "denial.schema.json#/properties/surface"
+        },
+        "factory.cause_code": {
+          "$ref": "denial.schema.json#/properties/cause_code"
+        },
+        "factory.thrash.count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "factory.requester.kind": {
+          "description": "Who caused the event: a run (run_id required) or the orchestrator acting in its own session (run_id absent).",
+          "enum": [
+            "run",
+            "orchestrator"
+          ]
+        },
+        "factory.orchestrator.id": {
+          "description": "The orchestrator session that caused the event (docs/spec.md, section 5). Present exactly when factory.requester.kind is orchestrator; the same value as the request's requester.id.",
+          "$ref": "common.schema.json#/$defs/orchestrator_id"
+        }
+      },
+      "required": [
+        "factory.denial.id",
+        "factory.surface",
+        "factory.cause_code",
+        "factory.thrash.count",
+        "factory.requester.kind"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/requester_identity"
+        }
+      ]
+    },
+    "a_model_usage": {
+      "description": "One term group of the cost equation (requests x tokens x price): the usage of factory.usage.requests model calls by one provider and model, summed. gen_ai.* follow the OTel GenAI semantic conventions at the commit pinned in docs/spec.md section 8 (still marked in development upstream). Token counts follow the OTel rule: gen_ai.usage.input_tokens INCLUDES cache read and cache write tokens, so cache_read + cache_write <= input_tokens. Providers that report input_tokens WITHOUT the cache tokens (the Anthropic Messages API) are normalized by the adapter before the event is written (docs/spec.md, 'Token counts'). Uncached input = input_tokens - cache_read - cache_write.",
+      "type": "object",
+      "properties": {
+        "gen_ai.provider.name": {
+          "description": "The provider as OTel names it. Use the well-known value when one applies (anthropic, openai, aws.bedrock, gcp.vertex_ai, gcp.gemini, azure.ai.openai, azure.ai.inference, cohere, deepseek, groq, ibm.watsonx.ai, mistral, moonshot_ai, perplexity, x_ai, gcp.gen_ai); otherwise a custom lowercase value. Adapters key their token normalization on it.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.]{0,63}$"
+        },
+        "gen_ai.request.model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "gen_ai.usage.input_tokens": {
+          "description": "All input tokens, including gen_ai.usage.cache_read.input_tokens and gen_ai.usage.cache_write.input_tokens.",
+          "$ref": "#/$defs/count"
+        },
+        "gen_ai.usage.output_tokens": {
+          "$ref": "#/$defs/count"
+        },
+        "gen_ai.usage.cache_read.input_tokens": {
+          "description": "Input tokens served from a provider-managed cache. A subset of gen_ai.usage.input_tokens.",
+          "$ref": "#/$defs/count"
+        },
+        "gen_ai.usage.cache_write.input_tokens": {
+          "description": "Input tokens written to a provider-managed cache. A subset of gen_ai.usage.input_tokens.",
+          "$ref": "#/$defs/count"
+        },
+        "factory.usage.requests": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "factory.usage.cost_usd": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "gen_ai.provider.name",
+        "gen_ai.request.model",
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens",
+        "gen_ai.usage.cache_read.input_tokens",
+        "gen_ai.usage.cache_write.input_tokens",
+        "factory.usage.requests"
+      ],
+      "additionalProperties": false
+    },
+    "a_credential_use": {
+      "description": "A credential was applied to an outgoing request on behalf of a run (proxy injection or an adapter call). Records which credential by reference name and scope class, and the target as host, method and path class. NEVER the value, a derivative of it, or a raw path or query: the reference name is a label chosen by policy, and the path class is a template. v0 covers HTTP(S) targets.",
+      "type": "object",
+      "properties": {
+        "factory.credential.ref": {
+          "description": "Name of the credential in the vault or policy (a label, never a value).",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,62}$"
+        },
+        "factory.credential.scope_class": {
+          "description": "What the credential allows on the target, in the coarsest terms: read, write or admin.",
+          "enum": [
+            "read",
+            "write",
+            "admin"
+          ]
+        },
+        "server.address": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "server.port": {
+          "$ref": "#/$defs/port"
+        },
+        "http.request.method": {
+          "enum": [
+            "GET",
+            "HEAD",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS"
+          ]
+        },
+        "factory.credential.path_class": {
+          "description": "A path template with placeholders instead of ids, for example /repos/{owner}/{repo}/pulls. Never a raw path or query.",
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9._~/{}*-]{0,199}$"
+        }
+      },
+      "required": [
+        "factory.credential.ref",
+        "factory.credential.scope_class",
+        "server.address",
+        "server.port",
+        "http.request.method",
+        "factory.credential.path_class"
+      ],
+      "additionalProperties": false
+    },
+    "a_token_revoke": {
+      "description": "A run token's jti entered the revocation set: from then on the token is refused (TOKEN_REVOKED). run_end: the run finished. stop: a stop from the stop table revoked the grant; factory.cause_code names the stop. operator: a human revoked it.",
+      "type": "object",
+      "properties": {
+        "factory.token.jti": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,64}$"
+        },
+        "factory.revoke.reason": {
+          "enum": [
+            "run_end",
+            "stop",
+            "operator"
+          ]
+        },
+        "factory.cause_code": {
+          "description": "The stop code. Present exactly when the reason is stop.",
+          "$ref": "common.schema.json#/$defs/cause_code"
+        }
+      },
+      "required": [
+        "factory.token.jti",
+        "factory.revoke.reason"
+      ],
+      "if": {
+        "properties": {
+          "factory.revoke.reason": {
+            "const": "stop"
+          }
+        },
+        "required": [
+          "factory.revoke.reason"
+        ]
+      },
+      "then": {
+        "required": [
+          "factory.cause_code"
+        ]
+      },
+      "else": {
+        "properties": {
+          "factory.cause_code": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "a_trace_gap": {
+      "description": "A hop did not carry the run's trace context (docs/spec.md, 'Trace context'). The run's events stay linked through run_id; third-party spans from that hop are not in the run's trace. hop: harness_env (no TRACEPARENT in the harness environment), mcp (no params._meta.traceparent on an MCP call), model_gateway (the model route did not forward it), op_request (a run's op request carried no usable traceparent). reason: absent, malformed, or foreign_trace_id (a valid traceparent for another trace).",
+      "type": "object",
+      "properties": {
+        "factory.trace.hop": {
+          "enum": [
+            "harness_env",
+            "mcp",
+            "model_gateway",
+            "op_request"
+          ]
+        },
+        "factory.trace.reason": {
+          "enum": [
+            "absent",
+            "malformed",
+            "foreign_trace_id"
+          ]
+        }
+      },
+      "required": [
+        "factory.trace.hop",
+        "factory.trace.reason"
+      ],
+      "additionalProperties": false
+    },
+    "a_op_request": {
+      "type": "object",
+      "properties": {
+        "factory.request_id": {
+          "type": "string",
+          "pattern": "^q-[0-9a-z]{6,32}$"
+        },
+        "factory.op": {
+          "$ref": "common.schema.json#/$defs/op_kind"
+        },
+        "factory.op_hash": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.reversibility": {
+          "description": "The catalog's reversibility for this op kind at request time: what the approver was told about undoing it.",
+          "$ref": "common.schema.json#/$defs/reversibility"
+        },
+        "factory.requester.kind": {
+          "description": "Who caused the event: a run (run_id required) or the orchestrator acting in its own session (run_id absent).",
+          "enum": [
+            "run",
+            "orchestrator"
+          ]
+        },
+        "factory.orchestrator.id": {
+          "description": "The orchestrator session that caused the event (docs/spec.md, section 5). Present exactly when factory.requester.kind is orchestrator; the same value as the request's requester.id.",
+          "$ref": "common.schema.json#/$defs/orchestrator_id"
+        }
+      },
+      "required": [
+        "factory.request_id",
+        "factory.op",
+        "factory.op_hash",
+        "factory.requester.kind"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/requester_identity"
+        }
+      ]
+    },
+    "a_op_approve": {
+      "type": "object",
+      "properties": {
+        "factory.approval.id": {
+          "type": "string",
+          "pattern": "^a-[0-9a-z]{6,32}$"
+        },
+        "factory.request_id": {
+          "type": "string",
+          "pattern": "^q-[0-9a-z]{6,32}$"
+        },
+        "factory.op_hash": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.decision": {
+          "enum": [
+            "approved",
+            "denied"
+          ]
+        },
+        "factory.approver.id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,62}$"
+        },
+        "factory.confirm.channels": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "pc",
+              "phone"
+            ]
+          }
+        },
+        "factory.policy_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "factory.requester.kind": {
+          "description": "Who caused the event: a run (run_id required) or the orchestrator acting in its own session (run_id absent).",
+          "enum": [
+            "run",
+            "orchestrator"
+          ]
+        },
+        "factory.orchestrator.id": {
+          "description": "The orchestrator session that caused the event (docs/spec.md, section 5). Present exactly when factory.requester.kind is orchestrator; the same value as the request's requester.id.",
+          "$ref": "common.schema.json#/$defs/orchestrator_id"
+        }
+      },
+      "required": [
+        "factory.approval.id",
+        "factory.request_id",
+        "factory.op_hash",
+        "factory.decision",
+        "factory.approver.id",
+        "factory.policy_version",
+        "factory.requester.kind"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/requester_identity"
+        }
+      ]
+    },
+    "a_op_result": {
+      "description": "Outcome of one release of an approved or allowed operation. refused: nothing was released (a precondition or policy said no), so there is no execution_id. succeeded and failed: the adapter ran under factory.execution_id and the service answered (external_ref is the service's id). unconfirmed: the action was dispatched under factory.execution_id but no service receipt arrived (crash, timeout), so what happened is unknown; a retry reuses the same execution_id and the adapter is idempotent per execution_id. An unconfirmed result has no external_ref and may be followed by one succeeded or failed result with the same execution_id once the service is asked.",
+      "type": "object",
+      "properties": {
+        "factory.request_id": {
+          "type": "string",
+          "pattern": "^q-[0-9a-z]{6,32}$"
+        },
+        "factory.op_hash": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.execution_id": {
+          "$ref": "common.schema.json#/$defs/execution_id"
+        },
+        "factory.outcome": {
+          "enum": [
+            "succeeded",
+            "refused",
+            "failed",
+            "unconfirmed"
+          ]
+        },
+        "factory.cause_code": {
+          "$ref": "common.schema.json#/$defs/cause_code"
+        },
+        "factory.policy_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "factory.external_ref": {
+          "description": "Where the result lives on the target (PR URL, deploy id): the service's own id, never ours. Never a secret. Absent when the outcome is unconfirmed.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "factory.requester.kind": {
+          "description": "Who caused the event: a run (run_id required) or the orchestrator acting in its own session (run_id absent).",
+          "enum": [
+            "run",
+            "orchestrator"
+          ]
+        },
+        "factory.orchestrator.id": {
+          "description": "The orchestrator session that caused the event (docs/spec.md, section 5). Present exactly when factory.requester.kind is orchestrator; the same value as the request's requester.id.",
+          "$ref": "common.schema.json#/$defs/orchestrator_id"
+        }
+      },
+      "required": [
+        "factory.request_id",
+        "factory.op_hash",
+        "factory.outcome",
+        "factory.policy_version",
+        "factory.requester.kind"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "factory.outcome": {
+                "const": "refused"
+              }
+            },
+            "required": [
+              "factory.outcome"
+            ]
+          },
+          "then": {
+            "required": [
+              "factory.cause_code"
+            ],
+            "properties": {
+              "factory.execution_id": false
+            }
+          },
+          "else": {
+            "required": [
+              "factory.execution_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "factory.outcome": {
+                "const": "unconfirmed"
+              }
+            },
+            "required": [
+              "factory.outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "factory.external_ref": false
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/requester_identity"
+        }
+      ],
+      "additionalProperties": false
+    },
+    "a_report_submit": {
+      "type": "object",
+      "properties": {
+        "factory.report.sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.report.result": {
+          "enum": [
+            "done",
+            "partial",
+            "blocked",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "factory.report.sha256",
+        "factory.report.result"
+      ],
+      "additionalProperties": false
+    },
+    "a_report_verify": {
+      "type": "object",
+      "properties": {
+        "factory.report.sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.verify.claims": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "claim": {
+                "$ref": "common.schema.json#/$defs/short_text"
+              },
+              "verdict": {
+                "enum": [
+                  "confirmed",
+                  "refuted",
+                  "unverifiable"
+                ]
+              }
+            },
+            "required": [
+              "claim",
+              "verdict"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "factory.verify.refuted": {
+          "$ref": "#/$defs/count"
+        }
+      },
+      "required": [
+        "factory.report.sha256",
+        "factory.verify.claims",
+        "factory.verify.refuted"
+      ],
+      "additionalProperties": false
+    },
+    "a_stop_raise": {
+      "type": "object",
+      "properties": {
+        "factory.stop.id": {
+          "$ref": "#/$defs/stop_id"
+        },
+        "factory.cause_code": {
+          "description": "A code from the stop table.",
+          "$ref": "common.schema.json#/$defs/cause_code"
+        },
+        "factory.halts": {
+          "enum": [
+            "run",
+            "dependents",
+            "all"
+          ]
+        },
+        "factory.action": {
+          "enum": [
+            "kill",
+            "quarantine",
+            "pause"
+          ]
+        }
+      },
+      "required": [
+        "factory.stop.id",
+        "factory.cause_code",
+        "factory.halts",
+        "factory.action"
+      ],
+      "additionalProperties": false
+    },
+    "a_stop_ack": {
+      "type": "object",
+      "properties": {
+        "factory.stop.id": {
+          "$ref": "#/$defs/stop_id"
+        },
+        "factory.ack.by": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,62}$"
+        }
+      },
+      "required": [
+        "factory.stop.id",
+        "factory.ack.by"
+      ],
+      "additionalProperties": false
+    },
+    "a_stop_clear": {
+      "type": "object",
+      "properties": {
+        "factory.stop.id": {
+          "$ref": "#/$defs/stop_id"
+        },
+        "factory.clear.by": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,62}$"
+        },
+        "factory.clear.mode": {
+          "enum": [
+            "manual",
+            "auto",
+            "approval"
+          ]
+        }
+      },
+      "required": [
+        "factory.stop.id",
+        "factory.clear.by",
+        "factory.clear.mode"
+      ],
+      "additionalProperties": false
+    },
+    "a_ledger_anchor": {
+      "description": "Checkpoint of the chain head, copied somewhere the ledger writer cannot rewrite. Covers every event before this one.",
+      "type": "object",
+      "properties": {
+        "factory.anchor.head_hash": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.anchor.head_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "factory.anchor.kind": {
+          "enum": [
+            "git-tag",
+            "transparency-log",
+            "offline-copy"
+          ]
+        },
+        "factory.anchor.ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "factory.anchor.head_hash",
+        "factory.anchor.head_seq",
+        "factory.anchor.kind",
+        "factory.anchor.ref"
+      ],
+      "additionalProperties": false
+    },
+    "a_vault_write": {
+      "description": "The vault stored (or failed to store) the secret that an approved secrets.write operation named. It records which secret and what happened, and NEVER the value, a hash of it, a keyed fingerprint, a prefix, or its length: the closed attribute list has no field that could hold one (the console may show a fingerprint; the ledger is exported and anchored). import creates a secret, rotate replaces the value of an existing one. The matching op.result (same request, same execution_id, same outcome) records the operation's outcome; checkVaultWrites verifies the pair and the approval before it. A failed write carries the cause code.",
+      "type": "object",
+      "properties": {
+        "factory.request_id": {
+          "type": "string",
+          "pattern": "^q-[0-9a-z]{6,32}$"
+        },
+        "factory.op_hash": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "factory.execution_id": {
+          "$ref": "common.schema.json#/$defs/execution_id"
+        },
+        "factory.outcome": {
+          "enum": [
+            "succeeded",
+            "failed"
+          ]
+        },
+        "factory.cause_code": {
+          "description": "Why the write failed. Present exactly when the outcome is failed.",
+          "$ref": "common.schema.json#/$defs/cause_code"
+        },
+        "factory.secret.id": {
+          "description": "The vault's name for the secret (a label, never a value).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+        },
+        "factory.secret.action": {
+          "enum": [
+            "import",
+            "rotate"
+          ]
+        },
+        "factory.secret.kind": {
+          "description": "What the secret is for, for example github-app-key or ntfy-topic.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "factory.requester.kind": {
+          "description": "Who caused the event: a run (run_id required) or the orchestrator acting in its own session (run_id absent).",
+          "enum": [
+            "run",
+            "orchestrator"
+          ]
+        },
+        "factory.orchestrator.id": {
+          "description": "The orchestrator session that caused the event (docs/spec.md, section 5). Present exactly when factory.requester.kind is orchestrator; the same value as the request's requester.id.",
+          "$ref": "common.schema.json#/$defs/orchestrator_id"
+        }
+      },
+      "required": [
+        "factory.request_id",
+        "factory.op_hash",
+        "factory.execution_id",
+        "factory.outcome",
+        "factory.secret.id",
+        "factory.secret.action",
+        "factory.secret.kind",
+        "factory.requester.kind"
+      ],
+      "allOf": [
+        {
+          "$ref": "#/$defs/requester_identity"
+        },
+        {
+          "if": {
+            "properties": {
+              "factory.outcome": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "factory.outcome"
+            ]
+          },
+          "then": {
+            "required": [
+              "factory.cause_code"
+            ]
+          },
+          "else": {
+            "properties": {
+              "factory.cause_code": false
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "a_console_login": {
+      "description": "An approver signed in to the console with a user-verified passkey assertion (Windows Hello on the server, the passkey on the phone). A session is weak authority: it lets the approver browse and approves nothing (every approval needs a fresh assertion over its own challenge). Always about the console, never about a run, so it has no run_id. A sign-in whose assertion lacks user verification is a refusal, never a login event (user_verified is the constant true).",
+      "type": "object",
+      "properties": {
+        "factory.approver.id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,62}$"
+        },
+        "factory.console.rp_id": {
+          "description": "The WebAuthn relying-party id of the origin the sign-in used.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "factory.console.user_verified": {
+          "const": true
+        }
+      },
+      "required": [
+        "factory.approver.id",
+        "factory.console.rp_id",
+        "factory.console.user_verified"
+      ],
+      "additionalProperties": false
+    },
+    "a_console_refused": {
+      "description": "The console refused a WebAuthn ceremony (sign-in, enrolment or an approval assertion). reason is a short lowercase code chosen by the writer, for example origin_mismatch, uv_missing, clone_warning or challenge_mismatch; a library's message or any text from the client is never recorded (it goes to the operational log). Any local process can trigger a refusal, so a writer MAY coalesce a burst into one event and say how many refusals it left out in factory.console.suppressed.",
+      "type": "object",
+      "properties": {
+        "factory.console.ceremony": {
+          "enum": [
+            "login",
+            "enroll",
+            "approve"
+          ]
+        },
+        "factory.console.reason": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,47}$"
+        },
+        "factory.console.rp_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "factory.console.suppressed": {
+          "description": "Refusals since the previous console.refused event that this writer did not record individually.",
+          "$ref": "#/$defs/count"
+        }
+      },
+      "required": [
+        "factory.console.ceremony",
+        "factory.console.reason"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

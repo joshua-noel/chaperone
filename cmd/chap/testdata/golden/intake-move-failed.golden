@@ -1,0 +1,15 @@
+$ chap intake move SHOP-12 --state Blocked --project storefront
+exit: 5
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"intake.move","params":{"state":"Blocked"},"project":"storefront","target":{"adapter":"linear","ref":"SHOP-12"}}
+--- stdout
+intake.move SHOP-12: failed
+id: q-5e6f7a  class: routine  policy: baseline-2026.10.1
+execution: x-7a8b9c
+result:
+  error: issue SHOP-12 does not carry the label "claude" now: the intake writes only to items labelled so
+  identifier: SHOP-12
+  to: Blocked
+--- stderr

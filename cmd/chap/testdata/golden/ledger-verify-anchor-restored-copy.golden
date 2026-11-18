@@ -1,0 +1,12 @@
+$ chap ledger verify --anchor --anchor-file /restore/chaperone.main.jsonl --anchor-pub PUBKEY
+exit: 5
+--- request
+POST /v0/ledger/verify
+auth: orchestrator
+{"against_export":false,"anchor":true,"anchor_keys":["PUBKEY"],"anchor_records":["{\"v\":1}","{\"v\":2}"]}
+--- stdout
+ledger NOT OK: chain chaperone.main, head seq 1042, hash sha256:abababababababababababababababababababababababababababababababab
+compared with 3 signed anchor record(s)
+newest anchor: head seq 1039, hash sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd, at 2026-10-24T10:00:00Z (the phone has the same two values)
+problem: ANCHOR_REWRITTEN seq 1039: the record for anchor seq 1040 says the head it covers (seq 1039) has hash sha256:cdcd, the chain has sha256:efef: events before the anchor were rewritten
+--- stderr

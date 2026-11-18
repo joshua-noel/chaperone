@@ -1,0 +1,47 @@
+{
+  "missing-op-hash.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "op_hash"
+    }
+  },
+  "op-hash-without-tag.json": {
+    "keyword": "pattern",
+    "instancePath": "/op_hash"
+  },
+  "params-not-an-object.json": {
+    "keyword": "type",
+    "instancePath": "/params"
+  },
+  "self-approval-field.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "",
+    "params": {
+      "additionalProperty": "approved"
+    }
+  },
+  "target-without-ref.json": {
+    "keyword": "required",
+    "instancePath": "/target",
+    "params": {
+      "missingProperty": "ref"
+    }
+  },
+  "traceparent-unsupported-version.json": {
+    "keyword": "pattern",
+    "instancePath": "/traceparent"
+  },
+  "traceparent-zero-trace-id.json": {
+    "keyword": "pattern",
+    "instancePath": "/traceparent"
+  },
+  "unknown-requester-kind.json": {
+    "keyword": "oneOf",
+    "instancePath": "/requester"
+  },
+  "wildcard-op.json": {
+    "keyword": "pattern",
+    "instancePath": "/op"
+  }
+}

@@ -1,0 +1,8 @@
+$ chap request op pr.merge --reason x
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: pr.merge has no usual target; pass --target adapter:ref
+usage: chap request op <op> --reason <why> [--params <json>] [--target <adapter>:<ref>]

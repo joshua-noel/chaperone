@@ -1,0 +1,13 @@
+$ chap health
+exit: 3
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+DENIED pr.merge on example-org/storefront#583 (orchestrator main)
+cause: OP_POLICY_REFUSED
+why: approval flood: 2 approvals already pending for this caller (limit 2)
+next: 2 requests are waiting for the operator; nothing more can be asked until he decides
+retry after 60 s

@@ -1,0 +1,36 @@
+{
+  "agent-detects-its-own-stop.json": {
+    "keyword": "enum",
+    "instancePath": "/entries/0/detected_by"
+  },
+  "extra-field.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "/entries/0",
+    "params": {
+      "additionalProperty": "severity"
+    }
+  },
+  "lowercase-cause-code.json": {
+    "keyword": "pattern",
+    "instancePath": "/entries/0/code"
+  },
+  "missing-action.json": {
+    "keyword": "required",
+    "instancePath": "/entries/0",
+    "params": {
+      "missingProperty": "action"
+    }
+  },
+  "no-entries.json": {
+    "keyword": "minItems",
+    "instancePath": "/entries"
+  },
+  "unknown-halts-value.json": {
+    "keyword": "enum",
+    "instancePath": "/entries/0/halts"
+  },
+  "zero-detection-target.json": {
+    "keyword": "minimum",
+    "instancePath": "/entries/0/detect_within_seconds"
+  }
+}

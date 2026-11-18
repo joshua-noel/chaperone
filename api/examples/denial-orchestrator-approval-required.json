@@ -1,0 +1,15 @@
+{
+  "spec_version": "0",
+  "type": "denial",
+  "denial_id": "d-6q2n8r",
+  "project": "acme-shop",
+  "at": "2026-10-24T09:12:40Z",
+  "surface": "op",
+  "action": { "verb": "merge", "target": "acme/shop#214" },
+  "cause_code": "OP_APPROVAL_REQUIRED",
+  "why": "pr.merge needs an approval for this exact head",
+  "request": { "possible": true, "command": "chap request op pr.merge --reason \"<why the merge is needed>\"" },
+  "thrash": { "count": 1, "window_seconds": 300, "flagged": false },
+  "policy_version": "baseline-2026.10.1",
+  "orchestrator_id": "main"
+}

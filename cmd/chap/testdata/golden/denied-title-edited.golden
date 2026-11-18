@@ -1,0 +1,12 @@
+$ chap health
+exit: 3
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+DENIED pr.merge on example-org/storefront#582 (orchestrator main)
+cause: OP_POLICY_REFUSED
+why: CI_STALE: title_approved: the pull request title is not the one the approver saw on the card; ask again for a new approval
+next: the PR title is not the one the operator approved: make sure it is a valid title (type(scope): description, 72 characters at most), then ask again so a new card shows the title as it is now

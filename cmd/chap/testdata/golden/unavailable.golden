@@ -1,0 +1,10 @@
+$ chap health
+exit: 6
+--- request
+POST /v0/ops
+auth: run
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+UNAVAILABLE (retryable): chapd failed closed, nothing ran
+why: the ledger could not commit; nothing ran

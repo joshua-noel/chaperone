@@ -1,0 +1,8 @@
+$ chap issue comment x --body y --repo example-org/storefront
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the issue number must be a positive integer
+usage: chap issue comment <n> [--body <b> | --body-file <f>] [--repo owner/name]

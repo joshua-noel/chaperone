@@ -1,0 +1,12 @@
+$ chap pr view 214 --repo example-org/storefront --project storefront
+exit: 3
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"pr.view","params":{},"project":"storefront","target":{"adapter":"github","ref":"example-org/storefront#214"}}
+--- stdout
+--- stderr
+DENIED pr.view on example-org/storefront#214 (orchestrator main)
+cause: OP_DISABLED
+why: pr.view is disabled by policy for storefront
+request: not possible, policy does not allow asking

@@ -1,0 +1,26 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 7,
+  "prev_hash": "sha256:dae987b56afdf3796278ab507169bec55ad378aded089e18b7713d69c58fa7ea",
+  "hash": "sha256:2ebbf7355040b15709c4a25eca928c59c273b1a1683a0b8297b7140701d40a45",
+  "time_unix_nano": "1792792845000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "57319a0b44c2f87d",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "pkg.admit",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.pkg.ecosystem": "npm",
+    "factory.pkg.name": "p-retry",
+    "factory.pkg.version": "6.2.1",
+    "factory.pkg.age_days": 212
+  }
+}

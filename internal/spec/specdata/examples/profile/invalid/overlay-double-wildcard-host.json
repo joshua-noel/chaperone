@@ -1,0 +1,45 @@
+{
+  "spec_version": "0",
+  "layer": "overlay",
+  "project": "acme-shop",
+  "version": "0.3.0",
+  "extends": {
+    "profile": "code",
+    "version": "1.0.0",
+    "digest": "sha256:39581aa52a1ebd4d262dc34c0ad375c805af99d2ddd6b90d54c3fdf38e6a931f"
+  },
+  "toolchain": {
+    "image": {
+      "ref": "registry.factory.internal/base/acme-shop-toolchain@sha256:ddc07b42a091fc855eb5b73f5d618ce357662c1967daf295543843909edf75ab"
+    }
+  },
+  "prompt_addendum": {
+    "path": ".factory/prompts/code-addendum.md",
+    "sha256": "sha256:f199e78e09f0fc75a044fb428bab6b1006ff3c5549d5dad8605617291a3b2f3e"
+  },
+  "network": {
+    "allow_add": [
+      {
+        "host": "*.*.acme.example",
+        "ports": [
+          443
+        ],
+        "purpose": "bad wildcard"
+      }
+    ]
+  },
+  "ops": {
+    "narrow_to": [
+      "pr.open",
+      "branch.push"
+    ]
+  },
+  "services": {
+    "add": [
+      "mailpit"
+    ]
+  },
+  "limits": {
+    "memory_mb": 6144
+  }
+}

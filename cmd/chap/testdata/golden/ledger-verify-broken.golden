@@ -1,0 +1,12 @@
+$ chap ledger verify --against-export
+exit: 5
+--- request
+POST /v0/ledger/verify
+auth: orchestrator
+{"against_export":true}
+--- stdout
+ledger NOT OK: chain chaperone.main, head seq 1042, hash sha256:abababababababababababababababababababababababababababababababab
+compared with the daily export
+problem: seq 877: prev_hash does not match seq 876
+problem: export 2026-10-23 has 311 events, chain has 312
+--- stderr

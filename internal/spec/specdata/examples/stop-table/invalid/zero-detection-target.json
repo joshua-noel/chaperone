@@ -1,0 +1,23 @@
+{
+  "spec_version": "0",
+  "type": "stop-table",
+  "table_version": "0.0.1",
+  "entries": [
+    {
+      "code": "CI_RED",
+      "name": "CI red on the current head",
+      "condition": "The CI result for the current head is not success.",
+      "detected_by": "chaperone-authz",
+      "halts": "dependents",
+      "action": "pause",
+      "recovery": "auto_when_clear",
+      "evidence": [
+        "op.result"
+      ],
+      "next_action": "Push a new head.",
+      "detect_within_seconds": 0,
+      "acknowledge_within_minutes": 60,
+      "rationale": "Never pass a defect on."
+    }
+  ]
+}

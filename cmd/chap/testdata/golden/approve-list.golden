@@ -1,0 +1,11 @@
+$ chap approve list
+exit: 0
+--- request
+GET /v0/approvals
+auth: orchestrator
+--- stdout
+APPROVAL  OP             STATE     CLASS     REQUEST   EXPIRES(-04)
+a-8m2q4x  deploy         pending   high      q-7t4n6p  2026-10-24T09:43:00Z
+a-2c6v9b  repo.settings  approved  critical  q-1k4m7p  2026-10-24T08:30:00Z
+more: chap approve list --cursor c2
+--- stderr

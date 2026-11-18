@@ -1,0 +1,23 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 22,
+  "prev_hash": "sha256:28d565458dbfe2bf61c89d75991e649dcb81597ec89567786a6ecd42de103398",
+  "hash": "sha256:a1949985b1c7f21dd8bb8472d9fe60f399f9751c872216e8e5dcf83158317f1b",
+  "time_unix_nano": "1792806500000000000",
+  "trace_id": "b368a14e69fc73207793b281c4391491",
+  "span_id": "98c3f5a02e6d417b",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "console.login",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "attributes": {
+    "factory.approver.id": "operator",
+    "factory.console.rp_id": "localhost",
+    "factory.console.user_verified": true
+  }
+}

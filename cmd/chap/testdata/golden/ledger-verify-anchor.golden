@@ -1,0 +1,11 @@
+$ chap ledger verify --anchor
+exit: 0
+--- request
+POST /v0/ledger/verify
+auth: orchestrator
+{"against_export":false,"anchor":true,"anchor_keys":null,"anchor_records":[]}
+--- stdout
+ledger ok: chain chaperone.main, head seq 1042, hash sha256:abababababababababababababababababababababababababababababababab
+compared with 3 signed anchor record(s)
+newest anchor: head seq 1039, hash sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd, at 2026-10-24T10:00:00Z (the phone has the same two values)
+--- stderr

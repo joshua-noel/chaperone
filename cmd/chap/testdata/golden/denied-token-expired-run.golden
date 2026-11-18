@@ -1,0 +1,12 @@
+$ chap health
+exit: 4
+--- request
+POST /v0/ops
+auth: run
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+DENIED token /v0/ops (profile docs, run r-7f3a)
+cause: TOKEN_EXPIRED
+why: token expired
+next: the run's token has expired: stop and report to the orchestrator

@@ -1,0 +1,17 @@
+$ chap op show q-3k9d2m
+exit: 0
+--- request
+GET /v0/ops/q-3k9d2m
+auth: run
+--- stdout
+pr.merge acme/shop#214: succeeded
+id: q-3k9d2m  class: gated  policy: baseline-2026.10.1
+execution: x-5h2j8w
+external_ref: https://github.com/acme/shop/pull/214
+result:
+  merge_sha: 7c1e0f3a9b2d4c5e6f708192a3b4c5d6e7f80912
+  method: squash
+checks:
+  ok   verify: success on 0588aa4
+  ok   behind_by: 0
+--- stderr

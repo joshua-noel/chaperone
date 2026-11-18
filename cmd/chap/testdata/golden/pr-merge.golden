@@ -1,0 +1,18 @@
+$ chap pr merge 214 --head 0588aa4ee0116267162e895016bcfda9ec3a3e2c
+exit: 0
+--- request
+POST /v0/ops
+auth: run
+{"op":"pr.merge","params":{"base":"main","head_sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c","method":"squash"},"target":{"adapter":"github","ref":"acme/shop#214"}}
+--- stdout
+pr.merge acme/shop#214: succeeded
+id: q-3k9d2m  class: gated  policy: baseline-2026.10.1
+execution: x-5h2j8w
+external_ref: https://github.com/acme/shop/pull/214
+result:
+  merge_sha: 7c1e0f3a9b2d4c5e6f708192a3b4c5d6e7f80912
+  method: squash
+checks:
+  ok   verify: success on 0588aa4
+  ok   behind_by: 0
+--- stderr

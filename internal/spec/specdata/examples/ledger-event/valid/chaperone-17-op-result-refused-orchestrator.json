@@ -1,0 +1,28 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 17,
+  "prev_hash": "sha256:7ffcb9ff34e3883662951143cad314c5e8cef1b89ec3ff0c9da5ca7e978ef932",
+  "hash": "sha256:45396122aae12047f0e150e62fdb4d12c1661b965eff96ef8da1c5ec718aab75",
+  "time_unix_nano": "1792805402000000000",
+  "trace_id": "b368a14e69fc73207793b281c4391491",
+  "span_id": "27a6d8f14c3e905b",
+  "severity_number": 13,
+  "severity_text": "WARN",
+  "event_name": "op.result",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "project": "chaperone",
+  "attributes": {
+    "factory.request_id": "q-7g3d8n",
+    "factory.op_hash": "sha256:17fdd714c637249638753d7d5d7325cd3d71b69ca3ab1cd608a5422f263106a4",
+    "factory.outcome": "refused",
+    "factory.cause_code": "OP_DISABLED",
+    "factory.policy_version": "baseline-2026.10.1",
+    "factory.requester.kind": "orchestrator",
+    "factory.orchestrator.id": "main"
+  }
+}

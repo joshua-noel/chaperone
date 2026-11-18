@@ -1,0 +1,34 @@
+Chaperone
+Copyright 2026 Joshua Noel
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This repository includes third-party Go modules under vendor/. Each keeps its own
+licence file in its folder. They are:
+
+- filippo.io/age v1.3.2 (BSD-style): vendor/filippo.io/age/LICENSE
+- filippo.io/hpke v0.4.0 (BSD-style): vendor/filippo.io/hpke/LICENSE
+- github.com/dlclark/regexp2 v1.12.0 (MIT): vendor/github.com/dlclark/regexp2/LICENSE
+- github.com/dustin/go-humanize v1.0.1 (MIT): vendor/github.com/dustin/go-humanize/LICENSE
+- github.com/fxamacker/cbor/v2 v2.9.4 (MIT): vendor/github.com/fxamacker/cbor/v2/LICENSE
+- github.com/go-viper/mapstructure/v2 v2.5.0 (MIT): vendor/github.com/go-viper/mapstructure/v2/LICENSE
+- github.com/go-webauthn/webauthn v0.18.2 (BSD-style): vendor/github.com/go-webauthn/webauthn/LICENSE
+- github.com/go-webauthn/x v0.3.1 (BSD-style): vendor/github.com/go-webauthn/x/LICENSE
+- github.com/golang-jwt/jwt/v5 v5.3.1 (MIT): vendor/github.com/golang-jwt/jwt/v5/LICENSE
+- github.com/google/go-tpm v0.9.8 (Apache-2.0): vendor/github.com/google/go-tpm/LICENSE
+- github.com/google/uuid v1.6.0 (BSD-style): vendor/github.com/google/uuid/LICENSE
+- github.com/mattn/go-isatty v0.0.24 (MIT): vendor/github.com/mattn/go-isatty/LICENSE
+- github.com/ncruces/go-strftime v1.0.0 (MIT): vendor/github.com/ncruces/go-strftime/LICENSE
+- github.com/philhofer/fwd v1.2.0 (MIT): vendor/github.com/philhofer/fwd/LICENSE.md
+- github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec (BSD-style): vendor/github.com/remyoudompheng/bigfft/LICENSE
+- github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 (Apache-2.0): vendor/github.com/santhosh-tekuri/jsonschema/v6/LICENSE
+- github.com/tinylib/msgp v1.6.4 (MIT): vendor/github.com/tinylib/msgp/LICENSE
+- github.com/x448/float16 v0.8.4 (MIT): vendor/github.com/x448/float16/LICENSE
+- go.yaml.in/yaml/v3 v3.0.5 (MIT): vendor/go.yaml.in/yaml/v3/LICENSE
+- golang.org/x/crypto v0.57.0 (BSD-style): vendor/golang.org/x/crypto/LICENSE
+- golang.org/x/sys v0.48.0 (BSD-style): vendor/golang.org/x/sys/LICENSE
+- golang.org/x/text v0.42.0 (BSD-style): vendor/golang.org/x/text/LICENSE
+- modernc.org/libc v1.77.1 (BSD-style): vendor/modernc.org/libc/LICENSE
+- modernc.org/mathutil v1.7.1 (BSD-style): vendor/modernc.org/mathutil/LICENSE
+- modernc.org/memory v1.12.1 (BSD-style): vendor/modernc.org/memory/LICENSE
+- modernc.org/sqlite v1.60.1 (BSD-style): vendor/modernc.org/sqlite/LICENSE

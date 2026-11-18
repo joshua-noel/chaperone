@@ -1,0 +1,299 @@
+{
+  "agent-as-producer.json": {
+    "keyword": "enum",
+    "instancePath": "/resource/service.name"
+  },
+  "console-login-with-run-id.json": {
+    "keyword": "false schema",
+    "instancePath": "/run_id"
+  },
+  "console-login-without-user-verification.json": {
+    "keyword": "const",
+    "instancePath": "/attributes/factory.console.user_verified"
+  },
+  "console-refused-free-text-reason.json": {
+    "keyword": "pattern",
+    "instancePath": "/attributes/factory.console.reason"
+  },
+  "console-refused-unknown-ceremony.json": {
+    "keyword": "enum",
+    "instancePath": "/attributes/factory.console.ceremony"
+  },
+  "credential-use-with-raw-query.json": {
+    "keyword": "pattern",
+    "instancePath": "/attributes/factory.credential.path_class"
+  },
+  "credential-use-with-value.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "/attributes",
+    "params": {
+      "additionalProperty": "factory.credential.value"
+    }
+  },
+  "credential-use-without-run-id.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "run_id"
+    }
+  },
+  "extra-top-level-field.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "",
+    "params": {
+      "additionalProperty": "hostname"
+    }
+  },
+  "runner-denial-without-run-id.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "run_id"
+    }
+  },
+  "host-grant-with-profile-digest.json": {
+    "keyword": "false schema",
+    "instancePath": "/attributes/factory.profile.digest"
+  },
+  "killed-run-end-without-cause.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.cause_code"
+    }
+  },
+  "later-event-with-genesis-prev-hash.json": {
+    "keyword": "not",
+    "instancePath": "/prev_hash"
+  },
+  "model-usage-old-cache-field-name.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "/attributes",
+    "params": {
+      "additionalProperty": "factory.usage.cache_read_tokens"
+    }
+  },
+  "model-usage-without-provider.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "gen_ai.provider.name"
+    }
+  },
+  "net-deny-without-cause.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.cause_code"
+    }
+  },
+  "normal-allow-with-cause.json": {
+    "keyword": "false schema",
+    "instancePath": "/attributes/factory.cause_code"
+  },
+  "op-request-unknown-reversibility.json": {
+    "keyword": "enum",
+    "instancePath": "/attributes/factory.reversibility"
+  },
+  "op-result-refused-with-execution-id.json": {
+    "keyword": "false schema",
+    "instancePath": "/attributes/factory.execution_id"
+  },
+  "op-result-succeeded-without-execution-id.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.execution_id"
+    }
+  },
+  "op-result-unconfirmed-with-external-ref.json": {
+    "keyword": "false schema",
+    "instancePath": "/attributes/factory.external_ref"
+  },
+  "op-result-without-requester-kind.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.requester.kind"
+    }
+  },
+  "orchestrator-denial-without-orchestrator-id.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.orchestrator.id"
+    }
+  },
+  "orchestrator-event-with-run-id.json": {
+    "keyword": "false schema",
+    "instancePath": "/run_id"
+  },
+  "orchestrator-id-uppercase.json": {
+    "keyword": "pattern",
+    "instancePath": "/attributes/factory.orchestrator.id"
+  },
+  "orchestrator-op-request-without-orchestrator-id.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.orchestrator.id"
+    }
+  },
+  "refused-result-without-cause.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.cause_code"
+    }
+  },
+  "run-denial-without-run-id.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "run_id"
+    }
+  },
+  "run-op-approve-without-run-id.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "run_id"
+    }
+  },
+  "run-op-request-without-run-id.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "run_id"
+    }
+  },
+  "run-op-result-with-orchestrator-id.json": {
+    "keyword": "false schema",
+    "instancePath": "/attributes/factory.orchestrator.id"
+  },
+  "run-op-result-without-run-id.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "run_id"
+    }
+  },
+  "run-scoped-event-without-run-id.json": {
+    "keyword": "required",
+    "instancePath": "",
+    "params": {
+      "missingProperty": "run_id"
+    }
+  },
+  "run-start-context-file-traversal.json": {
+    "keyword": "pattern",
+    "instancePath": "/attributes/factory.context.files/0/path"
+  },
+  "sandbox-grant-without-profile-digest.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.profile.digest"
+    }
+  },
+  "seq-zero-with-chained-prev-hash.json": {
+    "keyword": "const",
+    "instancePath": "/prev_hash"
+  },
+  "severity-below-range.json": {
+    "keyword": "minimum",
+    "instancePath": "/severity_number"
+  },
+  "time-as-number.json": {
+    "keyword": "type",
+    "instancePath": "/time_unix_nano"
+  },
+  "token-revoke-run-end-with-cause.json": {
+    "keyword": "false schema",
+    "instancePath": "/attributes/factory.cause_code"
+  },
+  "token-revoke-stop-without-cause.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.cause_code"
+    }
+  },
+  "trace-gap-unknown-hop.json": {
+    "keyword": "enum",
+    "instancePath": "/attributes/factory.trace.hop"
+  },
+  "unknown-attribute.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "/attributes",
+    "params": {
+      "additionalProperty": "extra"
+    }
+  },
+  "unknown-event-name.json": {
+    "keyword": "enum",
+    "instancePath": "/event_name"
+  },
+  "unknown-phase.json": {
+    "keyword": "enum",
+    "instancePath": "/attributes/factory.phase"
+  },
+  "vault-write-failed-without-cause.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.cause_code"
+    }
+  },
+  "vault-write-succeeded-with-cause.json": {
+    "keyword": "false schema",
+    "instancePath": "/attributes/factory.cause_code"
+  },
+  "vault-write-unknown-action.json": {
+    "keyword": "enum",
+    "instancePath": "/attributes/factory.secret.action"
+  },
+  "vault-write-with-fingerprint.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "/attributes",
+    "params": {
+      "additionalProperty": "factory.secret.fingerprint"
+    }
+  },
+  "vault-write-with-value.json": {
+    "keyword": "additionalProperties",
+    "instancePath": "/attributes",
+    "params": {
+      "additionalProperty": "factory.secret.value"
+    }
+  },
+  "vault-write-without-execution-id.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.execution_id"
+    }
+  },
+  "wait-phase-without-reason.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.phase.wait_reason"
+    }
+  },
+  "wait-reason-on-non-wait-phase.json": {
+    "keyword": "false schema",
+    "instancePath": "/attributes/factory.phase.wait_reason"
+  },
+  "would-deny-allow-without-cause.json": {
+    "keyword": "required",
+    "instancePath": "/attributes",
+    "params": {
+      "missingProperty": "factory.cause_code"
+    }
+  },
+  "zero-trace-id.json": {
+    "keyword": "pattern",
+    "instancePath": "/trace_id"
+  }
+}

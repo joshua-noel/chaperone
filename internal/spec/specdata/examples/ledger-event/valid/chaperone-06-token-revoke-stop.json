@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 6,
+  "prev_hash": "sha256:52fcef8bd684503352dda084003d67fa62bce536c22628572a9bd2444eabd1df",
+  "hash": "sha256:a9a89926be42c410336f700c3a37d8847f9ec7d75887b9e7e52f01ca652ba778",
+  "time_unix_nano": "1792797105000000000",
+  "trace_id": "0b6f2d1a084fc007e6a2f5e302ace42e",
+  "span_id": "f1b6e3a07c2d8954",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "token.revoke",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-9c21",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.token.jti": "q7Hd2mWz9XkP3vLc8RtN4b",
+    "factory.revoke.reason": "stop",
+    "factory.cause_code": "THRASH"
+  }
+}

@@ -1,0 +1,93 @@
+package policy
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+// Engine hands out the effective policy of a project. Project files are read
+// from Dir; a file that changes on disk is picked up on the next call (checked
+// at most once per second per project), so a policy PR deployed to the host
+// takes effect without a restart and with a new policy_version.
+type Engine struct {
+	cat  *Catalog
+	base *Pack
+	dir  string
+	now  func() time.Time
+
+	mu    sync.Mutex
+	cache map[string]cached
+}
+
+type cached struct {
+	checked time.Time
+	size    int64
+	mtime   time.Time
+	missing bool
+	eff     *Effective
+}
+
+// NewEngine returns an engine over the baseline and the project files in dir.
+// dir may be empty: every project then gets the baseline.
+func NewEngine(cat *Catalog, base *Pack, dir string) *Engine {
+	return &Engine{cat: cat, base: base, dir: dir, now: time.Now, cache: map[string]cached{}}
+}
+
+// Catalog returns the op catalog.
+func (e *Engine) Catalog() *Catalog { return e.cat }
+
+// Baseline returns the baseline pack.
+func (e *Engine) Baseline() *Pack { return e.base }
+
+// For returns the effective policy of project; never nil. An unreadable or
+// invalid project file gives an Effective with Invalid set (fail closed).
+func (e *Engine) For(project string) *Effective {
+	if e.dir == "" || !projectRe.MatchString(project) {
+		return e.base.ForProject(project)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	now := e.now()
+	c, ok := e.cache[project]
+	if ok && now.Sub(c.checked) < time.Second {
+		return c.eff
+	}
+	path := filepath.Join(e.dir, project+".yaml")
+	st, err := os.Stat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		if ok && c.missing {
+			c.checked = now
+			e.cache[project] = c
+			return c.eff
+		}
+		c = cached{checked: now, missing: true, eff: e.base.ForProject(project)}
+	case err != nil:
+		c = cached{checked: now, eff: e.broken(project, err)}
+	case ok && !c.missing && st.Size() == c.size && st.ModTime().Equal(c.mtime):
+		c.checked = now
+	default:
+		data, rerr := os.ReadFile(path)
+		var eff *Effective
+		if rerr != nil {
+			eff = e.broken(project, rerr)
+		} else if eff, err = e.base.LoadProject(project, data, e.cat); err != nil {
+			eff = e.broken(project, err)
+		}
+		c = cached{checked: now, size: st.Size(), mtime: st.ModTime(), eff: eff}
+	}
+	e.cache[project] = c
+	return c.eff
+}
+
+func (e *Engine) broken(project string, err error) *Effective {
+	eff := e.base.ForProject(project)
+	eff.Version = e.base.Version + "+invalid"
+	eff.Invalid = fmt.Errorf("policy for project %s is invalid: %w", project, err)
+	return eff
+}

@@ -1,0 +1,8 @@
+$ chap request op deploy --reason x --params [1]
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --params must be one JSON object
+usage: chap request op <op> --reason <why> [--params <json>] [--target <adapter>:<ref>]

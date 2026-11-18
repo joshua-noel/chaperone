@@ -1,0 +1,23 @@
+{
+  "spec_version": "0",
+  "type": "op.request",
+  "request_id": "q-6f2c7m",
+  "requester": {
+    "kind": "orchestrator",
+    "id": "operator"
+  },
+  "project": "chaperone",
+  "op": "approvers.enroll",
+  "target": {
+    "adapter": "chaperone",
+    "ref": "approver:operator"
+  },
+  "params": {
+    "label": "Operator phone",
+    "origin": "https://pc.example.ts.net"
+  },
+  "reason": "Add the phone passkey for the operator.",
+  "requested_at": "2026-10-24T01:20:00Z",
+  "expires_at": "2026-10-24T01:50:00Z",
+  "op_hash": "sha256:b1f214a55524d75832e07529fb5e78f9e9492383837b8f938df0a0cb89b40bd4"
+}

@@ -1,0 +1,49 @@
+{{define "content"}}
+<link rel="stylesheet" href="/approvals/approvals.css">
+<script src="/approvals/approvals.js" defer></script>
+{{if .Restricted}}{{if .Legacy}}{{template "restricted-legacy-note"}}{{else}}{{template "restricted-note" "/approvals"}}{{end}}{{end}}
+<div class="approvals-head">
+  <h1>Approvals</h1>
+  <p class="muted">Signed in as {{.Approver}}. Open a request, read it, then decide. Approving asks for Windows Hello for that one request.</p>
+</div>
+{{range .Cards}}
+{{template "approval-card" .}}
+{{else}}
+<div class="card"><section><p class="empty">Nothing is waiting for a decision. When an agent asks for something that needs you, it shows up here.</p></section></div>
+{{end}}
+{{if .Recent}}
+<div class="card" role="region" aria-labelledby="recent-heading">
+  <header><h2 id="recent-heading">Recent</h2></header>
+  <section>
+    <table class="table table-stack recent-table">
+      <caption class="sr-only">Recent approvals</caption>
+      <thead><tr><th scope="col">Request</th><th scope="col">Decision</th><th scope="col">What happened</th><th scope="col">When</th></tr></thead>
+      <tbody>
+      {{range .Recent}}
+        <tr><td data-label="Request">{{.Who}} wanted to {{.What}}{{if .Critical}} <span class="badge" data-tone="danger">critical</span>{{end}} <span class="muted">({{.Project}})</span></td><td data-label="Decision">{{template "state-badge" .State}}</td><td data-label="What happened">{{if .OutcomeText}}<span class="outcome outcome-{{.Outcome}}">{{.OutcomeText}}</span>{{else if or (eq .State "denied") (eq .State "expired") (eq .State "cancelled")}}<span class="muted">Nothing ran.</span>{{end}}</td><td data-label="When"><time datetime="{{.When}}" title="{{.When}}">{{.Age}}</time></td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+{{end}}
+{{if .PhoneOn}}
+<details class="card" id="phone-panel">
+  <summary class="phone-summary">Phone: approve from your phone</summary>
+  <section>
+    <p class="muted">Your phone can approve at <code>{{.PhoneURL}}</code> (through Tailscale). To add a phone, ask below, approve that request here with Windows Hello, then show the address.</p>
+    <form id="phone-enroll-form" class="form" autocomplete="off">
+      <label for="phone-label">Name for the phone passkey</label>
+      <input class="input" id="phone-label" name="label" type="text" maxlength="64" value="Phone passkey">
+      <button class="btn" type="submit">Ask to add a phone</button>
+    </form>
+    {{range .Enrolments}}
+    <p>The request to add a phone is approved and unused.
+      <button class="btn" type="button" data-action="enrollment" data-approval="{{.ID}}">Show the enrolment address</button></p>
+    {{end}}
+    <div id="phone-address" aria-live="polite"></div>
+    <p id="phone-status" role="status" aria-live="polite"></p>
+  </section>
+</details>
+{{end}}
+{{end}}

@@ -1,0 +1,22 @@
+$ chap manual
+exit: 0
+--- request
+GET /v0/catalog
+auth: orchestrator
+--- stdout
+manual: project acme-shop, profile code, policy baseline-2026.10.1
+branch.push [routine] Push the run's branch through the git proxy.
+  chap git setup; git push origin <branch>
+deploy [high] Deploy a commit to the pilot after one approval.
+  chap deploy <sha>
+health [routine] Read the pilot's readiness status.
+  chap health
+logs [routine] Read recent log lines from a fixed source.
+  chap logs <web|worker|db|tunnel> [--lines <n>]
+pr.merge [gated] Merge a PR when verify is green on its exact head.
+  chap pr merge <n> --head <sha> [--dry-run]
+pr.open [routine] Open a pull request from the run's branch.
+  chap pr open --title <t> [--branch <b>] [--base <b>] [--body <b>] [--draft]
+pr.update [routine] Update a PR title or body, or update its branch.
+  chap pr update <n> --expected-head <sha> [--title <t>] [--body <b>]
+--- stderr

@@ -1,0 +1,12 @@
+$ chap pr update 214 --expected-head 0588aa4ee0116267162e895016bcfda9ec3a3e2c --title "fix: x" --repo acme/shop --update-branch
+exit: 0
+--- request
+POST /v0/ops
+auth: run
+{"op":"pr.update","params":{"expected_head_sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c","number":214,"title":"fix: x","update_branch":true},"target":{"adapter":"github","ref":"acme/shop#214"}}
+--- stdout
+pr.update acme/shop#214: succeeded
+id: q-6w1x5z  class: routine  policy: baseline-2026.10.1
+execution: x-9c3v7b
+external_ref: https://github.com/acme/shop/pull/214
+--- stderr

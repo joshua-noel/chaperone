@@ -1,0 +1,27 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 10,
+  "prev_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "time_unix_nano": "1792792852000000000",
+  "trace_id": "00000000000000000000000000000001",
+  "span_id": "35dfc32a84e40f1a",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "net.allow",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-9c21",
+  "project": "acme-shop",
+  "attributes": {
+    "server.address": "docs.example.org",
+    "server.port": 443,
+    "network.transport": "tcp",
+    "factory.net.would_deny": true
+  },
+  "body": "Log-only enforcement: let through, would have been denied."
+}

@@ -1,0 +1,23 @@
+{
+  "spec_version": "0",
+  "type": "denial",
+  "denial_id": "d-9m2t6w",
+  "project": "acme-shop",
+  "at": "2026-10-23T22:20:05Z",
+  "surface": "op",
+  "action": {
+    "verb": "execute",
+    "target": "q-9d1t7w"
+  },
+  "cause_code": "APPROVAL_UNAVAILABLE",
+  "why": "the approval store cannot be reached; nothing ran",
+  "request": {
+    "possible": false
+  },
+  "thrash": {
+    "count": 1,
+    "window_seconds": 300,
+    "flagged": false
+  },
+  "orchestrator_id": "main"
+}

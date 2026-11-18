@@ -1,0 +1,26 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 1,
+  "prev_hash": "sha256:a2217041de770b2a2a7901c406066e3ab09703c51950791a4e31ce5417ea2895",
+  "hash": "sha256:1eba0edd51d1cc2f0468eaa50f67e36bf64b4e25188feb82b49380b0d8e9a71a",
+  "time_unix_nano": "1792795201000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "f0d7dc466352da55",
+  "severity_number": 13,
+  "severity_text": "WARN",
+  "event_name": "denial",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "project": "acme-shop",
+  "attributes": {
+    "factory.denial.id": "d-7m1x4z",
+    "factory.surface": "op",
+    "factory.cause_code": "OP_APPROVAL_REQUIRED",
+    "factory.thrash.count": 1,
+    "factory.requester.kind": "run"
+  }
+}

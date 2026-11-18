@@ -1,0 +1,16 @@
+{
+  "spec_version": "0",
+  "type": "denial",
+  "denial_id": "d-3n8w2k",
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "profile": "code",
+  "at": "2026-10-24T09:12:40Z",
+  "surface": "op",
+  "action": { "verb": "request", "target": "deploy" },
+  "cause_code": "OP_DISABLED",
+  "why": "deploy is disabled by policy for acme-shop",
+  "request": { "possible": false },
+  "thrash": { "count": 1, "window_seconds": 300, "flagged": false },
+  "policy_version": "baseline-2026.10.1"
+}

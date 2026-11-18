@@ -1,0 +1,30 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 14,
+  "prev_hash": "sha256:7f770675763b1e4f18d2b2f32c801c73fea793db6b0987d5cdeb4e700f42f4d7",
+  "hash": "sha256:63c472535ec8328457bd9099e4fa28ec96f279d6b9d0224a6f8c6f9cae6a688b",
+  "time_unix_nano": "1792793100000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "2b5890de50c9e526",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "model.usage",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "gen_ai.provider.name": "anthropic",
+    "gen_ai.request.model": "model-standard",
+    "gen_ai.usage.input_tokens": 183000,
+    "gen_ai.usage.output_tokens": 9100,
+    "gen_ai.usage.cache_read.input_tokens": 160200,
+    "gen_ai.usage.cache_write.input_tokens": 22200,
+    "factory.usage.requests": 31,
+    "factory.usage.cost_usd": 0.84
+  }
+}

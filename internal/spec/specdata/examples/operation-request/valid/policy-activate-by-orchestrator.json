@@ -1,0 +1,23 @@
+{
+  "spec_version": "0",
+  "type": "op.request",
+  "request_id": "q-7g3d8n",
+  "requester": {
+    "kind": "orchestrator",
+    "id": "main"
+  },
+  "project": "chaperone",
+  "op": "policy.activate",
+  "target": {
+    "adapter": "chaperone",
+    "ref": "policy"
+  },
+  "params": {
+    "commit_sha": "0588aa4ee0116267162e895016bcfda9ec3a3e2c",
+    "policy_version": "baseline-2026.10.2"
+  },
+  "reason": "Activate the merged policy pack that enables pr.merge for acme-shop.",
+  "requested_at": "2026-10-24T01:30:00Z",
+  "expires_at": "2026-10-24T02:00:00Z",
+  "op_hash": "sha256:17fdd714c637249638753d7d5d7325cd3d71b69ca3ab1cd608a5422f263106a4"
+}

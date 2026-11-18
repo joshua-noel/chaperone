@@ -1,0 +1,12 @@
+$ chap issue reopen 301 --repo example-org/storefront --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"issue.reopen","params":{},"project":"storefront","target":{"adapter":"github","ref":"example-org/storefront#301"}}
+--- stdout
+issue.reopen example-org/storefront#301: succeeded
+id: q-8e1a42  class: routine  policy: baseline-2026.10.1
+execution: x-9f2c13
+external_ref: https://github.com/example-org/storefront/issues/301
+--- stderr

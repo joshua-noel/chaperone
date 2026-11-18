@@ -1,0 +1,26 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 12,
+  "prev_hash": "sha256:806f4b029e97efec4f0a2ddfa036473c37c50f16eada8e11105b931db70ad4f1",
+  "hash": "sha256:7348ffa5dafd582d6fba8f78f2eced6cf7af4ca8e7fa7ed8f9337edf3cc6b80e",
+  "time_unix_nano": "1792792855000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "ca8d7372efe46ce3",
+  "severity_number": 13,
+  "severity_text": "WARN",
+  "event_name": "net.deny",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "server.address": "api.example.com",
+    "server.port": 443,
+    "network.transport": "tcp",
+    "factory.cause_code": "NET_HOST_NOT_ALLOWED"
+  }
+}

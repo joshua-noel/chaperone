@@ -1,0 +1,37 @@
+{{define "content"}}
+<link rel="stylesheet" href="/approvals/approvals.css">
+<script src="/approvals/approvals.js" defer></script>
+<div class="approvals-head">
+  <h1>Approvals on your phone</h1>
+  <p class="muted">Signed in as {{.Approver}}. Read the request. Then tap the number that is shown on the server screen for it. A wrong number denies the request. After the right number your phone asks for your passkey: that one confirmation approves.</p>
+</div>
+{{range .Cards}}
+<article class="card approval approval-risk-{{.Risk}}{{if .Critical}} approval-critical{{end}}" data-approval="{{.ID}}" data-risk="{{.Risk}}" data-channel="phone" aria-labelledby="title-{{.ID}}">
+  <header class="approval-line approval-line-open" id="title-{{.ID}}">
+    <span class="badge approval-risk" data-tone="{{.RiskTone}}">{{.Risk}}</span>
+    <span class="line-who">{{.Who}}</span>
+    <span class="line-what"><span class="line-wants">wants to</span> {{.What}}</span>
+    <span class="line-age">{{.Age}}</span>
+  </header>
+  <section class="approval-body">
+    <p class="muted approval-when">Asked {{.Age}} &middot; {{.ExpiresIn}} to decide</p>
+    <div class="approval-text" id="card-{{.ID}}" data-display-sha256="{{.DisplaySHA}}">{{template "cardtext" .}}</div>
+    <details class="approval-fp"><summary>Fingerprint of this text</summary><p class="muted">display_sha256 <code>{{.DisplaySHA}}</code><br>This page hashes the text above and checks it against this fingerprint before it asks for your passkey.</p></details>
+  </section>
+  <footer class="approval-actions">
+    {{if .Split}}<div role="group" aria-labelledby="pick-{{.ID}}" class="number-choices">
+      <p id="pick-{{.ID}}"><strong>Which number is on the server screen for this request?</strong></p>
+      {{range $n := .Numbers}}
+      <button class="btn number-choice" type="button" data-number="{{$n}}" aria-label="Number {{$n}}">{{$n}}</button>
+      {{end}}
+    </div>{{else}}<p class="approval-old">This request was made by an older version of Chaperone, so it cannot be approved. Deny it, or let it run out; the orchestrator has to ask again.</p>{{end}}
+    <label for="reason-{{.ID}}">Reason, if you deny</label>
+    <input id="reason-{{.ID}}" class="input" type="text" maxlength="500" autocomplete="off" placeholder="Needed only to deny">
+    <button class="btn approval-deny" data-variant="destructive" type="button" data-action="deny">Deny</button>
+  </footer>
+  <p class="approval-status" role="status" aria-live="polite"></p>
+</article>
+{{else}}
+<div class="card"><section><p>Nothing is waiting for a decision.</p></section></div>
+{{end}}
+{{end}}

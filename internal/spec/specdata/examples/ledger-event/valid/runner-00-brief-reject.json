@@ -1,0 +1,26 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 0,
+  "prev_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "hash": "sha256:6939b8c5b03cbf8fd3c77c8e33f72813e9e8bc5de73ea3121dddb59f0022b64b",
+  "time_unix_nano": "1792792800000000000",
+  "trace_id": "2a7505dcce2b61db48a827fd5c3d3615",
+  "span_id": "1b1d9a0e3a3e32c2",
+  "severity_number": 13,
+  "severity_text": "WARN",
+  "event_name": "brief.reject",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "project": "acme-shop",
+  "attributes": {
+    "factory.cause_code": "BRIEF_INVALID",
+    "factory.errors": [
+      "/budget/tokens: must be integer"
+    ]
+  },
+  "body": "Brief refused before any run started."
+}

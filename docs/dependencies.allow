@@ -1,0 +1,74 @@
+# Third-party modules Chaperone may depend on (ADR-001, "Dependency policy").
+#
+# One module path per line; `#` starts a comment. `go run ./scripts/allowcheck`
+# (CI step "allowlist") fails when go.mod requires a module that is not listed
+# here, direct or indirect. Adding a line needs an ADR-001 addendum and a PR
+# that passes `go mod verify` and `govulncheck`. Versions are pinned by go.mod
+# and vendor/, not here.
+#
+# Prefer a version at least 7 days old when bumping (same cooldown as the npm
+# mirror).
+
+# Pure-Go SQLite driver for internal/store. CGO is off for every binary
+# (ADR-001), so the cgo drivers (mattn/go-sqlite3) are not an option.
+# Also used by ADR-006.
+modernc.org/sqlite
+
+# Required by modernc.org/sqlite (its go.mod). Listed because go.mod lists them
+# as indirect requirements; none is imported by Chaperone code.
+modernc.org/libc                   # C runtime transpiled to Go, used by the SQLite transpile
+modernc.org/mathutil               # libc and sqlite helper
+modernc.org/memory                 # libc allocator
+github.com/dustin/go-humanize      # libc/sqlite formatting helper
+github.com/google/uuid             # libc helper
+github.com/mattn/go-isatty         # libc terminal check
+github.com/ncruces/go-strftime     # sqlite strftime
+github.com/remyoudompheng/bigfft   # mathutil big-number speedups
+
+# Windows service and DPAPI (ADR-001, ADR-003). Also pulled in by modernc.org/sqlite
+# and libc for the syscall layer.
+golang.org/x/sys
+
+# age file encryption for the vault (ADR-003). Reviewed reference implementation
+# of the age format; ADR-001 already lists it. Added with the vault (v1.3.2, 2026-08-29).
+filippo.io/age
+
+# Required by filippo.io/age (its go.mod): HPKE for its post-quantum and plugin
+# recipient types, and the x/crypto primitives (chacha20poly1305, hkdf, scrypt,
+# curve25519) behind the X25519 recipient the vault uses. Added with the vault.
+filippo.io/hpke
+golang.org/x/crypto
+
+# the spec binding, internal/spec.
+# JSON Schema 2020-12 validator for the spec's schemas. Pure Go, no cgo. Chosen
+# in the plan; v6.0.3 (2026-06-28).
+github.com/santhosh-tekuri/jsonschema/v6
+# The spec's patterns use lookahead, which Go's regexp lacks. The validator is
+# given this ECMAScript-style engine instead (required by the spec's "pattern"
+# semantics, tested against Ajv). Pure Go; v1.12.0 (2026-04-18). Only
+# internal/spec imports it.
+github.com/dlclark/regexp2
+# Required by jsonschema/v6 for its error messages (golang.org/x/text/message).
+# Listed as a direct requirement in go.mod's indirect block; internal/spec
+# imports language and message to render issues. v0.41.0 (2026-08-11).
+golang.org/x/text
+
+# WebAuthn relying party for the console: registration and assertion with user
+# verification (ADR-004). Added with approvals (v0.18.2, 2026-09-19). ADR-001 names it.
+github.com/go-webauthn/webauthn
+
+# Required by github.com/go-webauthn/webauthn (its go.mod); every one is imported
+# by the packages Chaperone uses (protocol, webauthn, metadata), none by Chaperone code.
+github.com/go-webauthn/x           # COSE and attestation helpers split out of webauthn
+github.com/fxamacker/cbor/v2       # CBOR for attestation objects and COSE keys
+github.com/x448/float16            # cbor/v2 half-float support
+github.com/golang-jwt/jwt/v5       # android-safetynet attestation statement
+github.com/google/go-tpm           # TPM attestation statement (Windows Hello may send "tpm")
+github.com/go-viper/mapstructure/v2 # webauthn metadata decoding
+github.com/tinylib/msgp            # generated session/credential serialisers
+github.com/philhofer/fwd           # msgp buffer reader
+
+# YAML parser for the op catalog, the baseline policy pack and project policy
+# files (internal/policy). Maintained continuation of gopkg.in/yaml.v3;
+# no further modules. v3.0.5 (2026-07-26). ADR-001 amendment 6.
+go.yaml.in/yaml/v3

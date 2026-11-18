@@ -1,0 +1,29 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 3,
+  "prev_hash": "sha256:21882879c5e3be4501b5b5978e0f95338a50b23b02cc269d8bc3c097868a0f4b",
+  "hash": "sha256:ee928eac8f48c44886d977b8a13af252c868c3d82ce5473e6770ccaca295832a",
+  "time_unix_nano": "1792795240000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "b0c8f1e67d406d1e",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "op.result",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.request_id": "q-4k2m9x",
+    "factory.op_hash": "sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415",
+    "factory.execution_id": "x-7c2m9q",
+    "factory.outcome": "refused",
+    "factory.policy_version": "baseline-2026.10.1",
+    "factory.requester.kind": "run",
+    "factory.cause_code": "OP_POLICY_REFUSED"
+  }
+}

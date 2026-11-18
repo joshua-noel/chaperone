@@ -1,0 +1,12 @@
+$ chap pr open --title "docs: fix typo" --body-file /work/body.md --draft
+exit: 0
+--- request
+POST /v0/ops
+auth: run
+{"op":"pr.open","params":{"base":"main","body":"Fixes the typo.\n","draft":true,"head":"agent/r-7f3a","title":"docs: fix typo"},"target":{"adapter":"github","ref":"acme/shop"}}
+--- stdout
+pr.open acme/shop: succeeded
+id: q-2b7c9d  class: routine  policy: baseline-2026.10.1
+execution: x-4d8k1s
+external_ref: https://github.com/acme/shop/pull/215
+--- stderr

@@ -1,0 +1,8 @@
+$ chap dev-token --project acme-shop --repo acme/shop --branch b --path docs/** --op pr.open
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --out is required: chap never prints a token, it writes it to a file
+usage: chap dev-token --project <p> --repo <owner/name> --branch <b> --path <glob> --op <op> --out <file> [--base <b>] [--minutes <n>]

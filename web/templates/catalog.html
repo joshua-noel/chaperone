@@ -1,0 +1,55 @@
+{{define "content"}}
+<h1>Operations</h1>
+<div class="alert" data-tone="info" role="note">
+  <h2>Read-only</h2>
+  <section>Every op starts disabled; enabling one is a policy change in the Chaperone repository. Baseline policy version <code>{{.BaselineVersion}}</code>.</section>
+</div>
+{{if .Projects}}
+<div class="card" role="region" aria-labelledby="policy-heading">
+  <header>
+    <h2 id="policy-heading">Project policy in force</h2>
+  </header>
+  <section>
+    <table class="table table-stack">
+      <caption class="sr-only">Project policy in force</caption>
+      <thead><tr><th scope="col">Project</th><th scope="col">Policy version</th><th scope="col">Status</th></tr></thead>
+      <tbody>
+      {{range .Projects}}
+        <tr><th scope="row">{{.Name}}</th><td data-label="Policy version"><code>{{.Version}}</code></td><td data-label="Status">{{if .Invalid}}<span class="badge" data-tone="danger">invalid</span> {{.Invalid}}{{else}}<span class="badge" data-tone="success">valid</span>{{end}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+{{end}}
+
+<div class="card" role="region" aria-labelledby="catalog-heading">
+  <header>
+    <h2 id="catalog-heading">Operations catalog</h2>
+  </header>
+  <section>
+    <table class="table table-stack" id="catalog">
+      <caption class="sr-only">Operations</caption>
+      <thead>
+        <tr>
+          <th scope="col">Op</th><th scope="col">Class</th><th scope="col">Needs approval</th><th scope="col">Baseline</th>
+          {{range .Projects}}<th scope="col">{{.Name}}</th>{{end}}
+          <th scope="col">Requests</th><th scope="col">Last request</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{range .Rows}}
+        <tr>
+          <th scope="row" aria-labelledby="op-{{.Op}}"{{if .Summary}} aria-describedby="op-what-{{.Op}}"{{end}}><span id="op-{{.Op}}"><code>{{.Op}}</code></span>{{if .Summary}}<span class="op-what" id="op-what-{{.Op}}">{{.Summary}}{{if .Usage}}<br><code>{{.Usage}}</code>{{end}}</span>{{end}}</th>
+          <td data-label="Class"><span class="badge" data-tone="{{if eq .Class "critical"}}danger{{else if eq .Class "high"}}warning{{else if eq .Class "gated"}}info{{else}}neutral{{end}}">{{.Class}}</span></td>
+          <td data-label="Needs approval">{{if .NeedsApproval}}yes{{else}}no{{end}}</td>
+          {{range .Cells}}<td data-label="{{.Label}}"{{if not .Enabled}} class="off"{{end}}>{{.Text}}{{if .Enabled}} ({{.Rate}}/min){{end}}</td>{{end}}
+          <td data-label="Requests">{{.Requests}}</td>
+          <td data-label="Last request">{{template "t" .Last}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+{{end}}

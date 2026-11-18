@@ -1,0 +1,60 @@
+{{define "content"}}
+{{if .Restricted}}{{if .Legacy}}{{template "restricted-legacy-note"}}{{else}}{{template "restricted-note" "/runs"}}{{end}}{{end}}
+<h1>Runs</h1>
+<div id="runs-status" aria-live="polite"></div>
+
+<div class="card" role="region" aria-labelledby="active-heading">
+  <header>
+    <h2 id="active-heading">Active runs</h2>
+    <p>Revoking a run ends it now: its token is refused from the next request. {{if .ActiveMore}}Only the first {{len .Active}} are listed.{{end}}</p>
+  </header>
+  <section>
+  {{if .Active}}
+    <table class="table table-stack" id="active-runs">
+      <caption class="sr-only">Active runs</caption>
+      <thead><tr><th scope="col">Run</th><th scope="col">Project</th><th scope="col">Profile</th><th scope="col">Started</th><th scope="col">Expires</th><th scope="col">Action</th></tr></thead>
+      <tbody>
+      {{range .Active}}{{template "run-row" .}}{{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <p class="empty">No run is active.</p>
+  {{end}}
+  </section>
+</div>
+
+<div class="card" role="region" aria-labelledby="orch-heading">
+  <header>
+    <h2 id="orch-heading">Orchestrator tokens</h2>
+    <p>the orchestrator's token (ADR-007). Revoking it takes effect on the orchestrator's next request; issue a new one with <code>chapd orch issue</code>. Only the fingerprint is shown.</p>
+  </header>
+  <section>
+  {{if .Orchs}}
+    <table class="table table-stack" id="orchestrators">
+      <caption class="sr-only">Orchestrator tokens</caption>
+      <thead><tr><th scope="col">Id</th><th scope="col">Fingerprint</th><th scope="col">Projects</th><th scope="col">Ops</th><th scope="col">Issued</th><th scope="col">Expires</th><th scope="col">Status</th></tr></thead>
+      <tbody>
+      {{range .Orchs}}{{template "orch-row" .}}{{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <p class="empty">No orchestrator token has been issued.</p>
+  {{end}}
+  </section>
+</div>
+
+{{if .Ended}}
+<div class="card" role="region" aria-labelledby="ended-heading">
+  <header><h2 id="ended-heading">Recently ended</h2></header>
+  <section>
+    <table class="table table-stack">
+      <caption class="sr-only">The most recent runs that ended</caption>
+      <thead><tr><th scope="col">Run</th><th scope="col">Project</th><th scope="col">Profile</th><th scope="col">Started</th><th scope="col">Ended</th><th scope="col">How</th></tr></thead>
+      <tbody>
+      {{range .Ended}}{{template "run-row" .}}{{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+{{end}}
+{{end}}

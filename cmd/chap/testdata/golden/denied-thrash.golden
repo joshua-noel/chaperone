@@ -1,0 +1,13 @@
+$ chap deploy 0588aa4ee0116267162e895016bcfda9ec3a3e2c
+exit: 3
+--- request
+POST /v0/ops
+auth: run
+{"op":"deploy","params":{"sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c"},"target":{"adapter":"wsl-host","ref":"pilot"}}
+--- stdout
+--- stderr
+DENIED op deploy (profile code, run r-7f3a)
+cause: OP_DISABLED
+why: deploy is disabled by policy for acme-shop
+request: not possible, policy does not allow asking
+note: repeated attempt 3 in 300s, flagged as thrash

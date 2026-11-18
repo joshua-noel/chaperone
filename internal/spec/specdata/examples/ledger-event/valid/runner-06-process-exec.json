@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 6,
+  "prev_hash": "sha256:5f4f10dfedd060a365d32ec85620034d76809239c59808cfd2d6c03ea5b616e6",
+  "hash": "sha256:dae987b56afdf3796278ab507169bec55ad378aded089e18b7713d69c58fa7ea",
+  "time_unix_nano": "1792792844000000000",
+  "trace_id": "a268071347d98ab77f06cc0b788e5072",
+  "span_id": "dafc5afdb5ecad51",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "process.exec",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "attributes": {
+    "process.command_line": "pnpm --filter sync test -- retry --repeat 10",
+    "process.pid": 4127,
+    "process.exit.code": 0
+  }
+}

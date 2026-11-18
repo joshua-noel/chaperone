@@ -1,0 +1,15 @@
+$ chap health
+exit: 0
+--- request
+POST /v0/ops
+auth: run
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+health health: succeeded
+id: q-1a2b3c  class: routine  policy: baseline-2026.10.1
+execution: x-1d2e3f
+result:
+  ready: true
+  status: ok
+  uptime_s: 86400
+--- stderr

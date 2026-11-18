@@ -1,0 +1,14 @@
+$ chap pr merge 214 --head 0588aa4ee0116267162e895016bcfda9ec3a3e2c --repo acme/shop --dry-run
+exit: 7
+--- request
+POST /v0/ops
+auth: orchestrator
+{"dry_run":true,"op":"pr.merge","params":{"base":"main","head_sha":"0588aa4ee0116267162e895016bcfda9ec3a3e2c","method":"squash"},"project":"acme-shop","target":{"adapter":"github","ref":"acme/shop#214"}}
+--- stdout
+dry run pr.merge acme/shop#214: would need an approval
+class: gated  policy: baseline-2026.10.1
+op_hash: sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415
+checks:
+  ok   verify: success on 0588aa4
+  ok   risk_tier: medium: approval needed
+--- stderr

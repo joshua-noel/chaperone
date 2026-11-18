@@ -1,0 +1,17 @@
+$ chap intake move SHOP-12 --state "Handed to engineering" --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"intake.move","params":{"state":"Handed to engineering"},"project":"storefront","target":{"adapter":"linear","ref":"SHOP-12"}}
+--- stdout
+intake.move SHOP-12: succeeded
+id: q-4d5e6f  class: routine  policy: baseline-2026.10.1
+execution: x-6f7a8b
+external_ref: https://linear.app/example/issue/SHOP-12
+result:
+  from: Todo
+  identifier: SHOP-12
+  moved: true
+  to: Handed to engineering
+--- stderr

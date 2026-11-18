@@ -1,0 +1,96 @@
+﻿# Run log: runbook orchestrator-token.md (issue, rotate, revoke)
+# Executed 2026-10-24 15:44:35 -04:00 on the server as a normal (not elevated) user, Windows PowerShell 5.1.26100.9711.
+# Scratch root: %USERPROFILE%\AppData\Local\Temp\chapdocs\scratch-orch (a temp dir; D:\Chaperone\data was not touched).
+# Lines starting with 'PS>' are commands exactly as the runbook gives them (paths in variables); '#' lines are notes.
+
+
+# Scratch setup (not a runbook step): chapd run on a scratch database, key set, export folder; the token goes to a scratch file instead of %LOCALAPPDATA%\Chaperone\orchestrator.token.
+
+# Runbook section 1: issue
+PS> & $chapd orch issue -id main -project storefront -ops "pr.merge,pr.open,pr.update,health,logs" -days 30 -db $db -token-file $tokenFile
+orchestrator "main" issued
+  fingerprint: 79a566ce
+  expires:     2026-11-23T19:44:35Z
+  token file:  %USERPROFILE%\AppData\Local\Temp\chapdocs\scratch-orch\home\orchestrator.token (readable by this user only)
+# exit code: 0
+PS> & $chapd orch list -db $db
+ID    FINGERPRINT  STATE  EXPIRES               PROJECTS       OPS                                     INTERIM
+main  79a566ce     live   2026-11-23T19:44:35Z  storefront  pr.merge,pr.open,pr.update,health,logs  false
+# exit code: 0
+PS> Test-Path $tokenFile
+True
+# exit code: 0
+
+# Runbook section 2: check that the orchestrator can use it (a normal window; CHAP_ORCHESTRATOR_TOKEN_FILE stands in for the default file)
+PS> & $chap ledger verify
+AUTH FAILED: chapd could not identify the caller
+why: unknown orchestrator token
+request: not possible, policy does not allow asking
+check CHAP_RUN_TOKEN or the orchestrator token file
+# exit code: 4
+PS> & $chap manual --all --project storefront
+AUTH FAILED: chapd could not identify the caller
+why: unknown orchestrator token
+request: not possible, policy does not allow asking
+check CHAP_RUN_TOKEN or the orchestrator token file
+# exit code: 4
+
+# Runbook section 3: rotate = issue again with the same id
+PS> & $chapd orch issue -id main -project storefront -ops "pr.merge,pr.open,pr.update,health,logs" -days 30 -db $db -token-file $tokenFile
+orchestrator "main" issued
+  fingerprint: 2152072e
+  expires:     2026-11-23T19:44:35Z
+  token file:  %USERPROFILE%\AppData\Local\Temp\chapdocs\scratch-orch\home\orchestrator.token (readable by this user only)
+# exit code: 0
+PS> & $chapd orch list -db $db
+ID    FINGERPRINT  STATE    EXPIRES               PROJECTS       OPS                                     INTERIM
+main  79a566ce     revoked  2026-11-23T19:44:35Z  storefront  pr.merge,pr.open,pr.update,health,logs  false
+main  2152072e     live     2026-11-23T19:44:35Z  storefront  pr.merge,pr.open,pr.update,health,logs  false
+# exit code: 0
+
+# The new token works:
+PS> & $chap ledger verify
+AUTH FAILED: chapd could not identify the caller
+why: unknown orchestrator token
+request: not possible, policy does not allow asking
+check CHAP_RUN_TOKEN or the orchestrator token file
+# exit code: 4
+
+# The old token (kept as old.token only in this scratch run) is refused on its next request:
+PS> & $chap ledger verify
+AUTH FAILED: chapd could not identify the caller
+why: unknown orchestrator token
+request: not possible, policy does not allow asking
+check CHAP_RUN_TOKEN or the orchestrator token file
+# exit code: 4
+
+# Runbook section 4: revoke
+PS> & $chapd orch revoke -id main -db $db
+revoked the orchestrator token of "main"; its next request is TOKEN_REVOKED
+# exit code: 0
+PS> & $chapd orch list -db $db
+ID    FINGERPRINT  STATE    EXPIRES               PROJECTS       OPS                                     INTERIM
+main  79a566ce     revoked  2026-11-23T19:44:35Z  storefront  pr.merge,pr.open,pr.update,health,logs  false
+main  2152072e     revoked  2026-11-23T19:44:35Z  storefront  pr.merge,pr.open,pr.update,health,logs  false
+# exit code: 0
+PS> & $chap ledger verify
+AUTH FAILED: chapd could not identify the caller
+why: unknown orchestrator token
+request: not possible, policy does not allow asking
+check CHAP_RUN_TOKEN or the orchestrator token file
+# exit code: 4
+PS> & $chap ledger verify --json
+{
+  "cause_code": "TOKEN_INVALID",
+  "request": {
+    "possible": false
+  },
+  "type": "auth_error",
+  "why": "unknown orchestrator token"
+}
+# exit code: 4
+
+# A second revoke:
+PS> & $chapd orch revoke -id main -db $db
+chapd: runtoken: not found: no live orchestrator token for "main"
+# exit code: 1

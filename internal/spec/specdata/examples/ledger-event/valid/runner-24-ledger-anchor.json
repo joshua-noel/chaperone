@@ -1,0 +1,24 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 24,
+  "prev_hash": "sha256:d5e444dac8301ae17b05ecc679b87eef94e6655f7391bc58ede540155c2af746",
+  "hash": "sha256:25d7fc537aee89695725e609c8b64e15ce64493f32eda0f86c15deb5bf6447f5",
+  "time_unix_nano": "1792797800000000000",
+  "trace_id": "2a7505dcce2b61db48a827fd5c3d3615",
+  "span_id": "2299ba88d14b6854",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "ledger.anchor",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "attributes": {
+    "factory.anchor.head_hash": "sha256:d5e444dac8301ae17b05ecc679b87eef94e6655f7391bc58ede540155c2af746",
+    "factory.anchor.head_seq": 23,
+    "factory.anchor.kind": "git-tag",
+    "factory.anchor.ref": "ledger-anchors/runner.host-1/2026-10-23T22-30Z"
+  }
+}

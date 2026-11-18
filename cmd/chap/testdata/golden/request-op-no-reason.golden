@@ -1,0 +1,8 @@
+$ chap request op deploy
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --reason is required
+usage: chap request op <op> --reason <why> [--params <json>] [--target <adapter>:<ref>]

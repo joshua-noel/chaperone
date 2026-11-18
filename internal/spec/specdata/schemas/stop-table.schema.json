@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory-spec.invalid/v0/stop-table.schema.json",
+  "title": "Jidoka stop table",
+  "description": "The factory's automatic stops, enforced outside the agent (plan: Borrowed from Toyota, 'Jidoka: stop on abnormality'). One entry per stop condition: what trips it, who detects it, what it halts (the blast radius), what happens to the run, how it recovers, and its cause code. The cause code is what the console shows (cause-coded andon) and what stop.raise ledger events carry. Codes are unique within a table (checked by tests, not by this schema).",
+  "type": "object",
+  "properties": {
+    "spec_version": { "$ref": "common.schema.json#/$defs/spec_version" },
+    "type": { "const": "stop-table" },
+    "table_version": { "$ref": "common.schema.json#/$defs/semver" },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "required": ["spec_version", "type", "table_version", "entries"],
+  "additionalProperties": false,
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "properties": {
+        "code": { "$ref": "common.schema.json#/$defs/cause_code" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "condition": {
+          "description": "The abnormality, stated so a detector can test it.",
+          "$ref": "common.schema.json#/$defs/short_text"
+        },
+        "detected_by": {
+          "description": "The component outside the agent that observes the condition.",
+          "enum": ["runner-scheduler", "runner-sandbox", "runner-proxy", "ledger-verifier", "chaperone-authz", "host-monitor", "operator"]
+        },
+        "halts": {
+          "description": "Blast radius. run = this run only; runs that merely wait for its output are not halted. dependents = this run and every run that lists it (transitively) in depends_on, because they would consume tainted or unaccepted output. all = every run in the fault domain (the sandbox host) and no new run starts there until the stop is cleared.",
+          "enum": ["run", "dependents", "all"]
+        },
+        "action": {
+          "description": "kill = terminate the sandbox, keep a snapshot. quarantine = kill, and freeze every output of the run (branches, PRs, artifacts) as untrusted until a human reviews the evidence. pause = suspend: no new operations, sandbox and state kept, resumable.",
+          "enum": ["kill", "quarantine", "pause"]
+        },
+        "recovery": {
+          "description": "none = ended; start a new run if wanted. manual = a human clears it in the console. auto_when_clear = lifts itself when the detector sees the condition gone. on_approval = a human approval (for example an extended budget) lifts or continues it.",
+          "enum": ["none", "manual", "auto_when_clear", "on_approval"]
+        },
+        "evidence": {
+          "description": "Ledger event names and artifacts kept with the stop.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+        },
+        "next_action": {
+          "description": "What the console shows as the next step for the human.",
+          "$ref": "common.schema.json#/$defs/short_text"
+        },
+        "detect_within_seconds": { "type": "integer", "minimum": 1 },
+        "acknowledge_within_minutes": { "type": "integer", "minimum": 1 },
+        "rationale": { "$ref": "common.schema.json#/$defs/short_text" }
+      },
+      "required": ["code", "name", "condition", "detected_by", "halts", "action", "recovery", "evidence", "next_action", "detect_within_seconds", "acknowledge_within_minutes", "rationale"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "iss": "runner.host-1",
+  "sub": "run:r-7f3a",
+  "aud": "chaperone",
+  "iat": 1792792800,
+  "exp": 1792798320,
+  "jti": "n8Gf3kQ2xV7bTz1LwA9cYd",
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "profile": {
+    "name": "research",
+    "version": "1.0.0",
+    "digest": "sha256:79ade8ad9c78968f3b423865eb8c300cb34e816b416cac840d2b4fe9de29c2aa"
+  },
+  "brief_sha256": "sha256:7ed2358fdd424519b90502f453c9ab84266b75d6c17db83fdb89511dd61d67c1",
+  "isolation": "gvisor",
+  "task_scope": {
+    "repo": "acme/shop",
+    "base": "main",
+    "branch": "agent/r-7f3a",
+    "paths": [
+      "services/sync/src/**",
+      "services/sync/test/**"
+    ],
+    "ops": []
+  },
+  "budget": {
+    "minutes": 90,
+    "tokens": 2000000
+  }
+}

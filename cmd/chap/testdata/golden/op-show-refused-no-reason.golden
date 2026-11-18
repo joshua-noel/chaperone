@@ -1,0 +1,13 @@
+$ chap op show q-w0ss2r
+exit: 5
+--- request
+GET /v0/ops/q-w0ss2r
+auth: run
+--- stdout
+pr.open acme/shop: refused
+id: q-w0ss2r  class: routine  policy: baseline-2026.10.1
+checks:
+  ok   repo: acme/shop
+  ok   branches: agent/r-7f3a -> main
+why: chapd recorded no reason for this refusal; the cause code is in the ledger, op.result of q-w0ss2r
+--- stderr

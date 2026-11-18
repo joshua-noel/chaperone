@@ -1,0 +1,42 @@
+{
+  "spec_version": "0",
+  "type": "op.approval",
+  "approval_id": "a-2n6v1b",
+  "request_id": "q-4k2m9x",
+  "run_id": "r-7f3a",
+  "op_hash": "sha256:e2b37a3e74132598e3b7d86068860fb0ff3e6e627fcd732ae7252a3732833415",
+  "decision": "denied",
+  "policy_version": "baseline-2026.10.1",
+  "checks": [
+    {
+      "name": "ci.green_on_exact_head",
+      "passed": true,
+      "detail": "verify = success on the requested head"
+    },
+    {
+      "name": "head.unchanged",
+      "passed": true
+    },
+    {
+      "name": "base.current",
+      "passed": true
+    }
+  ],
+  "shown": {
+    "display_sha256": "sha256:23932fe245e557d8db6fd83b9ddeef27e5377881c2028b1a9d2defed03f9a98e",
+    "channels": [
+      "pc",
+      "phone"
+    ]
+  },
+  "confirmations": [],
+  "approver": {
+    "id": "operator"
+  },
+  "challenge_sha256": "sha256:79ccdaa53ecf0ab7de0bcbc3460955f7587e3e3c47c81b16f00b8d4c2a04fc8b",
+  "nonce": "kP0xW7sDq2Lm9TgHb5Yz1c",
+  "single_use": true,
+  "decided_at": "2026-10-23T22:42:31Z",
+  "expires_at": "2026-10-23T22:52:31Z",
+  "reason": "The commit list shows an unrelated change."
+}

@@ -1,0 +1,30 @@
+{
+  "spec_version": "0",
+  "chain": "chaperone.host-1",
+  "seq": 10,
+  "prev_hash": "sha256:d491b424bea83f2557e96dabb214c8ec9788a658dba3e1369b3a3d0adcf1de74",
+  "hash": "sha256:8d433ea0c0bd82438eddb202dafcc1f3e28169b621c947806b51128a943fa234",
+  "time_unix_nano": "1792800320000000000",
+  "trace_id": "b368a14e69fc73207793b281c4391491",
+  "span_id": "9c3a5e1b7d0f2648",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "op.result",
+  "resource": {
+    "service.name": "chaperone",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "project": "acme-shop",
+  "attributes": {
+    "factory.request_id": "q-9d1t7w",
+    "factory.op_hash": "sha256:38159f26aeb226fefd69af55175315c4ece4532338e511d8e91cf77d81905848",
+    "factory.execution_id": "x-4t8k2n",
+    "factory.outcome": "succeeded",
+    "factory.policy_version": "baseline-2026.10.1",
+    "factory.external_ref": "ssh-host:staging/releases/035954c",
+    "factory.requester.kind": "orchestrator",
+    "factory.orchestrator.id": "main"
+  },
+  "body": "Receipt found when the host was asked under the same execution_id; nothing ran twice."
+}

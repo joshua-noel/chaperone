@@ -1,0 +1,8 @@
+$ chap issue comment 301 --repo example-org/storefront
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --body or --body-file is required
+usage: chap issue comment <n> [--body <b> | --body-file <f>] [--repo owner/name]

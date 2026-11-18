@@ -1,0 +1,24 @@
+{
+  "spec_version": "0",
+  "chain": "runner.host-1",
+  "seq": 22,
+  "prev_hash": "sha256:fa214b501634a6e409f3e8a1efe285218f63455831055e95dff5e69b36565150",
+  "hash": "sha256:318470c68b009693a73f46fec2e49aa142668695d04a4413777ae10fcc86c959",
+  "time_unix_nano": "1792797220000000000",
+  "trace_id": "0b6f2d1a084fc007e6a2f5e302ace42e",
+  "span_id": "3bdeb9de28f18619",
+  "severity_number": 9,
+  "severity_text": "INFO",
+  "event_name": "stop.ack",
+  "resource": {
+    "service.name": "runner",
+    "service.version": "0.0.0-spec",
+    "service.instance.id": "host-1"
+  },
+  "run_id": "r-9c21",
+  "project": "acme-shop",
+  "attributes": {
+    "factory.stop.id": "s-1x7k3m",
+    "factory.ack.by": "operator"
+  }
+}

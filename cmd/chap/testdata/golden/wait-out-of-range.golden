@@ -1,0 +1,8 @@
+$ chap health --wait 99
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: invalid value "99" for flag -wait: must be 0 to 55
+usage: chap health

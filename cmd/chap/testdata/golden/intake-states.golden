@@ -1,0 +1,19 @@
+$ chap intake states --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"intake.states","params":{},"project":"storefront","target":{"adapter":"linear","ref":"board"}}
+--- stdout
+intake.states board: succeeded
+id: q-2b3c4d  class: routine  policy: baseline-2026.10.1
+execution: x-4d5e6f
+team SHOP (Operations), label claude
+STATE                  TYPE       intake.move MAY SET
+Backlog                backlog    no
+Todo                   unstarted  no
+Handed to engineering  started    yes
+Blocked                started    yes
+Completed              completed  yes
+in the policy but not a state of the team (fix the policy): In review
+--- stderr

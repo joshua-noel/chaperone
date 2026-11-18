@@ -1,0 +1,12 @@
+$ chap health
+exit: 4
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"health","params":{},"target":{"adapter":"pilot","ref":"health"}}
+--- stdout
+--- stderr
+DENIED token /v0/ops (orchestrator main)
+cause: TOKEN_EXPIRED
+why: orchestrator token main expired
+next: the operator issues a new token: chapd orch issue -id main -project <p> -ops <op,...> (in an elevated window)

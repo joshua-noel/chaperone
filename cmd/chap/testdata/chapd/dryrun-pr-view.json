@@ -1,0 +1,1 @@
+{"type":"dry_run","would_allow":true,"outcome":"allow","op_hash":"sha256:5d41402abc4b2a76b9719d911017c592a1b2c3d4e5f60718293a4b5c6d7e8f90","class":"routine","policy_version":"baseline-2026.10.1","checks":[{"name":"repo","passed":true,"detail":"example-org/storefront#214"},{"name":"read_only","passed":true,"detail":"pr.view only reads"}]}

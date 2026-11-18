@@ -1,0 +1,8 @@
+$ chap runs revoke
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: give one run id or --all
+usage: chap runs revoke <r-id> | --all

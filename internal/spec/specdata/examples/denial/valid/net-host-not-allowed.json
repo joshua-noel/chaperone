@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "type": "denial",
+  "denial_id": "d-3f8k2q",
+  "run_id": "r-7f3a",
+  "project": "acme-shop",
+  "profile": "code",
+  "at": "2026-10-23T22:20:05Z",
+  "surface": "net",
+  "action": {
+    "verb": "connect",
+    "target": "api.example.com:443"
+  },
+  "cause_code": "NET_HOST_NOT_ALLOWED",
+  "why": "host not in the allowlist for profile code",
+  "request": {
+    "possible": true,
+    "command": "chap request net api.example.com --reason \"<why the task needs it>\""
+  },
+  "thrash": {
+    "count": 1,
+    "window_seconds": 300,
+    "flagged": false
+  }
+}

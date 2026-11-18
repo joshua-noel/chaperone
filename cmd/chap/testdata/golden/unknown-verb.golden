@@ -1,0 +1,7 @@
+$ chap pr close
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: pr needs a verb: checks|diff|files|merge|open|update|view

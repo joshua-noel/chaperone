@@ -1,0 +1,17 @@
+$ chap dev-token --project acme-shop --repo acme/shop --branch agent/r-9a2b --path docs/** --op pr.open --out run.token --json
+exit: 0
+--- request
+POST /v0/dev-tokens
+auth: orchestrator
+{"base":"main","branch":"agent/r-9a2b","minutes":60,"ops":["pr.open"],"paths":["docs/**"],"profile":"host-interim","project":"acme-shop","repo":"acme/shop"}
+--- file
+run.token (120 bytes)
+--- stdout
+{
+  "expires_at": "2026-10-24T10:30:00Z",
+  "fingerprint": "e2fa8b33",
+  "jti": "jti-5f8c1d2e3a4b5c6d",
+  "run_id": "r-9a2b",
+  "token_file": "run.token"
+}
+--- stderr

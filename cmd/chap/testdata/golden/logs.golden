@@ -1,0 +1,16 @@
+$ chap logs web --lines 2
+exit: 0
+--- request
+POST /v0/ops
+auth: run
+{"op":"logs","params":{"lines":2,"source":"web"},"target":{"adapter":"wsl-host","ref":"pilot"}}
+--- stdout
+logs pilot: succeeded
+id: q-4d5e6f  class: routine  policy: baseline-2026.10.1
+execution: x-7a8b9c
+result:
+  lines:
+    2026-10-24T09:10:01Z GET /healthz 200
+    2026-10-24T09:10:31Z GET /healthz 200
+  source: web
+--- stderr
