@@ -392,14 +392,14 @@ func TestUnreportedAttachmentUnderAnyDoesNotSurviveNarrowing(t *testing.T) {
 	}
 
 	rebuilt(t, r, AuthenticatorsPlatform)
-	if n, err := r.con.RefusedCredentials(context.Background()); err != nil || n != 1 {
+	if n, usable, err := r.con.RefusedCredentials(context.Background()); err != nil || n != 1 || usable != 0 {
 		t.Fatalf("refused credentials: %d, %v", n, err)
 	}
 	code, out := r.browser(pcOrigin).login(key, opts{signCount: &zero})
 	wantRefused(t, r, code, out, ReasonAttachment)
 
 	rebuilt(t, r, AuthenticatorsAny)
-	if n, _ := r.con.RefusedCredentials(context.Background()); n != 0 {
+	if n, usable, _ := r.con.RefusedCredentials(context.Background()); n != 0 || usable != 1 {
 		t.Fatalf("refused credentials under any: %d", n)
 	}
 	if code, out := r.browser(pcOrigin).login(key, opts{signCount: &zero}); code != 200 {
@@ -512,5 +512,53 @@ func TestEnrolmentStopsWhenAListenerStops(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("a stopped listener was not reported")
+	}
+}
+
+// The counts behind chapd's start-up warning: refused and still-usable credentials of enabled approvers; a revoked
+// credential and a disabled approver's credentials count for neither.
+func TestRefusedCredentialsCounts(t *testing.T) {
+	r := anyRig(t)
+	b := r.browser(pcOrigin)
+	if code, out := b.enrolAs(r.token(), roaming(t), opts{}); code != 200 {
+		t.Fatalf("enrol: %d %v", code, out)
+	}
+	count := func() (int, int) {
+		t.Helper()
+		n, u, err := r.con.RefusedCredentials(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n, u
+	}
+	rebuilt(t, r, AuthenticatorsPlatform)
+	if n, u := count(); n != 1 || u != 0 { // full lockout
+		t.Fatalf("refused %d, usable %d", n, u)
+	}
+	if _, err := r.db.SQL().Exec(`INSERT INTO credentials (approver_id, credential_id, rp_id, origin, public_key, attestation_type,
+		attestation_format, aaguid, transports, attachment, sign_count, user_verified, backup_eligible, backup_state, label, created_at)
+		SELECT approver_id, randomblob(32), rp_id, origin, public_key, attestation_type, attestation_format, aaguid, '[]', 'platform',
+		0, 1, 0, 0, 'Built in', created_at FROM credentials LIMIT 1`); err != nil {
+		t.Fatal(err)
+	}
+	if n, u := count(); n != 1 || u != 1 { // partial
+		t.Fatalf("refused %d, usable %d", n, u)
+	}
+	rebuilt(t, r, AuthenticatorsAny)
+	if n, u := count(); n != 0 || u != 2 {
+		t.Fatalf("under any: refused %d, usable %d", n, u)
+	}
+	rebuilt(t, r, AuthenticatorsPlatform)
+	if _, err := r.db.SQL().Exec(`UPDATE credentials SET revoked_at = created_at WHERE attachment = 'cross-platform'`); err != nil {
+		t.Fatal(err)
+	}
+	if n, u := count(); n != 0 || u != 1 {
+		t.Fatalf("after a revoke: refused %d, usable %d", n, u)
+	}
+	if _, err := r.db.SQL().Exec(`UPDATE approvers SET disabled_at = created_at`); err != nil {
+		t.Fatal(err)
+	}
+	if n, u := count(); n != 0 || u != 0 {
+		t.Fatalf("disabled approver: refused %d, usable %d", n, u)
 	}
 }

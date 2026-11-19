@@ -62,3 +62,40 @@ func TestListenCanBeTakenAgainAtOnce(t *testing.T) {
 	}
 	l2.Close()
 }
+
+// This Windows build already refuses a same-user SO_REUSEADDR bind on a plain listener, so the test above would pass
+// without the fix. This one reads the option back from the socket: SO_EXCLUSIVEADDRUSE is 1 on a Listen listener, and
+// 0 on a plain net.Listen one (the control).
+func TestListenSetsExclusiveAddrUse(t *testing.T) {
+	read := func(l net.Listener) int {
+		t.Helper()
+		rc, err := l.(*net.TCPListener).SyscallConn()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v int
+		var gerr error
+		if err := rc.Control(func(fd uintptr) {
+			v, gerr = windows.GetsockoptInt(windows.Handle(fd), windows.SOL_SOCKET, soExclusiveAddrUse)
+		}); err != nil || gerr != nil {
+			t.Fatalf("getsockopt: %v %v", err, gerr)
+		}
+		return v
+	}
+	l, err := Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if v := read(l); v != 1 {
+		t.Fatalf("SO_EXCLUSIVEADDRUSE is %d on a Listen listener, want 1", v)
+	}
+	plain, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Close()
+	if v := read(plain); v != 0 {
+		t.Fatalf("the control listener has SO_EXCLUSIVEADDRUSE %d: the test cannot tell the fix from the default", v)
+	}
+}

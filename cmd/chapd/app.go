@@ -260,10 +260,17 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	if cfg.Authenticators == console.AuthenticatorsAny {
 		a.log.Warn("approver authenticators: any. A hardware security key or a phone passkey may be enrolled and may approve, as well as one built into the device (ADR-004 amendment 15)")
 	}
-	if refused, err := con.RefusedCredentials(ctx); err != nil {
+	// A setting that refuses enrolled passkeys (narrowed from "any", or a built-in passkey whose browser did not
+	// report its kind under "any") is said at start. A full lockout is logged as an error, with the way out. It does
+	// not stop chapd: that would turn a setting mistake into an outage for the agents doing routine work, and the
+	// routine ops that need no approval go on without the console; the operator is locked out of approving either way, and the fix is
+	// the same flag.
+	if refused, usable, err := con.RefusedCredentials(ctx); err != nil {
 		return nil, err
+	} else if refused > 0 && usable == 0 {
+		a.log.Error("nobody can sign in or approve: every enrolled passkey is refused by the authenticators setting. Start chapd again with -approver-authenticators any (chapd enroll cannot add one while an approver exists)", "refused", refused)
 	} else if refused > 0 {
-		a.log.Warn("enrolled passkeys the authenticators setting refuses (a security key or phone made while it was any): they cannot sign in or approve until chapd runs with -approver-authenticators any again", "count", refused)
+		a.log.Warn("some enrolled passkeys are refused by the authenticators setting and cannot sign in or approve: a security key or phone passkey made while it was any, or a built-in passkey whose browser did not report its kind. Start chapd with -approver-authenticators any to allow them again", "refused", refused, "usable", usable)
 	}
 
 	ntf, err := a.buildNotifier(ctx)
@@ -542,7 +549,7 @@ func (a *App) Start(ctx context.Context) error {
 // Listen takes the console's port on cfg.Addr (loopback only): 127.0.0.1:PORT and [::1]:PORT (internal/loopback). It
 // is called before Start, so a port somebody else holds stops chapd before crash recovery, the sweeps and the release of
 // approved ops run (each service restart would repeat them), and before the
-// service reports that it is running. The listeners accept nothing until Serve.
+// service reports that it is running. The system completes connections into the backlog, but nothing is read or answered until Serve.
 func (a *App) Listen() ([]net.Listener, error) { return a.listenWith(loopback.Listen) }
 
 func (a *App) listenWith(listen loopback.ListenFunc) ([]net.Listener, error) {

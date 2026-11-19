@@ -117,7 +117,7 @@ func newLogger(dir string, w io.Writer) (*slog.Logger, func(), error) {
 // runDaemon builds chapd, takes the console's port, starts its background work and serves until ctx ends. The port is
 // taken before Start (and so before anything printed for the operator, such as the demo's enrolment address): if
 // another program holds it, chapd stops there, and a service that restarts does not repeat start-up work each time.
-// The listeners accept connections only after Start has finished.
+// Connections made meanwhile wait in the system's backlog: nothing is read or answered until Start has finished.
 func runDaemon(ctx context.Context, cfg Config) error {
 	app, err := Build(ctx, cfg)
 	if err != nil {

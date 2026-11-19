@@ -82,14 +82,20 @@ func (c *Console) recordedAttachment(a protocol.AuthenticatorAttachment) protoco
 	return a
 }
 
-// RefusedCredentials counts the live credentials the current setting refuses (a security key enrolled while it said
-// "any", under "platform" now). chapd warns at start when it is not zero: the only approver may be among them.
-func (c *Console) RefusedCredentials(ctx context.Context) (int, error) {
-	if c.authn == AuthenticatorsAny {
-		return 0, nil
+// RefusedCredentials counts the live credentials of enabled approvers that the current setting refuses (one enrolled
+// while it said "any", under "platform" now), and those it still allows. refused > 0 with usable == 0 is a full lockout:
+// nobody can sign in or approve at this console until the setting is wide again. chapd logs both cases at start.
+func (c *Console) RefusedCredentials(ctx context.Context) (refused, usable int, err error) {
+	var total int
+	err = c.db.SQL().QueryRowContext(ctx,
+		`SELECT count(*), coalesce(sum(CASE WHEN c.attachment NOT IN ('', 'platform') THEN 1 ELSE 0 END), 0)
+		 FROM credentials c JOIN approvers a ON a.id = c.approver_id
+		 WHERE c.revoked_at IS NULL AND a.disabled_at IS NULL`).Scan(&total, &refused)
+	if err != nil {
+		return 0, 0, err
 	}
-	var n int
-	err := c.db.SQL().QueryRowContext(ctx,
-		`SELECT count(*) FROM credentials WHERE revoked_at IS NULL AND attachment NOT IN ('', 'platform')`).Scan(&n)
-	return n, err
+	if c.authn == AuthenticatorsAny {
+		return 0, total, nil
+	}
+	return refused, total - refused, nil
 }
