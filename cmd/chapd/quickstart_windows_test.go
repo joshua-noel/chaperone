@@ -4,7 +4,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -95,34 +97,77 @@ func TestQuickstartFolderACLOnWindows(t *testing.T) {
 		t.Fatal("the test's parent folder already looks private; the check below proves nothing")
 	}
 	dir := filepath.Join(parent, "qs")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	old := filepath.Join(dir, "old.txt") // made before the folder is claimed: it must be covered too
-	if err := os.WriteFile(old, []byte("x"), 0o644); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil { // an empty folder the user made, with the parent's permissions
 		t.Fatal(err)
 	}
 	if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55436", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyUserOnlyDACL(dir, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT); err != nil {
+	if err := verifyUserOnlyDACL(dir, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT); err != nil { // owner included
 		t.Fatal(err)
 	}
 	// Everything the quickstart makes, and a file made later, carries only the user's entry.
-	later := filepath.Join(dir, "state.db")
+	later := filepath.Join(dir, "later.txt")
 	if err := os.WriteFile(later, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{old, later, filepath.Join(dir, quickstartMarker), filepath.Join(dir, "run-keys.json"),
+	for _, p := range []string{later, filepath.Join(dir, "state.db"), filepath.Join(dir, quickstartMarker), filepath.Join(dir, "run-keys.json"),
 		filepath.Join(dir, "policy"), filepath.Join(dir, "policy", "playground.yaml"), filepath.Join(dir, "logs")} {
 		onlyTheUserCanUse(t, p)
+		if err := checkTrusted(p); err != nil {
+			t.Errorf("%s: %v", p, err)
+		}
 	}
 	// A second start keeps it so.
-	st := &quickstartState{Kind: quickstartKind, Version: 1, Addr: "127.0.0.1:55436"}
+	st, err := readQuickstartState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := prepareQuickstartFolder(dir, st, "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := verifyUserOnlyDACL(dir, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A folder is private only if its OWNER is the current user: an owner can always rewrite the permission list.
+// C:\Windows is owned by the system, not by the user; reading is all this does.
+func TestOwnerOfAFolderIsChecked(t *testing.T) {
+	win := os.Getenv("SystemRoot")
+	if win == "" {
+		t.Skip("no SystemRoot")
+	}
+	if err := ownedByCurrentUser(win); err == nil {
+		t.Errorf("%s was taken as owned by the current user", win)
+	}
+	if err := verifyUserOnlyDACL(win, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT); err == nil || !strings.Contains(err.Error(), "owned by") {
+		t.Errorf("verifyUserOnlyDACL accepted a folder somebody else owns: %v", err)
+	}
+	if err := checkTrusted(win); err == nil {
+		t.Errorf("checkTrusted accepted %s", win)
+	}
+	own := filepath.Join(t.TempDir(), "mine")
+	if err := os.Mkdir(own, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ownedByCurrentUser(own); err != nil {
+		t.Errorf("a folder this user made: %v", err)
+	}
+	// After the lock the owner is read back as the current user.
+	if err := restrictDirToCurrentUser(own); err != nil {
+		t.Fatal(err)
+	}
+	if err := ownedByCurrentUser(own); err != nil {
+		t.Error(err)
+	}
+}
+
+// makeWorldWritable gives Everyone full control of path through an explicit entry, the way a user
+// with write access to the folder could (an entry set on the file itself, which a later change to the folder keeps).
+func makeWorldWritable(t *testing.T, path string) {
+	t.Helper()
+	if out, err := exec.Command("icacls", path, "/grant", "*S-1-1-0:F").CombinedOutput(); err != nil {
+		t.Fatalf("icacls: %v %s", err, out)
 	}
 }

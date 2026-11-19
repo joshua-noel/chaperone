@@ -69,6 +69,10 @@ const (
 // pr.merge, which always needs a passkey for a change to code.
 var quickstartOps = []string{"pr.checks", "pr.diff", "pr.files", "pr.merge", "pr.view"}
 
+// quickstartAfterCheck runs between the folder check and the folder preparation. Only tests set it: they
+// plant a file there, the way another user could in that window.
+var quickstartAfterCheck func()
+
 //go:embed quickstart_policy/playground.yaml
 var quickstartPolicy []byte
 
@@ -365,9 +369,19 @@ type quickstartFolder struct {
 	Fresh                                       bool
 }
 
-// prepareQuickstartFolder makes or re-opens the folder. The marker is written
-// first, so an interrupted first run is a quickstart folder too. Existing files
-// are kept: a second run reuses the database, the key set and the policy.
+// prepareQuickstartFolder makes or re-opens the folder, and never trusts what it did not
+// make itself. Between checkQuickstartDir and here the folder has had only its parent's
+// permissions, so another user may have put files in it. Therefore:
+//
+//   - an existing folder must be owned by the current user before anything is changed;
+//   - the folder is locked (private to the user; on Windows also owned by the user);
+//   - on a first run (no marker) it must still be EMPTY after the lock, and every file
+//     the first run makes is created exclusively (O_EXCL), never "if absent", so a planted
+//     file is a refusal and not an input: a planted run-keys.json would be the key set chapd loads;
+//   - on a reused folder (marker present) each file about to be trusted must be owned by the
+//     user and closed to other users (checkTrusted), and the marker must be what was read.
+//
+// The marker is written first, so an interrupted first run is a quickstart folder too.
 func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string, now time.Time) (*quickstartFolder, error) {
 	f := &quickstartFolder{
 		Dir: dir, DB: filepath.Join(dir, "state.db"), Keys: filepath.Join(dir, "run-keys.json"),
@@ -386,45 +400,120 @@ func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string
 	default:
 		f.Addr = state.Addr
 	}
+	if _, err := os.Lstat(dir); err == nil {
+		if err := ownedByCurrentUser(dir); err != nil {
+			return nil, fmt.Errorf("refusing %s: %w", dir, err)
+		}
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	// Private to this user whatever the parent allows: mode 0700, or on Windows a protected ACL with one inherited
-	// entry for this user, read back. A folder that cannot be made private is refused.
+	// Private to this user whatever the parent allows: mode 0700, or on Windows a protected ACL with entries for
+	// this user alone and this user as owner, read back. A folder that cannot be made private is refused.
 	if err := restrictDirToCurrentUser(dir); err != nil {
 		return nil, fmt.Errorf("cannot make %s private to this user: %w", dir, err)
 	}
 	if state == nil {
-		b, _ := json.MarshalIndent(quickstartState{Kind: quickstartKind, Version: 1, Addr: f.Addr, Playground: true, Created: now.UTC().Format(time.RFC3339)}, "", "  ")
-		if err := os.WriteFile(filepath.Join(dir, quickstartMarker), append(b, '\n'), 0o600); err != nil {
-			return nil, err
+		return f, firstRunFiles(f, now)
+	}
+	return f, reuseFiles(f, state)
+}
+
+// firstRunFiles fills a folder that must be empty. Nothing may exist; everything is made exclusively.
+func firstRunFiles(f *quickstartFolder, now time.Time) error {
+	entries, err := os.ReadDir(f.Dir)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 0 {
+		return fmt.Errorf("%s was empty when it was checked and is not now (it holds %q). Somebody else may be writing there. Nothing was used", f.Dir, entries[0].Name())
+	}
+	b, _ := json.MarshalIndent(quickstartState{Kind: quickstartKind, Version: 1, Addr: f.Addr, Playground: true, Created: now.UTC().Format(time.RFC3339)}, "", "  ")
+	if err := createExclusive(filepath.Join(f.Dir, quickstartMarker), append(b, '\n')); err != nil {
+		return err
+	}
+	for _, d := range []string{f.PolicyDir, f.LogDir} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			return err
 		}
-	}
-	if err := os.MkdirAll(f.PolicyDir, 0o700); err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(f.LogDir, 0o700); err != nil {
-		return nil, err
-	}
-	if err := writeIfAbsent(filepath.Join(f.PolicyDir, quickstartProject+".yaml"), quickstartPolicy); err != nil {
-		return nil, err
 	}
 	keys, err := newQuickstartKeySet()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := writeIfAbsent(f.Keys, keys); err != nil {
-		return nil, err
+	for _, c := range []struct {
+		path string
+		data []byte
+	}{
+		{filepath.Join(f.PolicyDir, quickstartProject+".yaml"), quickstartPolicy},
+		{f.Keys, keys},
+		{f.DB, nil}, // an empty file is an empty database; made here so nobody else can make it first
+	} {
+		if err := createExclusive(c.path, c.data); err != nil {
+			return err
+		}
 	}
-	return f, nil
+	return nil
 }
 
-// writeIfAbsent writes data to a new file with mode 0600 and leaves an existing file alone.
-func writeIfAbsent(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		return nil
+// reuseFiles checks a folder of an earlier run before anything in it is trusted, then
+// makes what is missing, exclusively.
+func reuseFiles(f *quickstartFolder, state *quickstartState) error {
+	if again, err := readQuickstartState(f.Dir); err != nil || *again != *state {
+		return fmt.Errorf("%s changed while the quickstart was starting (%v). Nothing was used", filepath.Join(f.Dir, quickstartMarker), err)
 	}
+	trust := []string{filepath.Join(f.Dir, quickstartMarker), f.Keys, f.DB, f.DB + "-wal", f.DB + "-shm", f.TokenFile, f.PolicyDir, f.LogDir}
+	for _, d := range []string{f.PolicyDir, f.LogDir} {
+		if entries, err := os.ReadDir(d); err == nil {
+			for _, e := range entries {
+				trust = append(trust, filepath.Join(d, e.Name()))
+			}
+		}
+	}
+	existed := map[string]bool{}
+	for _, p := range trust {
+		if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err := checkTrusted(p); err != nil {
+			return fmt.Errorf("will not use %s: %w. If you did not put it there, somebody else may have; use a new --dir", p, err)
+		}
+		existed[p] = true
+	}
+	// What was missing at the check is made now, exclusively: a file that has appeared since was not checked and is refused.
+	policy := filepath.Join(f.PolicyDir, quickstartProject+".yaml")
+	keys, err := newQuickstartKeySet()
+	if err != nil {
+		return err
+	}
+	for _, c := range []struct {
+		path  string
+		isDir bool
+		data  []byte
+	}{
+		{f.PolicyDir, true, nil}, {f.LogDir, true, nil},
+		{policy, false, quickstartPolicy}, {f.Keys, false, keys},
+		{f.DB, false, nil}, // so nobody can make the database first
+	} {
+		if existed[c.path] {
+			continue
+		}
+		var err error
+		if c.isDir {
+			err = os.Mkdir(c.path, 0o700)
+		} else {
+			err = createExclusive(c.path, c.data)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// createExclusive writes data to a NEW file with mode 0600 and fails if the file exists.
+func createExclusive(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
@@ -517,6 +606,9 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 		return err
 	}
 	defer loopback.CloseAll(lns)
+	if quickstartAfterCheck != nil {
+		quickstartAfterCheck()
+	}
 
 	f, err := prepareQuickstartFolder(dir, state, o.Addr, time.Now())
 	if err != nil {

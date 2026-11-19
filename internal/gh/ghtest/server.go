@@ -438,13 +438,17 @@ func (s *Server) CapLog(maxEntries, maxBody int) {
 	s.mu.Unlock()
 }
 
-// record appends to the log under s.mu, honouring CapLog.
-func (s *Server) record(r Request) {
-	if s.bodyMax > 0 && len(r.Body) > s.bodyMax {
-		r.Body = r.Body[:s.bodyMax]
+// record appends to the log under s.mu, honouring CapLog. The body is cut before it
+// becomes a string, so the log keeps a copy of at most bodyMax bytes and not the
+// whole request body (a substring of a large string would keep all of it alive).
+func (s *Server) record(method, path, query string, body []byte) {
+	if s.bodyMax > 0 && len(body) > s.bodyMax {
+		body = body[:s.bodyMax]
 	}
-	s.log = append(s.log, r)
+	s.log = append(s.log, Request{Method: method, Path: path, Query: query, Body: string(body)})
 	if s.logMax > 0 && len(s.log) > s.logMax {
-		s.log = append(s.log[:0], s.log[len(s.log)-s.logMax:]...)
+		n := copy(s.log, s.log[len(s.log)-s.logMax:])
+		clear(s.log[n:]) // drop the references the old tail still holds
+		s.log = s.log[:n]
 	}
 }

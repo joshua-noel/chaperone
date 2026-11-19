@@ -2,6 +2,7 @@ package ghtest
 
 import (
 	"net/http"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -37,4 +38,30 @@ func TestCapLogBoundsTheRequestLog(t *testing.T) {
 	if want := "/x" + strings.Repeat("y", 20); got[2].Path != want {
 		t.Errorf("newest entry %q, want %q", got[2].Path, want)
 	}
+}
+
+// A capped log must not keep the request bodies alive: 200 posts of 1 MiB must not leave 200 MiB on the heap.
+func TestCapLogDoesNotRetainWholeBodies(t *testing.T) {
+	s := New(t)
+	s.CapLog(500, 4<<10)
+	body := strings.Repeat("b", 1<<20)
+	for range 200 {
+		resp, err := http.Post(s.URL()+"/x", "text/plain", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	got := s.Requests()
+	if len(got) != 200 || len(got[0].Body) != 4<<10 {
+		t.Fatalf("%d entries, first body %d bytes", len(got), len(got[0].Body))
+	}
+	var m runtime.MemStats
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&m)
+	if m.HeapInuse > 64<<20 { // the bug held about 200 MiB
+		t.Errorf("heap in use after 200 capped 1 MiB posts: %d MiB", m.HeapInuse>>20)
+	}
+	runtime.KeepAlive(got)
 }
