@@ -261,11 +261,11 @@ func (g *GitPushOp) Finish(ctx context.Context, res GitPushResult) error {
 	case "succeeded":
 		to, outcome = StateSucceeded, "succeeded"
 		out.ExternalRef = clamp("github:"+g.rec.TargetRef+"@"+g.newSHA(), 300)
-		out.Result = map[string]any{"ref": g.ref(), "new": g.newSHA()}
+		out.Result = map[string]any{"ref": lineText(g.ref(), 300), "new": lineText(g.newSHA(), 300)}
 	case "failed":
 		to, outcome = StateFailed, "failed"
 		out.Failed = true
-		out.Result = map[string]any{"ref": g.ref(), "error": clamp(res.Detail, 300)}
+		out.Result = map[string]any{"ref": lineText(g.ref(), 300), "error": lineText(res.Detail, 300)}
 	case "unconfirmed":
 		out.Unconfirmed = true
 	default:

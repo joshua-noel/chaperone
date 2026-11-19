@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/untrusted"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -120,14 +121,14 @@ func (m *PRMerger) UpdateBranch(ctx context.Context, req PRUpdateRequest) (res *
 		}
 		return nil, fmt.Errorf("pr.update: %w", updErr)
 	}
-	res.Updated, res.Message = true, clip(msg, 300)
+	res.Updated, res.Message = true, clip(untrusted.Line(msg), 300)
 	v.add("update_write", true, "")
 	res.NewHead = res.OldHead
-	res.ExternalRef = clip(pull.HTMLURL, 300)
+	res.ExternalRef = safeURL(pull.HTMLURL, 300)
 	if after, rerr := m.readBack(ctx, read, merge); rerr == nil {
 		res.NewHead = after.Head.SHA
 		if res.ExternalRef == "" {
-			res.ExternalRef = clip(after.HTMLURL, 300)
+			res.ExternalRef = safeURL(after.HTMLURL, 300)
 		}
 	} else {
 		res.Warnings = append(res.Warnings, "read-back after update: "+strings.TrimSpace(rerr.Error()))

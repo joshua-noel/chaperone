@@ -265,30 +265,54 @@ func (a *PRReadAdapter) Execute(ctx context.Context, req *Request) (Outcome, err
 		}}, nil
 	}
 	var res map[string]any
+	var hidden hiddenText
 	switch a.op {
 	case OpPRView:
 		res = viewResult(pull, p.repo)
+		hidden.see("title", "titles", pull.Title, false)
+		hidden.see("body", "bodies", pull.Body, true)
+		hidden.see("branch name", "branch names", pull.Head.Ref, false)
+		hidden.see("branch name", "branch names", pull.Base.Ref, false)
+		if pull.User != nil {
+			hidden.see("author name", "author names", pull.User.Login, false)
+		}
+		for _, l := range pull.Labels {
+			hidden.see("label", "labels", l.Name, false)
+		}
 	case OpPRDiff:
 		raw, err := a.gh.GetPullDiff(ctx, tok, p.repo, p.number)
 		if err != nil {
 			return a.fromGitHub(err, p), nil
 		}
 		res = diffResult(pull, raw)
+		hidden.see("diff", "diffs", strings.ToValidUTF8(string(raw), "\uFFFD"), true)
 	case OpPRChecks:
 		runs, err := a.gh.ListCheckRuns(ctx, tok, p.repo, pull.Head.SHA, gh.CheckRunQuery{})
 		if err != nil {
 			return a.fromGitHub(err, p), nil
 		}
 		res = checksResult(pull, runs)
+		for _, r := range runs {
+			hidden.see("check name", "check names", r.Name, false)
+		}
 	default: // OpPRFiles
 		files, err := a.gh.ListPullFilesPage(ctx, tok, p.repo, p.number, p.page, p.perPage)
 		if err != nil {
 			return a.fromGitHub(err, p), nil
 		}
 		res = filesResult(pull, files, p)
+		for _, f := range files {
+			hidden.see("file path", "file paths", f.Filename, false)
+			if f.PreviousFilename != "" {
+				hidden.see("file path", "file paths", f.PreviousFilename, false)
+			}
+		}
 	}
 	res["untrusted_text"] = true
-	return Outcome{ExternalRef: clip(untrusted.Line(pull.HTMLURL), 300), Result: res}, nil
+	if w := hidden.text(); w != "" {
+		res["hidden_characters"] = w
+	}
+	return Outcome{ExternalRef: safeURL(pull.HTMLURL, 300), Result: res}, nil
 }
 
 // fromGitHub turns a GitHub error into a failed outcome with words a person
@@ -348,7 +372,7 @@ func viewResult(p *gh.Pull, repo gh.Repo) map[string]any {
 		"state": untrusted.Line(p.State), "draft": p.Draft, "merged": p.Merged, "author": author, "labels": labels,
 		"head": head, "base": map[string]any{"ref": untrusted.Line(p.Base.Ref), "sha": untrusted.Line(p.Base.SHA)},
 		"mergeable": mergeable, "mergeable_state": untrusted.Line(p.MergeableState),
-		"url": untrusted.Line(p.HTMLURL), "created_at": untrusted.Line(p.CreatedAt), "updated_at": untrusted.Line(p.UpdatedAt),
+		"url": safeURL(p.HTMLURL, 300), "created_at": untrusted.Line(p.CreatedAt), "updated_at": untrusted.Line(p.UpdatedAt),
 		"commits": p.Commits, "additions": p.Additions, "deletions": p.Deletions, "changed_files": p.ChangedFiles,
 	}
 	if p.ClosedAt != "" {
@@ -432,7 +456,7 @@ func checksResult(p *gh.Pull, runs []gh.CheckRun) map[string]any {
 		default:
 			other++
 		}
-		m := map[string]any{"id": r.ID, "name": clip(untrusted.Line(r.Name), 100), "status": untrusted.Line(r.Status), "conclusion": untrusted.Line(r.Conclusion), "app_id": r.AppID, "url": clip(untrusted.Line(r.HTMLURL), 300)}
+		m := map[string]any{"id": r.ID, "name": clip(untrusted.Line(r.Name), 100), "status": untrusted.Line(r.Status), "conclusion": untrusted.Line(r.Conclusion), "app_id": r.AppID, "url": safeURL(r.HTMLURL, 300)}
 		if !r.StartedAt.IsZero() {
 			m["started_at"] = r.StartedAt.UTC().Format(time.RFC3339)
 		}

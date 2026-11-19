@@ -542,6 +542,9 @@ func (s *Server) listCheckRuns(w http.ResponseWriter, req *http.Request, r *Repo
 		} else {
 			m["conclusion"] = nil
 		}
+		if c.ExternalID != "" {
+			m["external_id"] = c.ExternalID
+		}
 		if c.AppID != 0 {
 			m["app"] = map[string]any{"id": c.AppID}
 		} else {
@@ -584,6 +587,7 @@ func (s *Server) createCheckRun(w http.ResponseWriter, req *http.Request, r *Rep
 		HeadSHA    string `json:"head_sha"`
 		Status     string `json:"status"`
 		Conclusion string `json:"conclusion"`
+		ExternalID string `json:"external_id"`
 		Output     struct {
 			Title   string `json:"title"`
 			Summary string `json:"summary"`
@@ -601,10 +605,10 @@ func (s *Server) createCheckRun(w http.ResponseWriter, req *http.Request, r *Rep
 		refuse(w, 422, "Validation Failed")
 		return
 	}
-	c := &checkRun{id: s.nextID(), Check: Check{Name: b.Name, AppID: OwnAppID, Status: "completed", Conclusion: b.Conclusion, Title: b.Output.Title, Summary: b.Output.Summary}, sha: b.HeadSHA}
+	c := &checkRun{id: s.nextID(), Check: Check{Name: b.Name, AppID: OwnAppID, Status: "completed", Conclusion: b.Conclusion, Title: b.Output.Title, Summary: b.Output.Summary, ExternalID: b.ExternalID}, sha: b.HeadSHA}
 	r.checks = append(r.checks, c)
 	jsonOut(w, 201, map[string]any{"id": c.id, "name": c.Name, "head_sha": c.sha, "status": c.Status, "conclusion": c.Conclusion,
-		"html_url": "https://github.test/" + r.FullName() + "/runs/" + strconv.FormatInt(c.id, 10), "app": map[string]any{"id": OwnAppID}})
+		"html_url": "https://github.test/" + r.FullName() + "/runs/" + strconv.FormatInt(c.id, 10), "app": map[string]any{"id": OwnAppID}, "external_id": c.ExternalID})
 }
 
 func (s *Server) createDeployment(w http.ResponseWriter, req *http.Request, r *Repo) {

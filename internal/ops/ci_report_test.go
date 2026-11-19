@@ -263,3 +263,56 @@ func TestNewCIReportAdapterNeedsEverything(t *testing.T) {
 		t.Error("an empty config must be refused")
 	}
 }
+
+// ci.report is repeat-safe: a second Execute with the same execution id finds the check run the first one posted
+// (it carries the execution id as external_id) and posts nothing. Another execution id is a new report.
+func TestCIReportRepeatPostsNothingNew(t *testing.T) {
+	f := newCIFx(t)
+	req := f.req("r-ci01")
+	req.ExecutionID = "x-first"
+	first, err := f.ad.Execute(ctx, req)
+	if err != nil || first.Failed || first.Unconfirmed {
+		t.Fatalf("first: %v %+v", err, first)
+	}
+	if first.Result["already_posted"] != nil {
+		t.Errorf("the first report says it was posted before: %+v", first.Result)
+	}
+	again, err := f.ad.Execute(ctx, req)
+	if err != nil || again.Failed || again.Unconfirmed {
+		t.Fatalf("repeat: %v %+v", err, again)
+	}
+	if n := f.s.Count("POST", "/check-runs"); n != 1 {
+		t.Fatalf("a repeat posted again: %d check runs", n)
+	}
+	if again.Result["already_posted"] != true || again.Result["check_run_id"] != first.Result["check_run_id"] || again.ExternalRef != first.ExternalRef {
+		t.Errorf("repeat = %+v (%q), first = %+v (%q)", again.Result, again.ExternalRef, first.Result, first.ExternalRef)
+	}
+	if got := f.r.OwnChecks(f.head); len(got) != 1 || got[0].ExternalID != "x-first" {
+		t.Errorf("what GitHub holds: %+v", got)
+	}
+
+	other := f.req("r-ci01")
+	other.ExecutionID = "x-second"
+	if out, err := f.ad.Execute(ctx, other); err != nil || out.Failed || out.Result["already_posted"] != nil {
+		t.Fatalf("another execution id: %v %+v", err, out)
+	}
+	if n := f.s.Count("POST", "/check-runs"); n != 2 {
+		t.Errorf("another execution id should post: %d check runs", n)
+	}
+	f.noLeak(t)
+}
+
+// Another App's check run of the same name, head and external_id is not this adapter's own: it is posted anyway.
+func TestCIReportIgnoresAnotherAppsRunWithTheSameExternalID(t *testing.T) {
+	f := newCIFx(t)
+	f.r.SetCheck(f.head, ghtest.Check{Name: "local-ci", AppID: gh.GitHubActionsAppID, Status: "completed", Conclusion: "success", ExternalID: "x-first"})
+	req := f.req("r-ci01")
+	req.ExecutionID = "x-first"
+	out, err := f.ad.Execute(ctx, req)
+	if err != nil || out.Failed || out.Result["already_posted"] != nil {
+		t.Fatalf("execute: %v %+v", err, out)
+	}
+	if got := f.r.OwnChecks(f.head); len(got) != 1 {
+		t.Errorf("own runs: %+v", got)
+	}
+}

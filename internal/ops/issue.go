@@ -317,7 +317,7 @@ func (a *IssueAdapter) Check(ctx context.Context, req *Request) (CheckResult, er
 	if err != nil {
 		return CheckResult{}, err
 	}
-	return CheckResult{Checks: append(checks, Check{Name: "issue", Passed: true, Detail: "#" + strconv.Itoa(p.number) + " is " + is.State})}, nil
+	return CheckResult{Checks: append(checks, Check{Name: "issue", Passed: true, Detail: checkDetail("#" + strconv.Itoa(p.number) + " is " + is.State)})}, nil
 }
 
 // Execute implements [Adapter].
@@ -353,26 +353,26 @@ func (a *IssueAdapter) Execute(ctx context.Context, req *Request) (Outcome, erro
 		if err != nil {
 			return a.fromGitHub(err)
 		}
-		return Outcome{ExternalRef: clamp(is.HTMLURL, 300),
-			Result: map[string]any{"number": float64(is.Number), "url": clamp(is.HTMLURL, 300)}}, nil
+		return Outcome{ExternalRef: safeURL(is.HTMLURL, 300),
+			Result: map[string]any{"number": float64(is.Number), "url": safeURL(is.HTMLURL, 300)}}, nil
 	case OpIssueComment:
 		cm, err := a.gh.CreateIssueComment(ctx, tok, p.repo, p.number, p.body)
 		if err != nil {
 			return a.fromGitHub(err)
 		}
-		return Outcome{ExternalRef: clamp(cm.HTMLURL, 300),
-			Result: map[string]any{"number": float64(p.number), "comment_id": float64(cm.ID), "url": clamp(cm.HTMLURL, 300)}}, nil
+		return Outcome{ExternalRef: safeURL(cm.HTMLURL, 300),
+			Result: map[string]any{"number": float64(p.number), "comment_id": float64(cm.ID), "url": safeURL(cm.HTMLURL, 300)}}, nil
 	default: // OpIssueReopen
 		if cur.State == "open" {
-			return Outcome{ExternalRef: clamp(cur.HTMLURL, 300),
-				Result: map[string]any{"number": float64(p.number), "url": clamp(cur.HTMLURL, 300), "reopened": false}}, nil
+			return Outcome{ExternalRef: safeURL(cur.HTMLURL, 300),
+				Result: map[string]any{"number": float64(p.number), "url": safeURL(cur.HTMLURL, 300), "reopened": false}}, nil
 		}
 		is, err := a.gh.ReopenIssue(ctx, tok, p.repo, p.number)
 		if err != nil {
 			return a.fromGitHub(err)
 		}
-		return Outcome{ExternalRef: clamp(is.HTMLURL, 300),
-			Result: map[string]any{"number": float64(p.number), "url": clamp(is.HTMLURL, 300), "reopened": true}}, nil
+		return Outcome{ExternalRef: safeURL(is.HTMLURL, 300),
+			Result: map[string]any{"number": float64(p.number), "url": safeURL(is.HTMLURL, 300), "reopened": true}}, nil
 	}
 }
 

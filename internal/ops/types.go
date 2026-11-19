@@ -159,13 +159,14 @@ type Outcome struct {
 // Most adapters are repeat-safe anyway: a second Execute with the same
 // Request.ExecutionID changes the service once (Linear derives its comment id
 // from it, a move to the state the item is in sends nothing, pr.merge is bound
-// to one head sha, issue.reopen checks the state first). Three are not:
-// issue.open, issue.comment and ci.report send their write again, because
-// GitHub has no idempotency key for an issue or a comment, and a check run
-// would need an external_id lookup that is not built. Their connector tests
-// declare it (NotRepeatable). They are safe only because chapd does not repeat
-// an Execute: a new path that does (a Reconcile that runs the adapter again)
-// must make them repeat-safe first.
+// to one head sha, issue.reopen checks the state first, ci.report posts its
+// check run with the execution id as external_id and looks for it before
+// posting). Two are not: issue.open and issue.comment send their write again,
+// because GitHub has no idempotency key for an issue or a comment and a marker
+// in the body would change what is posted. Their connector test declares it
+// (NotRepeatable). They are safe only because chapd does not repeat an
+// Execute: a new path that does (a Reconcile that runs the adapter again) must
+// make them repeat-safe first.
 type Adapter interface {
 	Check(ctx context.Context, req *Request) (CheckResult, error)
 	Execute(ctx context.Context, req *Request) (Outcome, error)

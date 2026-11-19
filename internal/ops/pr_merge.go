@@ -445,7 +445,7 @@ func (m *PRMerger) merged(res *PRMergeResult, req PRMergeRequest, back *gh.Pull,
 	if res.MergeCommitSHA == "" {
 		res.MergeCommitSHA = answered
 	}
-	res.ExternalRef = back.HTMLURL
+	res.ExternalRef = safeURL(back.HTMLURL, 300)
 	if res.ExternalRef == "" {
 		res.ExternalRef = fmt.Sprintf("https://github.com/%s/pull/%d", req.Repo, req.Number)
 	}
@@ -629,6 +629,12 @@ func (m *PRMerger) evaluate(ctx context.Context, tok *gh.Token, req PRMergeReque
 	// Step 5: risk tier by path.
 	files, err := m.gh.ListPullFiles(ctx, tok, req.Repo, req.Number)
 	var tier PRTierResult
+	var hidden hiddenText
+	hidden.see("title", "titles", pull.Title, false)
+	if pull.User != nil {
+		hidden.see("author name", "author names", pull.User.Login, false)
+	}
+	hidden.see("base branch name", "base branch names", pull.Base.Ref, false)
 	switch {
 	case errors.Is(err, gh.ErrListTruncated):
 		tier = PRTierResult{Tier: TierHigh, Unclassified: true}
@@ -637,11 +643,20 @@ func (m *PRMerger) evaluate(ctx context.Context, tok *gh.Token, req PRMergeReque
 	default:
 		pf := make([]PRFile, len(files))
 		for i, f := range files {
+			hidden.see("file path", "file paths", f.Filename, false)
+			if f.PreviousFilename != "" {
+				hidden.see("file path", "file paths", f.PreviousFilename, false)
+			}
 			pf[i] = PRFile{Path: f.Filename, PreviousPath: f.PreviousFilename, Status: f.Status, Patch: f.Patch, Changes: f.Additions + f.Deletions}
 		}
 		tier = req.Policy.Tiers.Classify(pf)
 	}
 	v.Tier, v.TierPaths = tier.Tier, tier.Paths
+	if w := hidden.text(); w != "" {
+		// The text is shown cleaned. Say so, so the operator knows it was changed. The tier above was
+		// computed from the raw paths (and their hidden-character-free form), never from the cleaned text.
+		v.Checks = append(v.Checks, PRCheck{Name: "hidden_text", Passed: true, Detail: checkDetail(w)})
+	}
 	detail := tierDetail(tier)
 	if tier.Tier != TierLow && !req.Approved {
 		v.add("risk_tier", false, detail+"; needs an approval bound to this exact head")

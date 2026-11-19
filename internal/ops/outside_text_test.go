@@ -159,3 +159,162 @@ func TestPRMergeRefusalTextIsCleaned(t *testing.T) {
 		noHostile(t, "refusal", err.(*ops.Refusal).Why)
 	}
 }
+
+// The card and the result say when text was cleaned, and never repeat the raw text.
+func TestPRMergeSaysWhenItCleanedText(t *testing.T) {
+	f := newFx(t)
+	f.r.Branch("agent/hostile", base)
+	head := f.r.Commit("agent/hostile")
+	n := f.r.OpenPR(ghtest.PROptions{Title: "docs: update\u200d notes", Head: "agent/hostile", Base: base, Author: "mallory\u202e"})
+	f.r.SetFiles(n, ghtest.File{Filename: "internal/app/\u202egnp.go"}, ghtest.File{Filename: "internal/app/b\u200d.go"}, ghtest.File{Filename: "internal/app/c.go"})
+	f.r.SetCheck(head, verify("completed", "success"))
+	a := f.mergeAdapter()
+	r := f.mergeReq("storefront", n, head)
+	res, err := a.Check(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warning := func(checks []ops.Check) string {
+		for _, c := range checks {
+			if c.Name == "hidden_text" {
+				if !c.Passed {
+					t.Error("the hidden_text check must not fail the merge")
+				}
+				return c.Detail
+			}
+		}
+		return ""
+	}
+	want := "1 title, 1 author name, 2 file paths held hidden or control characters; shown with each such character replaced by a space"
+	if got := warning(res.Checks); got != want {
+		t.Errorf("warning = %q, want %q", got, want)
+	}
+	r.ApprovedEvidence = res.Evidence
+	out, err := a.Execute(ctx, r)
+	if err != nil || out.Failed {
+		t.Fatalf("out = %+v, err = %v", out, err)
+	}
+	found := false
+	for _, c := range out.Result["checks"].([]any) {
+		if m := c.(map[string]any); m["name"] == "hidden_text" && m["detail"] == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the result does not carry the warning: %v", out.Result["checks"])
+	}
+
+	// A clean pull request carries no such check.
+	g, gh := f.green(t, "agent/clean", "internal/app/clean.go")
+	clean, err := a.Check(ctx, f.mergeReq("storefront", g, gh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := warning(clean.Checks); w != "" {
+		t.Errorf("a clean pull request has the warning %q", w)
+	}
+}
+
+func TestPRReadsSayWhenTheyCleanedText(t *testing.T) {
+	f := newReadFx(t, nil)
+	n, _ := f.pr("agent/\u202egnp", ghtest.PROptions{Title: "feat: add\u200d a thing", Body: "plain\r\nbody", Author: "octo"})
+	f.r.SetFiles(n, ghtest.File{Filename: "src/\u202egnp.exe"}, ghtest.File{Filename: "ok.go"})
+	view := mustSucceed(t, f.run(t, ops.OpPRView, n, map[string]any{}))
+	if got, want := view["hidden_characters"], "1 title, 1 branch name held hidden or control characters; shown with each such character replaced by a space"; got != want {
+		t.Errorf("pr.view hidden_characters = %v, want %q", got, want)
+	}
+	files := mustSucceed(t, f.run(t, ops.OpPRFiles, n, map[string]any{}))
+	if got, want := files["hidden_characters"], "1 file path held hidden or control characters; shown with each such character replaced by a space"; got != want {
+		t.Errorf("pr.files hidden_characters = %v, want %q", got, want)
+	}
+	// Clean text, a CRLF body included, has no such field.
+	m, _ := f.pr("agent/plain", ghtest.PROptions{Body: "line\r\nline", Author: "octo"})
+	if r := mustSucceed(t, f.run(t, ops.OpPRView, m, map[string]any{})); r["hidden_characters"] != nil {
+		t.Errorf("a clean pull request has hidden_characters: %v", r["hidden_characters"])
+	}
+}
+
+func TestResultURLsAreHTTPSOrEmpty(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://github.com/example-org/storefront/pull/1": "https://github.com/example-org/storefront/pull/1",
+		"":                            "",
+		"http://github.com/x":         "",
+		"javascript:alert(1)":         "",
+		"//github.com/x":              "",
+		"https:///nohost":             "",
+		"https://github.com/x\u202ey": "",
+		"https://exa mple.com/":       "",
+		"https://github.com/" + strings.Repeat("a", 300): "",
+	} {
+		if got := ops.SafeURL(in, 300); got != want {
+			t.Errorf("SafeURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestLineTextCleansAndCaps(t *testing.T) {
+	if got := ops.LineText("a\u202eb\nc\x1b", 300); got != "a b c " {
+		t.Errorf("LineText = %q", got)
+	}
+	if got := ops.LineText(strings.Repeat("x", 400), 300); len(got) != 300 {
+		t.Errorf("LineText length %d", len(got))
+	}
+}
+
+// A path that a file system could read as another name is not a plain path: it cannot be classified, so it is
+// high and needs an approval. Before, a hidden character or a trailing dot made a protected file miss its rule and
+// fall to a low glob (agents<ZWNJ>.md missed **/agents.md and matched **/*.md), which merges with no card.
+func TestPathsThatReadAsAnotherNameAreHigh(t *testing.T) {
+	g := ops.PRTierGlobs{}
+	protected := []string{
+		// the files the task named, each with a hidden character in or after the name
+		"agents\u200c.md", "claude\ufeff.md", "CODEOWNERS\u200c", ".gitattributes\u2060",
+		"requirements\u200d.txt", "require\u200dments.txt", "pyproject\u200b.toml",
+		"docs/agents\u200d.md", ".gitmodules\u200b", "go.mod\u200c", "package.json\u200d",
+		// inside a protected directory or on a protected extension
+		".github\u200c/workflows/ci.yml", "\ufeffscripts/run.go", "vendor\u202e/x.go", "web/payment\u200b/checkout.ts",
+		"deploy\u200d.yml", "src/\u202egnp.exe", "tools/run\u200b.sh",
+		// a Unicode format character (Cf) of each kind
+		"agents\u202a.md", "agents\u2066.md", "agents\u200e.md", "agents\u200f.md", "agents\u061c.md", "agents\u00ad.md", "agents\u206a.md",
+		// default-ignorable code points that are not Cf
+		"agents\u034f.md", "agents\u115f.md", "agents\u1160.md", "agents\u17b4.md", "agents\u17b5.md", "agents\u180b.md",
+		"agents\u180d.md", "agents\u180f.md", "agents\u3164.md", "agents\uffa0.md", "agents\ufe00.md", "agents\ufe0f.md",
+		"agents\U000e0100.md", "agents\U000e01ef.md", "agents\U000e0041.md",
+		// a name that ends in a dot or a space (Windows drops them), in the file or in a directory
+		"AGENTS.md.", "agents.md ", "docs./notes.md", "docs /notes.md", ".github./workflows/ci.yml", "CLAUDE.md..",
+		// a colon (an NTFS stream name)
+		"agents.md::$DATA", "docs/notes.md:stream", "AGENTS.md:Zone.Identifier",
+		// a control character: refused before
+		".github/\x07/x.yml", "agents\x00.md",
+	}
+	for _, p := range protected {
+		got := g.ClassifyPath(p)
+		t.Logf("%q -> %s", p, got)
+		if got != ops.TierHigh {
+			t.Errorf("ClassifyPath(%q) = %s, want high", p, got)
+		}
+		res := g.Classify([]ops.PRFile{{Path: p}})
+		if res.Tier != ops.TierHigh || !res.Unclassified {
+			t.Errorf("Classify(%q) = %+v, want high and unclassified", p, res)
+		}
+		// A rename out of such a path is high as well.
+		if res := g.Classify([]ops.PRFile{{Path: "docs/a.md", PreviousPath: p, Status: "renamed"}}); res.Tier != ops.TierHigh {
+			t.Errorf("a rename out of %q is %s, want high", p, res.Tier)
+		}
+		// A test-path downgrade does not apply: a removed test file with such a name is never low or medium on the
+		// strength of its test-looking name.
+		if res := g.Classify([]ops.PRFile{{Path: "tests/" + p, Status: "removed"}}); res.Tier != ops.TierHigh {
+			t.Errorf("a removed test path under %q is %s, want high", p, res.Tier)
+		}
+	}
+	// Plain names are classified as before.
+	for p, want := range map[string]ops.PRTier{
+		"agents.md": ops.TierHigh, "docs/notes.md": ops.TierLow, "README.md": ops.TierLow, "docs/caf\u00e9.md": ops.TierLow,
+		"internal/app/app.go": ops.TierMedium, "internal/app/app_test.go": ops.TierLow, "docs/v1.2/notes.md": ops.TierLow,
+		"requirements.txt": ops.TierMedium, "pyproject.toml": ops.TierMedium, "CODEOWNERS": ops.TierHigh,
+	} {
+		if got := g.ClassifyPath(p); got != want {
+			t.Errorf("ClassifyPath(%q) = %s, want %s", p, got, want)
+		}
+	}
+}

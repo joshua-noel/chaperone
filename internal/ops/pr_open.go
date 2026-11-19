@@ -207,7 +207,7 @@ func (p *PROpen) Check(_ context.Context, req *Request) (CheckResult, error) {
 func (p *PROpen) Execute(ctx context.Context, req *Request) (Outcome, error) {
 	pp, err := p.parse(req)
 	if err != nil {
-		return Outcome{Failed: true, Result: map[string]any{"error": clamp(err.Error(), 300)}}, nil
+		return Outcome{Failed: true, Result: map[string]any{"error": lineText(err.Error(), 300)}}, nil
 	}
 	tok, err := p.tokens.Mint(ctx, pp.repo, gh.PermsOpenPull())
 	if err != nil {
@@ -221,16 +221,16 @@ func (p *PROpen) Execute(ctx context.Context, req *Request) (Outcome, error) {
 		var api *gh.APIError
 		switch {
 		case errors.Is(cerr, gh.ErrInvalidArgument):
-			return Outcome{Failed: true, Result: map[string]any{"error": clamp(cerr.Error(), 300)}}, nil
+			return Outcome{Failed: true, Result: map[string]any{"error": lineText(cerr.Error(), 300)}}, nil
 		case errors.As(cerr, &api) && api.Status >= 400 && api.Status < 500 && api.Status != http.StatusRequestTimeout:
 			return Outcome{Failed: true, Result: map[string]any{
-				"error": clamp(fmt.Sprintf("GitHub refused the pull request (%d): %s", api.Status, api.Detail()), 500),
+				"error": lineText(fmt.Sprintf("GitHub refused the pull request (%d): %s", api.Status, api.Detail()), 500),
 			}}, nil
 		}
 		return Outcome{}, cerr // 5xx or transport: it may exist
 	}
 	return Outcome{
-		ExternalRef: clamp(pull.HTMLURL, 300),
-		Result:      map[string]any{"number": float64(pull.Number), "url": clamp(pull.HTMLURL, 300), "draft": pp.draft},
+		ExternalRef: safeURL(pull.HTMLURL, 300),
+		Result:      map[string]any{"number": float64(pull.Number), "url": safeURL(pull.HTMLURL, 300), "draft": pp.draft},
 	}, nil
 }

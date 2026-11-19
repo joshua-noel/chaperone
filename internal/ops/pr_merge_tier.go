@@ -5,6 +5,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // PRTier is the review tier of a pull request (decision #22, ADR-002 step 5).
@@ -174,19 +175,32 @@ func anyGlob(globs []string, name string) bool {
 }
 
 // cleanPath returns the lower-case form of a repository path, or false if it
-// is not a plain relative slash path (absolute, backslash, dot segments,
-// control characters, empty). Such a path cannot be classified.
+// is not a plain relative slash path. Such a path cannot be classified, and
+// the classifier then calls it high. A path is not plain when it is empty,
+// absolute, holds a backslash, a dot segment or a control character (these
+// five were refused before), or when a file system could read it as another
+// name than the one it has:
+//
+//   - a hidden character: a Unicode format character (bidi controls,
+//     zero-width characters, a byte order mark) or another default-ignorable
+//     code point (a variation selector, a tag, U+034F, U+115F, U+1160,
+//     U+17B4, U+17B5, U+180B-U+180F, U+3164, U+FFA0). macOS HFS+ ignores
+//     some of them in names, so `agents<U+200C>.md` is `agents.md` there, and
+//     a glob would take it for a doc;
+//   - a name that ends in a dot or a space: Windows drops them, so
+//     `agents.md.` and `agents.md ` are `agents.md` on a Windows checkout;
+//   - a colon: on NTFS `agents.md::` is the stream of `agents.md`.
 func cleanPath(p string) (string, bool) {
-	if p == "" || strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") || strings.Contains(p, `\`) {
+	if p == "" || strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") || strings.Contains(p, `\`) || strings.Contains(p, ":") {
 		return "", false
 	}
 	for _, r := range p {
-		if r < 0x20 || r == 0x7f {
+		if r < 0x20 || r == 0x7f || hiddenRune(r) {
 			return "", false
 		}
 	}
 	for _, seg := range strings.Split(p, "/") {
-		if seg == "" || seg == "." || seg == ".." {
+		if seg == "" || seg == "." || seg == ".." || strings.HasSuffix(seg, ".") || strings.HasSuffix(seg, " ") {
 			return "", false
 		}
 	}
@@ -317,4 +331,18 @@ func (g PRTierGlobs) Classify(files []PRFile) PRTierResult {
 		res.Paths = setters
 	}
 	return res
+}
+
+// hiddenRune reports whether r is a character that shows as nothing, or that a file system ignores in a name: a
+// Unicode format character (class Cf) or another default-ignorable code point.
+func hiddenRune(r rune) bool {
+	switch {
+	case unicode.Is(unicode.Cf, r):
+		return true
+	case r == 0x034f, r == 0x115f, r == 0x1160, r == 0x17b4, r == 0x17b5, r == 0x3164, r == 0xffa0:
+		return true
+	case r >= 0x180b && r <= 0x180f, r >= 0xfe00 && r <= 0xfe0f, r >= 0xe0000 && r <= 0xe007f, r >= 0xe0100 && r <= 0xe01ef:
+		return true
+	}
+	return false
 }
