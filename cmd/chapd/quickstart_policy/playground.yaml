@@ -1,0 +1,22 @@
+# Starter policy written by `chapd quickstart`. It governs the PLAYGROUND only:
+# the repository below is a fake GitHub that lives inside the quickstart process.
+# Nothing here reaches a real repository.
+#
+# A project file cannot turn an op on; the baseline does that. The `pr:` block is
+# what makes pr.merge usable for the project at all.
+# To write your own, copy policy/storefront.yaml from the source tree.
+project: playground
+
+pr:
+  # A request for any other repository is refused.
+  repo: playground/storefront
+  # Pull requests merge into this branch only.
+  base: main
+  # `verify` is always required. Add check names here to require more.
+  extra_checks: []
+  # Paths the baseline classifier does not know. Empty: the baseline decides.
+  # Docs are low (no approval); code under src/ is medium (needs your passkey).
+  tiers:
+    high: []
+    medium: []
+    low: []

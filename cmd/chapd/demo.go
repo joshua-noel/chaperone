@@ -11,21 +11,18 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"sync"
-	"testing"
 	"time"
 
 	"github.com/joshua-noel/chaperone/internal/console"
-	"github.com/joshua-noel/chaperone/internal/gh"
-	"github.com/joshua-noel/chaperone/internal/gh/ghtest"
 )
 
 // This file exists only in a `go build -tags demo` binary, and only `chapd run`
 // reads its flag (never `chapd svc`). It points chapd's GitHub client at an
 // in-process fake GitHub (internal/gh/ghtest) holding a Storefront repository
-// with two pull requests, so scripts/demo/merge-on-red.ps1 can show Chaperone
+// with four pull requests, so scripts/demo/merge-on-red.ps1 can show Chaperone
 // refusing to merge a PR whose CI is red, with no GitHub App, no key and no
-// network. The shipped chapd cannot do this.
+// network. The shipped chapd cannot do this with `chapd run`; its own copy of
+// the fake is `chapd quickstart --playground` (quickstart.go).
 
 const (
 	demoOwner = "example-org"
@@ -37,32 +34,11 @@ const (
 	demoStateAddr = "127.0.0.1:0"
 )
 
-// demoTB lets ghtest run outside a test. Only what ghtest calls is implemented.
-type demoTB struct {
-	testing.TB
-	mu       sync.Mutex
-	cleanups []func()
-}
-
-func (d *demoTB) Helper()                        {}
-func (d *demoTB) Cleanup(f func())               { d.mu.Lock(); d.cleanups = append(d.cleanups, f); d.mu.Unlock() }
-func (d *demoTB) Errorf(format string, a ...any) { panic(fmt.Sprintf("fake GitHub: "+format, a...)) }
-func (d *demoTB) Fatalf(format string, a ...any) { panic(fmt.Sprintf("fake GitHub: "+format, a...)) }
-func (d *demoTB) Logf(format string, a ...any)   {}
-
-type demoPR struct {
-	Number int    `json:"number"`
-	Kind   string `json:"kind"`
-	Title  string `json:"title"`
-	Head   string `json:"head_sha"`
-	Merged bool   `json:"merged"`
-}
-
 type demoSeed struct {
 	Repo     string   `json:"repo"`
 	Base     string   `json:"base"`
 	StateURL string   `json:"state_url"`
-	PRs      []demoPR `json:"prs"`
+	PRs      []fakePR `json:"prs"`
 }
 
 func demoFlags(fs *flag.FlagSet, cfg *Config) {
@@ -72,7 +48,7 @@ func demoFlags(fs *flag.FlagSet, cfg *Config) {
 		}
 		return startDemoGitHub(cfg, path)
 	})
-	fs.BoolFunc("dev-enroll", "DEMO BUILD ONLY: when no approver exists, print a one-time address to enrol a passkey (Windows Hello) on this scratch database", func(string) error {
+	fs.BoolFunc("dev-enroll", "DEMO BUILD ONLY: when no approver exists, print a one-time address to enrol a passkey on this scratch database", func(string) error {
 		cfg.afterBuild = printEnrollAddress
 		return nil
 	})
@@ -82,8 +58,11 @@ func demoFlags(fs *flag.FlagSet, cfg *Config) {
 // running on a scratch database: one address, good once.
 func printEnrollAddress(ctx context.Context, a *App) error {
 	origin, _ := localEndpoints(a.cfg.Addr, a.cfg.Hosts)
-	token, err := console.IssueEnrollment(ctx, a.DB, nil, 30*time.Minute, time.Now())
-	if err != nil { // an approver exists already: sign in instead
+	token, err := console.IssueFirstEnrollment(ctx, a.DB, 30*time.Minute, time.Now())
+	if err != nil {
+		return err
+	}
+	if token == "" { // an approver exists already: sign in instead
 		fmt.Printf("Console: %s/login\n", origin.URL)
 		return nil
 	}
@@ -92,53 +71,39 @@ func printEnrollAddress(ctx context.Context, a *App) error {
 }
 
 func startDemoGitHub(cfg *Config, seedPath string) error {
-	s := ghtest.New(&demoTB{})
-	in := s.AddInstallation(7, demoOwner, map[string]string{
-		"contents": "write", "pull_requests": "write", "checks": "read", "deployments": "write", "metadata": "read",
+	f, err := newFakeGitHub(fakeGitHubOptions{
+		Owner: demoOwner, Repo: demoRepo, Base: demoBase,
+		// The two "medium" PRs touch a code path, so merging them needs an approval
+		// card (scripts/demo/approve-a-merge.ps1); the others never need one.
+		PRs: []fakePRSpec{
+			{Kind: "green", Branch: "agent/fix-typo", Title: "docs: fix a typo in the notes", Conclusion: "success", File: "docs/notes.md"},
+			{Kind: "red", Branch: "agent/break-checkout", Title: "fix: speed up checkout", Conclusion: "failure", File: "docs/notes.md"},
+			{Kind: "medium", Branch: "agent/checkout-copy", Title: "feat: reword the checkout button", Conclusion: "success", File: "src/checkout.py"},
+			{Kind: "medium-deny", Branch: "agent/checkout-fees", Title: "feat: add a service fee at checkout", Conclusion: "success", File: "src/fees.py"},
+		},
+		// policy/storefront.yaml has pr.local_ci mode `also`: the App's own local-ci check is needed besides verify.
+		LocalCI: true,
 	})
-	repo := in.AddRepo(demoRepo, demoBase)
-
-	verify := func(conclusion string) ghtest.Check {
-		return ghtest.Check{Name: "verify", AppID: gh.GitHubActionsAppID, Status: "completed", Conclusion: conclusion}
+	if err != nil {
+		return err
 	}
+	cfg.github = f.Client
+
 	ln, err := net.Listen("tcp", demoStateAddr)
 	if err != nil {
 		return fmt.Errorf("demo state endpoint: %w", err)
 	}
-	seed := demoSeed{Repo: demoOwner + "/" + demoRepo, Base: demoBase, StateURL: "http://" + ln.Addr().String() + "/state"}
-	// The two "medium" PRs touch a code path, so merging them needs an approval
-	// card (scripts/demo/approve-a-merge.ps1); the others never need one.
-	for _, p := range []struct{ kind, branch, title, conclusion, file string }{
-		{"green", "agent/fix-typo", "docs: fix a typo in the notes", "success", "docs/notes.md"},
-		{"red", "agent/break-checkout", "fix: speed up checkout", "failure", "docs/notes.md"},
-		{"medium", "agent/checkout-copy", "feat: reword the checkout button", "success", "src/checkout.py"},
-		{"medium-deny", "agent/checkout-fees", "feat: add a service fee at checkout", "success", "src/fees.py"},
-	} {
-		repo.Branch(p.branch, demoBase)
-		head := repo.Commit(p.branch)
-		n := repo.OpenPR(ghtest.PROptions{Title: p.title, Head: p.branch, Base: demoBase})
-		repo.SetFiles(n, ghtest.File{Filename: p.file})
-		repo.SetCheck(head, verify(p.conclusion))
-		// policy/storefront.yaml has pr.local_ci mode `also`: the App's own local-ci check is needed besides verify.
-		repo.SetCheck(head, ghtest.Check{Name: "local-ci", AppID: ghtest.OwnAppID, Status: "completed", Conclusion: p.conclusion})
-		seed.PRs = append(seed.PRs, demoPR{Number: n, Kind: p.kind, Title: p.title, Head: head})
-	}
-
-	c, err := gh.New(gh.Config{AppID: s.AppID(), Keys: gh.StaticKey{Key: s.Key()}, BaseURL: s.URL(), Now: s.Now})
-	if err != nil {
-		return err
-	}
-	cfg.github = c
+	seed := demoSeed{Repo: f.Repo, Base: f.Base, StateURL: "http://" + ln.Addr().String() + "/state", PRs: f.PRs}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/state", func(w http.ResponseWriter, _ *http.Request) {
 		out := seed
-		out.PRs = append([]demoPR(nil), seed.PRs...)
+		out.PRs = append([]fakePR(nil), seed.PRs...)
 		for i := range out.PRs {
-			out.PRs[i].Merged, _ = repo.Merged(out.PRs[i].Number)
+			out.PRs[i].Merged = f.Merged(out.PRs[i].Number)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"seed": out, "merge_calls_to_github": s.Count("PUT", "/merge")})
+		_ = json.NewEncoder(w).Encode(map[string]any{"seed": out, "merge_calls_to_github": f.MergeCalls()})
 	})
 	go func() { _ = http.Serve(ln, mux) }()
 

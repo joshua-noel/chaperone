@@ -136,6 +136,16 @@ func (s *Server) Advance(d time.Duration) {
 	s.mu.Unlock()
 }
 
+// SkipIDs moves the id counter forward by n, before anything is created. Commit
+// SHAs come from that counter, so a caller that runs the fake outside a test
+// (the quickstart playground) gets SHAs that differ from run to run and no
+// operation of an earlier run matches one of this run.
+func (s *Server) SkipIDs(n int64) {
+	s.mu.Lock()
+	s.seq += n
+	s.mu.Unlock()
+}
+
 // SetTokenStyle picks the token shape for later mints.
 func (s *Server) SetTokenStyle(st TokenStyle) {
 	s.mu.Lock()
