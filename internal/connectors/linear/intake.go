@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
 )
@@ -41,7 +42,7 @@ func (a *listAdapter) parse(r *ops.Request) (*policy.Linear, listParams, error) 
 	if err := a.teamTarget(r, pol); err != nil {
 		return nil, p, err
 	}
-	if err := onlyParams(r.Params, "refresh", "closed"); err != nil {
+	if err := onlyParams(r.Params, linearspec.List.ParamNames()...); err != nil {
 		return nil, p, err
 	}
 	if p.refresh, err = paramBool(r.Params, "refresh"); err != nil {
@@ -174,7 +175,7 @@ func (a *statesAdapter) parse(r *ops.Request) (*policy.Linear, error) {
 	if err := a.teamTarget(r, pol); err != nil {
 		return nil, err
 	}
-	return pol, onlyParams(r.Params)
+	return pol, onlyParams(r.Params, linearspec.States.ParamNames()...)
 }
 
 // Check validates the request; it reads nothing.
@@ -252,7 +253,7 @@ func (a *commentAdapter) parse(r *ops.Request) (commentParams, error) {
 	if p.ident, err = a.issueTarget(r, pol); err != nil {
 		return p, err
 	}
-	if err := onlyParams(r.Params, "body"); err != nil {
+	if err := onlyParams(r.Params, linearspec.Comment.ParamNames()...); err != nil {
 		return p, err
 	}
 	if p.body, err = paramString(r.Params, "body"); err != nil {
@@ -337,7 +338,7 @@ func (a *moveAdapter) parse(r *ops.Request) (moveParams, error) {
 	if p.ident, err = a.issueTarget(r, pol); err != nil {
 		return p, err
 	}
-	if err := onlyParams(r.Params, "state"); err != nil {
+	if err := onlyParams(r.Params, linearspec.Move.ParamNames()...); err != nil {
 		return p, err
 	}
 	name, err := paramString(r.Params, "state")

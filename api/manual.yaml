@@ -23,6 +23,11 @@
 # surface: how the op is asked for.
 #   op   POST /v0/ops (params as in components.schemas.Params* of openapi.yaml)
 #   git  the git proxy mount (/git/...); the op in the token authorises the push
+#
+# Entries between a "# BEGIN generated" and its "# END generated" line are written
+# by `go generate ./internal/connectors/...` from the connector's declaration
+# (internal/connectors/kit, docs/connectors.md). Change the declaration, not the
+# entry: a test fails when the two differ.
 version: 1
 ops:
   pr.open:
@@ -133,6 +138,7 @@ ops:
     surface: op
     summary: Share one Drive file with allowlisted recipients.
     usage: chap drive share <file-id> --from <account> --name <file-name> --to <a> --role <r>
+  # BEGIN generated: connector linear (do not edit by hand; run `go generate ./internal/connectors/...`)
   intake.list:
     class: routine
     reversibility: reversible
@@ -157,6 +163,7 @@ ops:
     surface: op
     summary: List the board team's states and the policy's.
     usage: chap intake states
+  # END generated: connector linear
   notion.write:
     class: high
     reversibility: compensable

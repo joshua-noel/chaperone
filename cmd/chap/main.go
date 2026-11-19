@@ -125,6 +125,7 @@ type command struct {
 func commands() []*command {
 	var all []*command
 	all = append(all, opCommands()...)
+	all = append(all, kitCommands(declaredOps())...)
 	all = append(all, otherCommands()...)
 	sort.Slice(all, func(i, j int) bool { return all[i].path < all[j].path })
 	return all

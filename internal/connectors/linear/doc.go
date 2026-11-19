@@ -2,6 +2,15 @@
 // : the ops `intake.list`, `intake.comment`,
 // `intake.move` and `intake.states`.
 //
+// # Where the facts of an operation are
+//
+// The name, class, reversibility, summary, usage line, rate, target and params
+// of each operation are declared once, in the subpackage [linearspec]. The
+// manual entry, the params schema, the `chap` command and the adapter's list of
+// allowed params are derived from that declaration (see docs/connectors.md and
+// internal/connectors/kit). This package holds what is not a fact: the policy
+// checks, the idempotency, the reading of Linear and the handling of its text.
+//
 // # What an agent can and cannot do
 //
 // The orchestrator asks chapd for an op; chapd builds the GraphQL itself. The caller never

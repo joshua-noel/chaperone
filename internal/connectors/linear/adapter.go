@@ -10,35 +10,38 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/kit"
+	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
 	"github.com/joshua-noel/chaperone/internal/redact"
 )
 
-// The op kinds.
+// The op kinds. The names, the classes and every other fact about an op are
+// declared once, in [linearspec]; this file holds what the adapters do.
 const (
-	OpList    = "intake.list"
-	OpComment = "intake.comment"
-	OpMove    = "intake.move"
-	OpStates  = "intake.states"
+	OpList    = linearspec.NameList
+	OpComment = linearspec.NameComment
+	OpMove    = linearspec.NameMove
+	OpStates  = linearspec.NameStates
 )
 
 // Ops lists the op kinds of the connector.
-var Ops = []string{OpList, OpComment, OpMove, OpStates}
+var Ops = linearspec.Connector.Names()
 
 // AdapterName is the target adapter every intake op names.
-const AdapterName = "linear"
+const AdapterName = linearspec.Adapter
 
 // Limits of what a caller may send.
 const (
 	// MaxCommentBytes is the longest comment. "Picked up by the orchestrator" and a few
 	// links need a fraction of it.
-	MaxCommentBytes = 4000
+	MaxCommentBytes = linearspec.MaxCommentBytes
 )
 
 var (
-	teamRefRE  = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
-	identRefRE = regexp.MustCompile(`^([A-Z][A-Z0-9]{1,9})-[1-9][0-9]{0,8}$`)
+	teamRefRE  = regexp.MustCompile(linearspec.TeamRefPattern)
+	identRefRE = regexp.MustCompile(linearspec.IssueRefPattern)
 )
 
 // PolicyFunc returns the project's `linear:` block, or nil when the project
@@ -75,18 +78,20 @@ func (c Config) check() error {
 	return nil
 }
 
-// Adapters returns the adapters by op kind.
+// Adapters returns the adapters by op kind. [kit.Bind] refuses to return them
+// when an operation of [linearspec.Connector] has no adapter here, or an
+// adapter here has no declaration.
 func Adapters(cfg Config) (map[string]ops.Adapter, error) {
 	if err := cfg.check(); err != nil {
 		return nil, err
 	}
 	b := base{cfg: cfg}
-	return map[string]ops.Adapter{
+	return kit.Bind(linearspec.Connector, map[string]ops.Adapter{
 		OpList:    &listAdapter{base: b},
 		OpComment: &commentAdapter{base: b},
 		OpMove:    &moveAdapter{base: b},
 		OpStates:  &statesAdapter{base: b},
-	}, nil
+	})
 }
 
 type base struct{ cfg Config }
@@ -123,7 +128,7 @@ func (b base) policy(r *ops.Request) (*policy.Linear, error) {
 
 // BoardRef is the target ref of intake.list and intake.states that means "the
 // team of the project's linear: block", for a caller that does not know the key.
-const BoardRef = "board"
+const BoardRef = linearspec.BoardRef
 
 // teamTarget checks a target that names a team (intake.list, intake.states):
 // the project's team key, or [BoardRef].

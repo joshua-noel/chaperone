@@ -1661,6 +1661,7 @@ components:
         run_id: { type: string, pattern: "^r-[0-9a-z]{4,32}$" }
       required: [run_id]
       additionalProperties: false
+    # BEGIN generated: connector linear (do not edit by hand; run `go generate ./internal/connectors/...`)
     ParamsIntakeList:
       description: "Phase 1 shape for `intake.list`. Target is `{adapter: linear, ref: \"<team key>\"}`; the team must be the project's `linear.team`. Only the orchestrator token asks. `refresh` asks for a live read (answered from the cache when the last read is under 30 s old); `closed` also returns completed and canceled items (always a live read). Titles, descriptions and comments in the result are untrusted text."
       type: object
@@ -1686,6 +1687,7 @@ components:
       description: "Phase 1 shape for `intake.states`. Target is `{adapter: linear, ref: \"<team key>\"}`. No params."
       type: object
       additionalProperties: false
+    # END generated: connector linear
     ParamsDeploy:
       description: "Owned by L1-15. Target is `{adapter: wsl-host, ref: \"<target>\"}`."
       type: object
