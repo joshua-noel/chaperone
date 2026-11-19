@@ -1,7 +1,9 @@
 name: ci
 
-# Slow scans (govulncheck) live in scan.yml, on a weekly schedule. The Windows job
-# runs only after a merge to main or by hand, to keep pull request runs short.
+# Slow scans (govulncheck) live in scan.yml, on a weekly schedule. The tests that
+# use the real macOS keychain and a real Linux keyring live in keyring.yml. The
+# Windows and macOS jobs run only after a merge to main or by hand, to keep pull
+# request runs short.
 on:
   pull_request:
     branches: [main]
@@ -13,6 +15,7 @@ on:
       - "docs/runbooks/**"
       - "docs/images/**"
       - "docs/development.md"
+      - "docs/releasing.md"
       - "docs/running-chapd.md"
       - "docs/manual-crosswalk.md"
       - "README.md"
@@ -25,13 +28,14 @@ on:
       - "docs/runbooks/**"
       - "docs/images/**"
       - "docs/development.md"
+      - "docs/releasing.md"
       - "docs/running-chapd.md"
       - "docs/manual-crosswalk.md"
       - "README.md"
       - ".github/CODEOWNERS"
       - ".github/pull_request_template.md"
-  # Run both jobs, Windows included, on any branch by hand (Actions tab, or
-  # `gh workflow run ci -r <branch>`), for a PR that touches Windows code.
+  # Run every job, Windows and macOS included, on any branch by hand (Actions tab, or
+  # `gh workflow run ci -r <branch>`), for a PR that touches Windows or macOS code.
   workflow_dispatch:
 
 permissions:
@@ -92,6 +96,9 @@ jobs:
       - name: go vet (windows cross check)
         run: GOOS=windows go vet ./...
 
+      - name: go vet (darwin cross check)
+        run: GOOS=darwin go vet ./...
+
       - name: go test
         run: go test -count=1 ./...
 
@@ -136,3 +143,44 @@ jobs:
 
       - name: chap version
         run: dist/windows/chap.exe version
+
+  # macos-latest is a GitHub-hosted Apple silicon runner (arm64, M-series), so
+  # this job builds and tests natively for darwin/arm64. The darwin/amd64 build
+  # the release workflow makes is a cross build that no job runs. Like the
+  # Windows job it runs after a merge to main and on demand. The keychain
+  # wrapper is exercised against the real `security` tool by keyring.yml, not
+  # here.
+  macos:
+    name: macos
+    needs: linux
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      - name: build all binaries (native, CGO off)
+        env:
+          CHAP_VERSION: ci
+        run: |
+          pkg=github.com/joshua-noel/chaperone/internal/version
+          mkdir -p dist/darwin
+          for bin in chapd chap chap-host; do
+            go build -trimpath -ldflags "-s -w -X ${pkg}.Version=${CHAP_VERSION} -X ${pkg}.Commit=${GITHUB_SHA}" -o "dist/darwin/$bin" "./cmd/$bin"
+          done
+          ls -l dist/darwin
+
+      - name: chap version
+        run: dist/darwin/chap version
