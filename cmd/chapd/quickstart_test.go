@@ -119,7 +119,7 @@ func TestQuickstartRefusesTheRealPort(t *testing.T) {
 
 func TestQuickstartRefusesANonLoopbackAddress(t *testing.T) {
 	for _, addr := range []string{
-		"0.0.0.0:55421", "[::]:55421", ":55421", "192.168.1.20:55421", "10.0.0.5:55421", "8.8.8.8:55421",
+		"0.0.0.0:55421", "[::]:55421", ":55421", "192.0.2.20:55421", "10.0.0.5:55421", "8.8.8.8:55421",
 		"localhost:55421", "example.com:55421", // not an IP address
 		"127.0.0.2:55421", "[::1]:55421", // loopback, but the console's Host allowlist is 127.0.0.1 and localhost
 		"127.0.0.1", "127.0.0.1:0", "127.0.0.1:80", "127.0.0.1:99999",
