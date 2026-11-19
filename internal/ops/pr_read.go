@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -45,10 +46,10 @@ import (
 
 // The op kinds.
 const (
-	OpPRView   = "pr.view"
-	OpPRDiff   = "pr.diff"
-	OpPRChecks = "pr.checks"
-	OpPRFiles  = "pr.files"
+	OpPRView   = githubspec.NamePRView
+	OpPRDiff   = githubspec.NamePRDiff
+	OpPRChecks = githubspec.NamePRChecks
+	OpPRFiles  = githubspec.NamePRFiles
 )
 
 // PRReadOps lists the four read ops, in the order the manual shows them.
@@ -62,8 +63,8 @@ const (
 	// PRBodyMax is the most body bytes a pr.view result carries.
 	PRBodyMax = 64 << 10
 	// PRFilesPerPage is the default page size of pr.files; PRFilesMaxPerPage is its largest.
-	PRFilesPerPage    = 30
-	PRFilesMaxPerPage = 100
+	PRFilesPerPage    = githubspec.FilesPerPage
+	PRFilesMaxPerPage = githubspec.FilesMaxPerPage
 	// prFilesMaxItems is GitHub's own cap: it lists at most 3000 files of a pull request.
 	prFilesMaxItems = 3000
 	prLabelsMax     = 50
@@ -127,11 +128,12 @@ type prReadParams struct {
 	perPage    int    // pr.files
 }
 
+// prReadKeys are the params each read op takes: the declared ones.
 var prReadKeys = map[string][]string{
-	OpPRView:   {},
-	OpPRDiff:   {"expected_head_sha"},
-	OpPRChecks: {"expected_head_sha"},
-	OpPRFiles:  {"expected_head_sha", "page", "per_page"},
+	OpPRView:   githubspec.PRView.ParamNames(),
+	OpPRDiff:   githubspec.PRDiff.ParamNames(),
+	OpPRChecks: githubspec.PRChecks.ParamNames(),
+	OpPRFiles:  githubspec.PRFiles.ParamNames(),
 }
 
 func (a *PRReadAdapter) perms() map[string]string {

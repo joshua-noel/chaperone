@@ -83,14 +83,23 @@ func (r Reversibility) Valid() bool {
 // Kind is the type of one parameter.
 type Kind int
 
-// The parameter kinds the generic command line understands.
+// The parameter kinds.
 const (
 	// Bool is a flag with no value; it is sent only when set.
 	Bool Kind = iota + 1
-	// String is a flag with a text value.
+	// String is a flag with a text value. With Const it is a fixed word the
+	// command sends and the caller never chooses; with FromRef it is the ref.
 	String
 	// Text is the parameter `body`, given as --body or --body-file.
 	Text
+	// Int is a whole number of 1 or more, with an optional maximum and an
+	// optional default (the default is written in the params schema; the
+	// command sends nothing when the flag is left out, and the adapter
+	// applies it). With FromRef it is the number of the ref.
+	Int
+	// List is a flag that may be repeated (or carry a comma list); each item
+	// is a string.
+	List
 )
 
 // Param is one parameter of an operation.
@@ -98,19 +107,52 @@ type Param struct {
 	// Name is the key in the request's params.
 	Name string
 	Kind Kind
-	// Required is for String and Text; a Bool flag cannot be required.
+	// Required is the schema's `required`. For a String, Text, Int or List
+	// flag the command also refuses a call that leaves it out. A Bool flag
+	// cannot be required.
 	Required bool
 	// MinLength and MaxLength bound a String or Text in the params schema
-	// (MinLength 0 leaves the minimum out). MaxLength is required for both.
+	// (MinLength 0 leaves the minimum out), and each item of a List. A String
+	// or Text needs MaxLength, a Pattern, a Const or Unbounded; a List needs
+	// MaxLength for its items.
 	MinLength, MaxLength int
+	// Unbounded is for a String whose schema has no maximum length. The
+	// adapter must bound it; say so in Doc.
+	Unbounded bool
+	// Pattern is an anchored regular expression the value must match; it is
+	// written in the params schema. Why is the usage error when the command
+	// finds the flag's value does not match it. A Required string is checked
+	// always, an optional one only when it is given.
+	Pattern, Why string
+	// CLIPattern is the check the command makes when it is stricter than
+	// Pattern (the schema accepts a 40 or a 64 character sha, the command
+	// only a 40 character one). It defaults to Pattern.
+	CLIPattern string
+	// Const is the one value the schema allows (`const:`). The command sends
+	// it and has no flag for it; the param is Required.
+	Const string
+	// Min, Max and Default are the bounds of an Int. Min is at least 1,
+	// because 0 stands for "the flag was left out"; Max 0 is no maximum;
+	// Default 0 is none.
+	Min, Max, Default int
+	// MinItems and MaxItems bound a List (MinItems 0 leaves the minimum out).
+	MinItems, MaxItems int
+	// FromRef means the command fills the param from the target and has no
+	// flag for it: an Int is the number of a `owner/name#N` ref, a String is
+	// the positional ref itself. A FromRef param is Required.
+	FromRef bool
 	// Flag is the command-line flag; it defaults to Name.
 	Flag string
-	// Placeholder is the value's name in the usage line of a String flag.
+	// Placeholder is the value's name in the usage line of a String, Int or
+	// List flag.
 	Placeholder string
-	// Help is the flag's help text, for a Bool or String. A Text parameter
-	// uses the help of the shared --body and --body-file flags.
+	// Help is the flag's help text, for a Bool, String, Int or List. A Text
+	// parameter uses the help of the shared --body and --body-file flags.
 	Help string
 }
+
+// hasFlag reports whether the generated command has a flag for the param.
+func (p Param) hasFlag() bool { return !p.FromRef && p.Const == "" }
 
 // FlagName is the command-line flag of the parameter, without dashes.
 func (p Param) FlagName() string {
@@ -128,10 +170,20 @@ type Target struct {
 	// command line checks it before it sends anything. The adapter checks the
 	// ref again: this is a convenience, not the guard.
 	Pattern string
-	// Why is the usage error for a ref that does not match Pattern.
+	// Why is the usage error for a ref that does not match Pattern. It may
+	// hold one %q, which is replaced by the ref the caller gave. For a Repo
+	// target with Positional it is the usage error for a bad number.
 	Why string
 
-	// Exactly one of Positional and Flag is set.
+	// Repo means the ref is a GitHub-style repository, `owner/name`, taken
+	// from --repo or else from the git remote origin of the checkout. With
+	// Positional it is `owner/name#N`, where N is the positional argument, a
+	// whole number of 1 or more. A Repo target has no Pattern, Flag,
+	// Placeholder, Default or Help.
+	Repo bool
+
+	// Exactly one of Positional and Flag is set, except for a Repo target,
+	// which may have neither.
 	//
 	// Positional is the placeholder of a ref given as the one positional
 	// argument, for example "SHOP-12" (shown as <SHOP-12>).
@@ -149,6 +201,9 @@ type CLI struct {
 	// Summary is the line `chap help` shows. It defaults to the catalog
 	// summary with the first letter in lower case and no final full stop.
 	Summary string
+	// DryRun is the help text of the command's --dry-run flag. Empty means
+	// the command has none.
+	DryRun string
 }
 
 // Op is the declaration of one operation.
@@ -260,7 +315,7 @@ func (o Op) Validate() error {
 	case strings.TrimSpace(o.Doc) == "":
 		return fail("doc is empty: say what the target must be and what the params mean")
 	}
-	for _, s := range []string{o.Name, o.Summary, o.Usage, o.Doc, o.CLI.Summary} {
+	for _, s := range []string{o.Name, o.Summary, o.Usage, o.Doc, o.CLI.Summary, o.CLI.DryRun} {
 		if i := strings.IndexFunc(s, unicode.IsControl); i >= 0 {
 			return fail("a text has a control character at byte %d", i)
 		}
@@ -280,6 +335,14 @@ func (o Op) Validate() error {
 	if o.Target.Flag != "" {
 		flags[o.Target.Flag] = true
 	}
+	if !o.CLI.Custom {
+		if o.Target.Repo {
+			flags["repo"] = true
+		}
+		if o.CLI.DryRun != "" {
+			flags["dry-run"] = true
+		}
+	}
 	for _, p := range o.Params {
 		if err := p.validate(o.CLI.Custom); err != nil {
 			return fail("param %q: %v", p.Name, err)
@@ -289,6 +352,18 @@ func (o Op) Validate() error {
 		}
 		seen[p.Name] = true
 		if o.CLI.Custom {
+			continue
+		}
+		if p.FromRef {
+			// The number of a `owner/name#N` ref, or the positional ref.
+			if p.Kind == Int && !(o.Target.Repo && o.Target.Positional != "") {
+				return fail("param %q is the number of the ref, and the target is not a repository with a positional number", p.Name)
+			}
+			if p.Kind == String && (o.Target.Repo || o.Target.Positional == "") {
+				return fail("param %q is the positional ref, and the target has none", p.Name)
+			}
+		}
+		if !p.hasFlag() {
 			continue
 		}
 		names := []string{p.FlagName()}
@@ -329,11 +404,24 @@ func (t Target) validate(custom bool) error {
 	if custom {
 		return nil
 	}
+	if t.Repo {
+		switch {
+		case t.Pattern != "" || t.Flag != "" || t.Placeholder != "" || t.Default != "" || t.Help != "":
+			return errors.New("a repository target has no Pattern, Flag, Placeholder, Default or Help")
+		case t.Positional != "" && t.Why == "":
+			return errors.New("a repository target with a number needs Why, the usage error for a bad number")
+		case t.Positional == "" && t.Why != "":
+			return errors.New("a repository target with no number takes no Why")
+		}
+		return nil
+	}
 	switch {
 	case (t.Positional == "") == (t.Flag == ""):
 		return errors.New("target needs exactly one of Positional and Flag")
 	case t.Why == "":
 		return errors.New("target needs Why, the usage error for a bad ref")
+	case strings.Count(t.Why, "%") != strings.Count(t.Why, "%q") || strings.Count(t.Why, "%q") > 1:
+		return errors.New("Why may hold one %q and no other %")
 	}
 	if _, err := regexp.Compile(t.Pattern); err != nil || !strings.HasPrefix(t.Pattern, "^") || !strings.HasSuffix(t.Pattern, "$") {
 		return fmt.Errorf("target pattern %q must be an anchored regular expression (^...$)", t.Pattern)
@@ -355,38 +443,132 @@ func (p Param) validate(custom bool) error {
 	if !paramNameRE.MatchString(p.Name) {
 		return errors.New("name must be lower case letters, digits and _")
 	}
+	if err := p.validateSchema(); err != nil {
+		return err
+	}
+	if custom {
+		return nil
+	}
+	if p.Flag != "" && !flagNameRE.MatchString(p.Flag) {
+		return errors.New("flag must be lower case letters, digits and -")
+	}
+	if p.FromRef {
+		switch {
+		case p.Kind != Int && p.Kind != String:
+			return errors.New("a param from the ref is an Int (the number) or a String (the ref)")
+		case !p.Required:
+			return errors.New("a param from the ref is always sent, so it is Required")
+		case p.Flag != "" || p.Placeholder != "" || p.Help != "":
+			return errors.New("a param from the ref has no flag, Placeholder or Help")
+		}
+		return nil
+	}
+	if p.Const != "" {
+		if p.Flag != "" || p.Placeholder != "" || p.Help != "" {
+			return errors.New("a const param has no flag, Placeholder or Help")
+		}
+		return nil
+	}
 	switch p.Kind {
-	case Bool, String, Text:
+	case Bool:
+		if p.Required {
+			return errors.New("a bool flag cannot be required")
+		}
+		if p.Help == "" {
+			return errors.New("a bool flag needs Help")
+		}
+	case String, Int, List:
+		if p.Placeholder == "" || p.Help == "" {
+			return errors.New("a string, int or list flag needs Placeholder and Help")
+		}
+		if p.Pattern != "" && p.Why == "" {
+			return errors.New("a pattern needs Why, the usage error for a value that does not match")
+		}
+	case Text:
+		if p.Name != "body" {
+			return errors.New("a text param is named body (--body, --body-file); write a custom command for another name")
+		}
+	}
+	return nil
+}
+
+var constRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._-]{0,39}$`)
+
+// validateSchema checks what the params schema is written from.
+func (p Param) validateSchema() error {
+	noInt := p.Min != 0 || p.Max != 0 || p.Default != 0
+	noList := p.MinItems != 0 || p.MaxItems != 0
+	noLen := p.MinLength != 0 || p.MaxLength != 0
+	noText := p.Pattern != "" || p.CLIPattern != "" || p.Const != "" || p.Unbounded || noLen
+	if p.Why != "" && p.Pattern == "" {
+		return errors.New("Why is for a Pattern")
+	}
+	switch p.Kind {
+	case Bool:
+		if noInt || noList || noText {
+			return errors.New("a bool has no bounds, pattern or default")
+		}
+	case Int:
+		switch {
+		case noList || noText:
+			return errors.New("an int has Min, Max and Default only")
+		case p.Min < 1:
+			return errors.New("Min must be at least 1 (0 stands for a flag left out)")
+		case p.Max != 0 && p.Max < p.Min:
+			return errors.New("Max must not be below Min")
+		case p.Default != 0 && (p.Default < p.Min || p.Max != 0 && p.Default > p.Max):
+			return errors.New("Default must be between Min and Max")
+		}
+	case List:
+		switch {
+		case noInt || p.Pattern != "" || p.CLIPattern != "" || p.Const != "" || p.Unbounded:
+			return errors.New("a list has MinItems, MaxItems and the length of its items only")
+		case p.MaxItems < 1 || p.MinItems < 0 || p.MinItems > p.MaxItems:
+			return errors.New("MaxItems must be set, and MinItems must not exceed it")
+		case p.MaxLength < 1 || p.MinLength < 0 || p.MinLength > p.MaxLength:
+			return errors.New("MaxLength of the items must be set, and MinLength must not exceed it")
+		}
+	case String, Text:
+		if noInt || noList {
+			return errors.New("a string has length, pattern and const only")
+		}
+		if p.Kind == Text && (p.Pattern != "" || p.CLIPattern != "" || p.Const != "" || p.Unbounded) {
+			return errors.New("a text param has a length only")
+		}
+		if p.Const != "" {
+			switch {
+			case noLen || p.Pattern != "" || p.CLIPattern != "" || p.Unbounded:
+				return errors.New("a const param has nothing else")
+			case !constRE.MatchString(p.Const):
+				return errors.New("Const must be a short plain word")
+			case !p.Required:
+				return errors.New("a const param is Required")
+			}
+			return nil
+		}
+		for _, pat := range []string{p.Pattern, p.CLIPattern} {
+			if pat == "" {
+				continue
+			}
+			if _, err := regexp.Compile(pat); err != nil || !strings.HasPrefix(pat, "^") || !strings.HasSuffix(pat, "$") {
+				return fmt.Errorf("pattern %q must be an anchored regular expression (^...$)", pat)
+			}
+		}
+		if p.CLIPattern != "" && p.Pattern == "" {
+			return errors.New("CLIPattern is a stricter check than Pattern, which is then set")
+		}
+		switch {
+		case p.Unbounded && (p.MaxLength != 0 || p.MinLength != 0):
+			return errors.New("Unbounded has no length")
+		case p.Unbounded && p.Pattern != "":
+			return errors.New("a pattern is already a bound: drop Unbounded")
+		case p.MinLength < 0 || p.MaxLength < 0 || p.MaxLength != 0 && p.MinLength > p.MaxLength:
+			return errors.New("MinLength must not exceed MaxLength")
+		case p.MaxLength == 0 && p.Pattern == "" && !p.Unbounded:
+			return errors.New("MaxLength must be set (or a Pattern, or Unbounded)")
+		}
 	default:
 		return errors.New("unknown kind")
-	}
-	if !custom {
-		if p.Flag != "" && !flagNameRE.MatchString(p.Flag) {
-			return errors.New("flag must be lower case letters, digits and -")
-		}
-		switch p.Kind {
-		case Bool:
-			if p.Required {
-				return errors.New("a bool flag cannot be required")
-			}
-			if p.Help == "" {
-				return errors.New("a bool flag needs Help")
-			}
-		case String:
-			if p.Placeholder == "" || p.Help == "" {
-				return errors.New("a string flag needs Placeholder and Help")
-			}
-		case Text:
-			if p.Name != "body" {
-				return errors.New("a text param is named body (--body, --body-file); write a custom command for another name")
-			}
-		}
-	}
-	if p.Kind != Bool && (p.MaxLength < 1 || p.MinLength < 0 || p.MinLength > p.MaxLength) {
-		return errors.New("MaxLength must be set, and MinLength must not exceed it")
-	}
-	if p.Kind == Bool && (p.MinLength != 0 || p.MaxLength != 0) {
-		return errors.New("a bool has no length")
 	}
 	return nil
 }

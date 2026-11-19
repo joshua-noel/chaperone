@@ -30,6 +30,7 @@
 # entry: a test fails when the two differ.
 version: 1
 ops:
+  # BEGIN generated: connector github (do not edit by hand; run `go generate ./internal/connectors/...`)
   pr.open:
     class: routine
     reversibility: reversible
@@ -90,6 +91,7 @@ ops:
     surface: op
     summary: Reopen an issue labelled source:error-watcher.
     usage: chap issue reopen <n>
+  # END generated: connector github
   branch.push:
     class: routine
     reversibility: reversible
@@ -108,12 +110,14 @@ ops:
     surface: op
     summary: Read recent log lines from a fixed source.
     usage: chap logs <web|worker|db|tunnel> [--lines <n>]
+  # BEGIN generated: connector ci (do not edit by hand; run `go generate ./internal/connectors/...`)
   ci.report:
     class: routine
     reversibility: reversible
     surface: op
     summary: Post a finished local CI run's result as a check run.
     usage: chap ci report <run-id>
+  # END generated: connector ci
   deploy:
     class: high
     reversibility: compensable

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -31,7 +32,7 @@ import (
 //     for the same run replaces the first.
 
 // ciReportAdapterTarget is the target adapter of a ci.report request; the ref is the run's ID.
-const ciReportAdapterTarget = "runner"
+const ciReportAdapterTarget = githubspec.CIAdapter
 
 // ciProfile is the profile a reported run must have had.
 const ciProfile = "ci"
@@ -110,7 +111,7 @@ func (a *ciReportAdapter) resolve(ctx context.Context, r *Request) (ciReport, []
 	if r.Target.Adapter != ciReportAdapterTarget {
 		return rep, nil, paramsInvalid("target adapter must be %s, got %q", ciReportAdapterTarget, clip(r.Target.Adapter, 40))
 	}
-	if err := onlyParams(r.Params, "run_id"); err != nil {
+	if err := onlyParams(r.Params, githubspec.CIReport.ParamNames()...); err != nil {
 		return rep, nil, err
 	}
 	runID, err := paramString(r.Params, "run_id")

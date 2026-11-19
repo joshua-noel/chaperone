@@ -2,7 +2,7 @@
 
 A connector lets Chaperone act on one service for an agent, so the agent never holds a credential for it. This page says how a connector is put together, what rules it must follow, and how to add one operation.
 
-Status: the connector kit exists for the Linear connector only. GitHub and Google still use the older layout. See [What is not covered yet](#what-is-not-covered-yet).
+Status: the connector kit covers the Linear connector and the GitHub operations. Google still uses the older layout. See [What is covered](#github-what-is-covered-and-what-stays-custom) and [What is not covered yet](#what-is-not-covered-yet).
 
 ## The seam
 
@@ -75,8 +75,8 @@ What is derived from a declaration:
 | --- | --- | --- |
 | Catalog entry in `api/manual.yaml` | Generated into a marked region by `go generate ./internal/connectors/...` | `TestGeneratedRegionsAreUpToDate` and `TestCatalogAgreesWithTheDeclarations` in `internal/connectors/declared` |
 | Params schema in `api/openapi.yaml` (and so the MCP tool schema) | Generated into a marked region, the same command | The same tests, and the existing schema tests of `internal/mcpfront` |
-| Adapter registration | `kit.Bind` in `linear.Adapters` refuses to start when an operation has no adapter, or an adapter has no declaration | `TestAdaptersAreTheDeclaredOperations`, `TestBindIsOneToOne` |
-| Allowed param names in `parse` | `onlyParams(r.Params, linearspec.Move.ParamNames()...)` | `TestEachAdapterTakesTheDeclaredParamsOnly` |
+| Adapter registration | `kit.Bind` in `linear.Adapters`, and in `adapters` of `cmd/chapd/adapters.go` for GitHub, refuses to start when an operation has no adapter, or an adapter has no declaration | `TestAdaptersAreTheDeclaredOperations`, `TestBindIsOneToOne`, `TestGitHubAdaptersAreTheDeclaredOperations` |
+| Allowed param names in `parse` | `onlyParams(r.Params, linearspec.Move.ParamNames()...)`; the GitHub adapters of `internal/ops` do the same with `githubspec` | `TestEachAdapterTakesTheDeclaredParamsOnly` |
 | `chap` command, help, usage errors | Built at start-up by `cmd/chap/kitcmd.go` | The golden files and `docs/manualgen` (unchanged), `TestEveryDeclaredOpHasExactlyOneCommand` |
 | Usage line of the command | Computed from the declared params | `TestGeneratedCommandLines` |
 
@@ -93,17 +93,25 @@ What is NOT derived, on purpose, and stays hand-written in the connector:
 
 - The class is also written in the generated manual entry, so a change of class is a visible change in the same pull request.
 - Every declared operation is pinned in one table written by hand, `pins` in `internal/connectors/declared/declared_test.go`. `TestEveryDeclaredOpIsPinned` fails for an operation with no pin, so a new connector cannot skip it. Loosening a class means changing the declaration, the manual entry and the pin together.
+- This was tried for `pr.merge`, the one gated GitHub operation. With the class lowered to routine in the declaration, `TestEveryDeclaredOpIsPinned`, `TestGeneratedRegionsAreUpToDate` and `TestCatalogAgreesWithTheDeclarations` fail. With the manual entry regenerated as well, `TestEveryDeclaredOpIsPinned` still fails, and so do `TestClassesAndCriticalOps` in `internal/policy` and the `manual-code` golden of `cmd/chap`.
 - `kit.Op.Validate` refuses an irreversible operation that is routine or gated. *Decided for now:* this rule stays. The owner has not answered yet.
 - The catalog loader still refuses a duplicate key and a `secrets.*` operation that is not critical. A declared operation cannot replace a hand-written entry: the generator only rewrites its own marked regions, and a test counts the entries.
 - The baseline loader still refuses a catalog operation with no baseline rule, so a declared operation is off until a policy change turns it on.
 
 ### When a generated command is not enough
 
-Set `CLI: kit.CLI{Custom: true}` in the declaration and write the command in `cmd/chap/ops.go` as before. `TestEveryDeclaredOpHasExactlyOneCommand` fails when an operation has both or neither. The generic command handles: one ref (positional, or a flag with a default), bool flags, string flags, and the `--body` / `--body-file` pair. Anything else (a ref taken from git, a flag that depends on another flag) needs a custom command.
+Set `CLI: kit.CLI{Custom: true}` in the declaration and write the command in `cmd/chap/ops.go` as before. `TestEveryDeclaredOpHasExactlyOneCommand` fails when an operation has both or neither. The generic command handles:
 
-For a custom command, `kit` checks only what the catalog and the params schema need: the adapter name, and each param's name, kind and bounds. It does not check the ref's shape (`Target.Pattern`, `Positional`, `Flag`, `Default`, `Why`), the flag names, or the `body` name of a text param, because the hand-written command owns those. Set `Target: kit.Target{Adapter: "github"}` for a ref that is read from git.
+- one ref: a positional argument, or a flag with a default, or a repository (`owner/name`, or `owner/name#N` with the number as the positional argument) read from `--repo` and else from the git remote origin;
+- bool flags, string flags (with a pattern check and its usage error), whole-number flags (a minimum, a maximum, 0 means "left out"), repeatable list flags, and the `--body` / `--body-file` pair;
+- a `--dry-run` flag;
+- a param the command fills from the ref (the number, or the ref itself) and a param with one fixed value.
 
-The params schema is limited by what `kit` can write. Every param that is not a bool is written as a string with `minLength` and `maxLength`. An integer, a list or a pattern param needs a new `Kind` in `kit` first (and in `writeParams`); until then it cannot be declared, even for a custom command.
+Anything else needs a custom command: a param read from git, a default for a flag that the schema does not have, a flag that depends on another, a hint written into the usage line, a command whose flags are not in the order of the schema.
+
+For a custom command, `kit` checks only what the catalog and the params schema need: the adapter name, and each param's name, kind and bounds (length, pattern, const, number bounds, list bounds). It does not check the ref's shape (`Target.Pattern`, `Positional`, `Flag`, `Default`, `Why`), the flag names, the `body` name of a text param, or the placeholders and help of a flag, because the hand-written command owns those. Set `Target: kit.Target{Adapter: "github", Repo: true}` for a ref that is read from git.
+
+The params schema is written from these kinds: bool; string (a length, or a pattern, or `Const`, or `Unbounded` when the schema has no maximum and the adapter bounds it); text; integer (minimum, maximum, default); list of strings (item count and item length). An enum, a one-of or a nested object cannot be declared yet.
 
 `TestGeneratedCommandsHaveNoFlagClash` builds the flag set of every generated command, so a declared flag that has the name of a common flag (`--json`, `--project`, `--reason`, `--approval`, `--request`, `--wait`) fails a test. `TestKitKnowsTheCommonFlags` checks that `kit.CommonFlags` is the list `chap` registers.
 
@@ -146,9 +154,61 @@ The 11 before were: the adapter, `adapter.go`, the adapter's tests, `cmd/chap/in
 
 Adding a whole new connector adds one line to `internal/connectors/declared/declared.go`, and the two marker lines are created by the generator (`api/manual.yaml` at the end of the file, `api/openapi.yaml` before the first `Params` schema).
 
+## GitHub: what is covered and what stays custom
+
+The GitHub operations are declared in `internal/connectors/github/githubspec/spec.go`. The adapters stay in `internal/ops`, where `cmd/chapd/adapters.go` builds them and `kit.Bind` pairs them with the declarations. The class of every one is pinned in `internal/connectors/declared/declared_test.go`.
+
+| Operation | Class | Catalog entry, params schema, adapter binding | `chap` command |
+| --- | --- | --- | --- |
+| `pr.view`, `pr.diff`, `pr.checks`, `pr.files` | routine | generated | generated |
+| `pr.update` | routine | generated | generated (`number` is filled from the ref) |
+| `issue.comment`, `issue.reopen` | routine | generated | generated |
+| `ci.report` | routine | generated (connector `ci`, adapter `runner`) | generated |
+| `pr.open` | routine | generated | **custom**: `head` is the current git branch when `--branch` is left out, and `--base` defaults to `main` |
+| `pr.merge` | **gated** | generated | **custom**: the command fixes the merge method (`squash`), `--base` defaults to `main`, and the flag `--head` fills `head_sha`. It is the one operation here that changes the repository for good, so its command stays where a reviewer reads it whole |
+| `issue.open` | routine | generated | **custom**: its usage line names the label the error watcher must give (`--label source:error-watcher`), and its usage errors name it too |
+| `branch.push` | routine | **not declared** | none (`chap git setup`, then `git push`) |
+
+`ci.report` is its own connector, `ci`, because a connector has one `target.adapter` and the ref of `ci.report` is a run (`runner`). Its act is still on GitHub.
+
+`branch.push` is reached through the git proxy and not through `POST /v0/ops`. The kit writes `surface: op` and a params schema for every operation, and has no command or adapter to bind for a proxy. Its catalog entry stays hand-written, and so does the entry of `pr.push.workflow`.
+
+What the move did not change: every golden file, `docs/manual.md`, the OpenAPI text of each params schema and the manual entry of each operation are the same bytes as before. The entries are in the same order in `api/manual.yaml`; in `api/openapi.yaml` the `ParamsPr*` blocks follow the same order now (the three issue blocks moved after `ParamsPrFiles`).
+
+### Files touched, for a new GitHub read operation
+
+Take a new read operation, `pr.commits`, that lists the commits of a PR for the orchestrator. The counts are the files a person edits. The "with the kit" column was checked by declaring the operation and running the tests: they fail until the pin, the regeneration, the baseline rule and the adapter exist, and nothing else.
+
+| File | Before | With the kit |
+| --- | --- | --- |
+| `internal/gh/pulls.go`, its test | by hand (the GitHub call) | by hand |
+| `internal/ops/pr_read.go`, its test | by hand: the adapter, the name, the `PRReadOps` list, the allowed params | by hand: the adapter, the name, the `PRReadOps` list. The allowed params are the declared ones |
+| `cmd/chap/prread.go` | by hand: the command and the printing | by hand: the printing only |
+| `cmd/chap/ops.go` | by hand: the table entry | not touched |
+| `api/manual.yaml`, `api/openapi.yaml` | by hand | generated |
+| `githubspec/spec.go` | not there | by hand: the declaration and one name in `Connector.Ops` |
+| `declared_test.go` | not there | by hand: the pin |
+| `internal/policy/data/baseline.yaml` | by hand | by hand (the rate must equal the declared one) |
+| `internal/policy/policy_test.go` | by hand, when the op is turned on | the same |
+| `cmd/chap/golden_test.go`, the canned reply | by hand | by hand (optional: the generic command is tested once) |
+| `docs/manual.md`, `help.golden`, the new golden file | by command | by command |
+
+**Before: 12 files by hand, 3 by command. With the kit: 11 by hand, 5 by command** (the two `api/` files move from "by hand" to "by command"; the declaration and the pin are new). The count hardly moves, because most of the files are logic: the GitHub call, the adapter, the printing and their tests. What moved is the number of places where the same facts are typed: name, class, summary, usage line, rate, params and their bounds were typed in `ops.go`, `manual.yaml`, `openapi.yaml`, the command in `prread.go` and the key list in `pr_read.go` (five places). They are typed once now, in the declaration, with the pin as the deliberate second copy of the class.
+
+Without a declaration the new adapter is refused as well: `kit.Bind` stops `chapd` at start-up when a declared operation has no adapter, or an adapter has no declaration.
+
 ## What is not covered yet
 
-- **GitHub and Google are not migrated.** Their operations are declared by hand in the old places. `kit` supports a custom command only in part (see above: it does not yet write integer, list or pattern params), and has no support for a surface other than `op` (the git proxy).
+- **Google is not migrated.** Its operations are declared by hand in the old places.
+- **The kit cannot express a surface other than `op`.** `branch.push` and `pr.push.workflow` (the git proxy) have no declaration.
+- **The kit cannot express a default that the schema does not have.** `pr merge --base main` and `pr open --base main` are command defaults and not schema defaults, so those two commands stay custom. The same holds for a param that is read from git (`pr open --branch`).
+- **The kit cannot express an enum, a one-of or a nested object** in a params schema.
+- **The kit declares the per-minute rate only.** The baseline also has per-hour rates for the GitHub reads and issues, and no test compares them with the declaration.
+- **`Unbounded` strings.** The schemas of `head` and `base` in `pr.open` and `base` in `pr.merge` have no `maxLength`, as before; the adapters cap them (250 bytes in `pr.open`). The declaration says `Unbounded` so the gap shows. Adding a `maxLength` is a change of the contract and was not made here.
+- **The command line is stricter than the schema for a sha.** The reads accept a 40 or a 64 character sha in the schema; the command accepts the 40 character one (`Param.CLIPattern`). That is how it was.
+- **Order of two simultaneous usage errors.** The generic command checks the params in the order they are declared, which is the order of the schema. For `pr files` that means `--page` and `--per-page` are checked before `--expected-head`; the hand-written command checked `--expected-head` first. It matters only when two flags are wrong at once.
+- **An unknown param is refused with the declared names in declaration order.** The refusal of `pr.files` lists `page, per_page, expected_head_sha`; it listed `expected_head_sha, page, per_page`.
+- **Description quoting.** The generator writes a params description plain when it is short and plain, and in double quotes otherwise (over 160 characters, or a character that YAML reads specially). This is the rule that gives the bytes the hand-written text had.
 - **No scaffold command.** `chap connector new <name>` does not exist. A new connector is copied from `linear` and `linearspec` by hand.
 - **No conformance suite.** The rules above are tested by each connector for itself. A shared suite (`Check` changes nothing, `Execute` twice acts once, no secret in any output, untrusted marking, every refusal has a known cause code) is milestone 2.3.
 - **Shared helpers are not shared.** The HTTP client that never logs a credential, the rate limit and retry code, and the text cleaning (`clean`, `checkText`) live in `linear`. Other connectors have their own copies.

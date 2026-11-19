@@ -48,6 +48,21 @@ var pins = map[string]kit.Pin{
 	"intake.comment": {Class: kit.Routine, Reversibility: kit.Compensable},
 	"intake.move":    {Class: kit.Routine, Reversibility: kit.Reversible},
 	"intake.states":  {Class: kit.Routine, Reversibility: kit.Reversible},
+
+	// GitHub. pr.merge is the one gated operation: it merges on its own when
+	// verify is green on the exact head, and a merge is undone only by a revert
+	// commit, hence compensable. Do not loosen it to routine.
+	"pr.open":       {Class: kit.Routine, Reversibility: kit.Reversible},
+	"pr.update":     {Class: kit.Routine, Reversibility: kit.Reversible},
+	"pr.merge":      {Class: kit.Gated, Reversibility: kit.Compensable},
+	"pr.view":       {Class: kit.Routine, Reversibility: kit.Reversible},
+	"pr.diff":       {Class: kit.Routine, Reversibility: kit.Reversible},
+	"pr.checks":     {Class: kit.Routine, Reversibility: kit.Reversible},
+	"pr.files":      {Class: kit.Routine, Reversibility: kit.Reversible},
+	"issue.open":    {Class: kit.Routine, Reversibility: kit.Reversible},
+	"issue.comment": {Class: kit.Routine, Reversibility: kit.Compensable},
+	"issue.reopen":  {Class: kit.Routine, Reversibility: kit.Reversible},
+	"ci.report":     {Class: kit.Routine, Reversibility: kit.Reversible},
 }
 
 func TestEveryDeclaredOpIsPinned(t *testing.T) {
@@ -215,7 +230,7 @@ func TestAFifthOperationNeedsOnlyItsDeclarationAndAnAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manual, err = kit.Splice(kit.Manual, manual, []kit.Connector{five})
+	manual, err = kit.Splice(kit.Manual, manual, swapLinear(five))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +246,7 @@ func TestAFifthOperationNeedsOnlyItsDeclarationAndAnAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	openapi, err = kit.Splice(kit.OpenAPI, openapi, []kit.Connector{five})
+	openapi, err = kit.Splice(kit.OpenAPI, openapi, swapLinear(five))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,4 +282,17 @@ func TestAFifthOperationNeedsOnlyItsDeclarationAndAnAdapter(t *testing.T) {
 	if pack.ForProject("acme-shop").Enabled("intake.show") {
 		t.Error("a new op must be off until a policy change turns it on")
 	}
+}
+
+// swapLinear is the declared connectors with the Linear one replaced by c, so a
+// test can add an operation to Linear and still splice every other region.
+func swapLinear(c kit.Connector) []kit.Connector {
+	var out []kit.Connector
+	for _, d := range Connectors() {
+		if d.Name == c.Name {
+			d = c
+		}
+		out = append(out, d)
+	}
+	return out
 }

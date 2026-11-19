@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -37,9 +38,9 @@ import (
 
 // The op kinds.
 const (
-	OpIssueOpen    = "issue.open"
-	OpIssueComment = "issue.comment"
-	OpIssueReopen  = "issue.reopen"
+	OpIssueOpen    = githubspec.NameIssueOpen
+	OpIssueComment = githubspec.NameIssueComment
+	OpIssueReopen  = githubspec.NameIssueReopen
 )
 
 // IssueLabel is the label every issue of the error watcher carries. It is the
@@ -47,10 +48,10 @@ const (
 const IssueLabel = "source:error-watcher"
 
 const (
-	issueTitleMax  = 200
-	issueBodyMax   = 10000
-	issueLabelsMax = 10
-	issueLabelMax  = 50
+	issueTitleMax  = githubspec.TitleMax
+	issueBodyMax   = githubspec.IssueBodyMax
+	issueLabelsMax = githubspec.IssueLabelsMax
+	issueLabelMax  = githubspec.IssueLabelMax
 )
 
 // IssueAPI is the part of *[gh.Client] that the issue ops use.
@@ -108,10 +109,17 @@ type issueParams struct {
 
 func (a *IssueAdapter) hasNumber() bool { return a.op != OpIssueOpen }
 
+// issueNames are the params each issue op takes: the declared ones.
+var issueNames = map[string][]string{
+	OpIssueOpen:    githubspec.IssueOpen.ParamNames(),
+	OpIssueComment: githubspec.IssueComment.ParamNames(),
+	OpIssueReopen:  githubspec.IssueReopen.ParamNames(),
+}
+
 var issueKeys = map[string]map[string]bool{
-	OpIssueOpen:    {"title": true, "body": true, "labels": true},
-	OpIssueComment: {"body": true},
-	OpIssueReopen:  {},
+	OpIssueOpen:    keySet(issueNames[OpIssueOpen]),
+	OpIssueComment: keySet(issueNames[OpIssueComment]),
+	OpIssueReopen:  keySet(issueNames[OpIssueReopen]),
 }
 
 // parse validates the request. A failure is a *Refusal.
@@ -119,7 +127,7 @@ func (a *IssueAdapter) parse(req *Request) (issueParams, error) {
 	bad := func(why string) (issueParams, error) {
 		return issueParams{}, &Refusal{Code: CodeParamsInvalid, Why: why}
 	}
-	if req.Target.Adapter != "github" {
+	if req.Target.Adapter != githubspec.Adapter {
 		return bad("target.adapter must be github")
 	}
 	ref, num, hasNum := strings.Cut(req.Target.Ref, "#")
@@ -199,13 +207,10 @@ func (a *IssueAdapter) parse(req *Request) (issueParams, error) {
 }
 
 func issueParamList(op string) string {
-	switch op {
-	case OpIssueOpen:
-		return "title, body, labels"
-	case OpIssueComment:
-		return "body"
+	if len(issueNames[op]) == 0 {
+		return "no params"
 	}
-	return "no params"
+	return strings.Join(issueNames[op], ", ")
 }
 
 func hasLabel(labels []string, want string) bool {

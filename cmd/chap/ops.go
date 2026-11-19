@@ -266,30 +266,18 @@ func (l *listFlag) Set(v string) error {
 	return nil
 }
 
+// opCommands are the op commands that are written by hand. The commands of
+// the operations the connectors declare with the kit are built from their
+// declarations (kitcmd.go), except the ones whose declaration says
+// CLI.Custom: pr open, pr merge and issue open, here.
 func opCommands() []*command {
 	return []*command{
 		{path: "pr open", usage: "chap pr open --title <t> [--body <b> | --body-file <f>] [--draft] [--branch <b>] [--base <b>] [--repo owner/name]",
 			summary: "open a pull request from the run's branch", run: cmdPrOpen},
-		{path: "pr update", usage: "chap pr update <n> --expected-head <sha> [--title <t>] [--body <b> | --body-file <f>] [--update-branch] [--repo owner/name]",
-			summary: "update a PR's title or body, or its branch", run: cmdPrUpdate},
 		{path: "pr merge", usage: "chap pr merge <n> --head <sha> [--base <b>] [--repo owner/name] [--dry-run]",
 			summary: "merge a PR when verify is green on its exact head", run: cmdPrMerge},
-		{path: "pr view", usage: "chap pr view <n> [--repo owner/name] [--dry-run]",
-			summary: "read a PR's title, body, state, head, base, mergeability (orchestrator only)", run: cmdPrView},
-		{path: "pr diff", usage: "chap pr diff <n> [--expected-head <sha>] [--repo owner/name] [--dry-run]",
-			summary: "read a PR's unified diff, capped at 256 KiB (orchestrator only)", run: cmdPrDiff},
-		{path: "pr checks", usage: "chap pr checks <n> [--expected-head <sha>] [--repo owner/name] [--dry-run]",
-			summary: "read the check runs on a PR's head commit (orchestrator only)", run: cmdPrChecks},
-		{path: "pr files", usage: "chap pr files <n> [--page <p>] [--per-page <n>] [--expected-head <sha>] [--repo owner/name] [--dry-run]",
-			summary: "list a PR's changed files, one page at a time (orchestrator only)", run: cmdPrFiles},
-		{path: "ci report", usage: "chap ci report <run-id> [--dry-run]",
-			summary: "post a finished ci run's result to GitHub as a check run (orchestrator only)", run: cmdCiReport},
 		{path: "issue open", usage: "chap issue open --title <t> --label source:error-watcher [--label <l>] [--body <b> | --body-file <f>] [--repo owner/name]",
 			summary: "open an issue labelled source:error-watcher", run: cmdIssueOpen},
-		{path: "issue comment", usage: "chap issue comment <n> [--body <b> | --body-file <f>] [--repo owner/name]",
-			summary: "comment on an issue labelled source:error-watcher", run: cmdIssueComment},
-		{path: "issue reopen", usage: "chap issue reopen <n> [--repo owner/name]",
-			summary: "reopen an issue labelled source:error-watcher", run: cmdIssueReopen},
 		{path: "health", usage: "chap health",
 			summary: "read the pilot's readiness status", run: cmdHealth},
 		{path: "logs", usage: "chap logs <web|worker|db|tunnel> [--lines <n>]",
@@ -357,53 +345,6 @@ func cmdPrOpen(a *app, c *command, args []string) int {
 	return a.ask(&co, opReq{op: "pr.open", target: target{"github", r}, params: params})
 }
 
-func cmdPrUpdate(a *app, c *command, args []string) int {
-	var co common
-	var tf textFlags
-	var title, expected, repo string
-	var updateBranch bool
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	tf.register(fs)
-	fs.StringVar(&title, "title", "", "new title")
-	fs.StringVar(&expected, "expected-head", "", "the PR's head sha you last saw (required)")
-	fs.BoolVar(&updateBranch, "update-branch", false, "update the PR branch from its base")
-	fs.StringVar(&repo, "repo", "", "owner/name (default: from the git remote origin)")
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	n, err := parsePR(pos[0])
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	if !shaRE.MatchString(expected) {
-		return a.usageErr(c, "--expected-head must be a 40-character lowercase hex sha")
-	}
-	text, hasBody, err := tf.resolve(a)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	r, err := a.repoArg(repo)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	params := map[string]any{"number": n, "expected_head_sha": expected}
-	if title != "" {
-		params["title"] = title
-	}
-	if hasBody {
-		params["body"] = text
-	}
-	if updateBranch {
-		params["update_branch"] = true
-	}
-	return a.ask(&co, opReq{op: "pr.update", target: target{"github", fmt.Sprintf("%s#%d", r, n)}, params: params})
-}
-
 func cmdPrMerge(a *app, c *command, args []string) int {
 	var co common
 	var head, base, repo string
@@ -434,27 +375,6 @@ func cmdPrMerge(a *app, c *command, args []string) int {
 	}
 	params := map[string]any{"base": base, "head_sha": head, "method": "squash"}
 	return a.ask(&co, opReq{op: "pr.merge", target: target{"github", fmt.Sprintf("%s#%d", r, n)}, params: params, dryRun: dry})
-}
-
-// cmdCiReport asks chapd to state a finished `ci` run's result on GitHub. The request names the run and nothing else:
-// chapd reads the repository, the commit and the outcome from its own record of the run.
-func cmdCiReport(a *app, c *command, args []string) int {
-	var co common
-	var dry bool
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	fs.BoolVar(&dry, "dry-run", false, "check the run and the policy only; post nothing")
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	if !runIDRE.MatchString(pos[0]) {
-		return a.usageErr(c, "%q is not a run id like r-7f3a", pos[0])
-	}
-	return a.ask(&co, opReq{op: "ci.report", target: target{"runner", pos[0]}, params: map[string]any{"run_id": pos[0]}, dryRun: dry})
 }
 
 func cmdHealth(a *app, c *command, args []string) int {

@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/joshua-noel/chaperone/internal/connectors/declared"
@@ -18,10 +20,11 @@ import (
 // are checked here only to give a usage error early. chapd checks everything
 // again and is the guard.
 //
-// An operation that needs more than this (a computed ref, a param that is read
-// from git, a flag that depends on another) sets CLI.Custom in its declaration
-// and keeps a hand-written command in opCommands; a test checks that each
-// declared operation has exactly one of the two.
+// An operation that needs more than this (a param that is read from git, a
+// default that differs from the schema's, a flag that depends on another, a
+// fixed flag in the usage line) sets CLI.Custom in its declaration and keeps a
+// hand-written command in opCommands; a test checks that each declared
+// operation has exactly one of the two.
 
 // declaredOps is the list of declared operations. A test replaces it.
 var declaredOps = declared.Ops
@@ -49,29 +52,49 @@ type declaredFlags struct {
 	co       common
 	tf       textFlags
 	teamFlag string
+	repo     string
+	dry      bool
 	bools    map[string]*bool
 	strs     map[string]*string
+	ints     map[string]*int
+	lists    map[string]*listFlag
 }
 
 // registerDeclared defines every flag of the generated command of o: the
-// common ones, the params' and the ref's. The flag package panics when a flag
-// is defined twice, so a clash between a declared flag and a common one fails
-// TestGeneratedCommandsHaveNoFlagClash instead of surprising a user.
+// common ones, the params', the ref's and --repo and --dry-run. The flag
+// package panics when a flag is defined twice, so a clash between a declared
+// flag and a common one fails TestGeneratedCommandsHaveNoFlagClash instead of
+// surprising a user.
 func registerDeclared(o kit.Op, fs *flag.FlagSet, a *app) *declaredFlags {
-	d := &declaredFlags{bools: map[string]*bool{}, strs: map[string]*string{}}
+	d := &declaredFlags{bools: map[string]*bool{}, strs: map[string]*string{}, ints: map[string]*int{}, lists: map[string]*listFlag{}}
 	d.co.register(fs, a)
 	for _, p := range o.Params {
+		if p.FromRef || p.Const != "" {
+			continue
+		}
 		switch p.Kind {
 		case kit.Bool:
 			d.bools[p.Name] = fs.Bool(p.FlagName(), false, p.Help)
 		case kit.String:
 			d.strs[p.Name] = fs.String(p.FlagName(), "", p.Help)
+		case kit.Int:
+			d.ints[p.Name] = fs.Int(p.FlagName(), 0, p.Help)
+		case kit.List:
+			l := &listFlag{}
+			d.lists[p.Name] = l
+			fs.Var(l, p.FlagName(), p.Help)
 		case kit.Text:
 			d.tf.register(fs)
 		}
 	}
-	if o.Target.Positional == "" {
+	if o.Target.Flag != "" {
 		fs.StringVar(&d.teamFlag, o.Target.Flag, "", o.Target.Help)
+	}
+	if o.Target.Repo {
+		fs.StringVar(&d.repo, "repo", "", "owner/name (default: from the git remote origin)")
+	}
+	if o.CLI.DryRun != "" {
+		fs.BoolVar(&d.dry, "dry-run", false, o.CLI.DryRun)
 	}
 	return d
 }
@@ -79,7 +102,7 @@ func registerDeclared(o kit.Op, fs *flag.FlagSet, a *app) *declaredFlags {
 func runDeclared(o kit.Op, a *app, c *command, args []string) int {
 	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
 	d := registerDeclared(o, fs, a)
-	co, tf, bools, strs := &d.co, &d.tf, d.bools, d.strs
+	co, tf := &d.co, &d.tf
 	positionals := 0
 	if o.Target.Positional != "" {
 		positionals = 1
@@ -95,31 +118,89 @@ func runDeclared(o kit.Op, a *app, c *command, args []string) int {
 	// The ref is the positional argument, or the flag's value, or the
 	// declared default when the flag is left out. A given ref must have the
 	// declared shape; the default is a fixed word the adapter understands.
-	ref, given := o.Target.Default, false
-	if positionals == 1 {
+	// For a repository target the positional argument is the number, and the
+	// repository is read last, as the hand-written commands did.
+	ref, given, number := o.Target.Default, false, 0
+	switch {
+	case o.Target.Repo && positionals == 1:
+		n, err := strconv.Atoi(pos[0])
+		if err != nil || n < 1 {
+			return a.usageErr(c, "%s", o.Target.Why)
+		}
+		number = n
+	case positionals == 1:
 		ref, given = pos[0], true
-	} else if d.teamFlag != "" {
+	case d.teamFlag != "":
 		ref, given = d.teamFlag, true
 	}
 	if given && !regexp.MustCompile(o.Target.Pattern).MatchString(ref) {
-		return a.usageErr(c, "%s", o.Target.Why)
+		why := o.Target.Why
+		if strings.Contains(why, "%q") {
+			why = fmt.Sprintf(why, ref)
+		}
+		return a.usageErr(c, "%s", why)
 	}
 
 	params := map[string]any{}
 	for _, p := range o.Params {
+		switch {
+		case p.FromRef && p.Kind == kit.Int:
+			params[p.Name] = number
+			continue
+		case p.FromRef:
+			params[p.Name] = ref
+			continue
+		case p.Const != "":
+			params[p.Name] = p.Const
+			continue
+		}
 		switch p.Kind {
 		case kit.Bool:
-			if *bools[p.Name] {
+			if *d.bools[p.Name] {
 				params[p.Name] = true
 			}
 		case kit.String:
-			v := *strs[p.Name]
-			if p.Required && strings.TrimSpace(v) == "" {
+			v := *d.strs[p.Name]
+			if p.Pattern != "" {
+				pat := p.CLIPattern
+				if pat == "" {
+					pat = p.Pattern
+				}
+				if (p.Required || v != "") && !regexp.MustCompile(pat).MatchString(v) {
+					return a.usageErr(c, "%s", p.Why)
+				}
+			} else if p.Required && strings.TrimSpace(v) == "" {
 				return a.usageErr(c, "--%s is required", p.FlagName())
 			}
 			if v != "" {
 				params[p.Name] = v
 			}
+		case kit.Int:
+			// 0 is a flag left out: nothing is sent and the adapter applies
+			// the schema's default.
+			v := *d.ints[p.Name]
+			if v == 0 {
+				if p.Required {
+					return a.usageErr(c, "--%s is required", p.FlagName())
+				}
+				continue
+			}
+			if v < p.Min || p.Max > 0 && v > p.Max {
+				if p.Max > 0 {
+					return a.usageErr(c, "--%s must be %d to %d", p.FlagName(), p.Min, p.Max)
+				}
+				return a.usageErr(c, "--%s must be %d or more", p.FlagName(), p.Min)
+			}
+			params[p.Name] = v
+		case kit.List:
+			l := *d.lists[p.Name]
+			if len(l) == 0 {
+				if p.Required {
+					return a.usageErr(c, "--%s is required", p.FlagName())
+				}
+				continue
+			}
+			params[p.Name] = []string(l)
 		case kit.Text:
 			text, has, err := tf.resolve(a)
 			if err != nil {
@@ -133,5 +214,15 @@ func runDeclared(o kit.Op, a *app, c *command, args []string) int {
 			}
 		}
 	}
-	return a.ask(co, opReq{op: o.Name, target: target{o.Target.Adapter, ref}, params: params})
+	if o.Target.Repo {
+		repo, err := a.repoArg(d.repo)
+		if err != nil {
+			return a.usageErr(c, "%v", err)
+		}
+		ref = repo
+		if positionals == 1 {
+			ref = fmt.Sprintf("%s#%d", repo, number)
+		}
+	}
+	return a.ask(co, opReq{op: o.Name, target: target{o.Target.Adapter, ref}, params: params, dryRun: d.dry})
 }

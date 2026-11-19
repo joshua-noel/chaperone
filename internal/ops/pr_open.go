@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -22,7 +23,7 @@ import (
 // whether the pull request exists leaves the op `unconfirmed`.
 
 // OpPROpen is the op kind.
-const OpPROpen = "pr.open"
+const OpPROpen = githubspec.NamePROpen
 
 // PRProject is the repository and the pull request base of a project.
 type PRProject struct {
@@ -66,9 +67,19 @@ func NewPROpen(cfg PROpenConfig) (*PROpen, error) {
 }
 
 const (
-	prTitleMax = 200
-	prBodyMax  = 20000
+	prTitleMax = githubspec.TitleMax
+	prBodyMax  = githubspec.PRBodyMax
 )
+
+// keySet is the set of the names, for a "refuse a param the op does not
+// declare" check.
+func keySet(names []string) map[string]bool {
+	m := make(map[string]bool, len(names))
+	for _, n := range names {
+		m[n] = true
+	}
+	return m
+}
 
 // prOpenParams is a validated params object.
 type prOpenParams struct {
@@ -77,7 +88,7 @@ type prOpenParams struct {
 	draft bool
 }
 
-var prOpenKeys = map[string]bool{"title": true, "body": true, "head": true, "base": true, "draft": true}
+var prOpenKeys = keySet(githubspec.PROpen.ParamNames())
 
 // parse validates the request and returns what to send. A failure is a
 // *Refusal.
@@ -85,7 +96,7 @@ func (p *PROpen) parse(req *Request) (prOpenParams, error) {
 	bad := func(why string) (prOpenParams, error) {
 		return prOpenParams{}, &Refusal{Code: CodeParamsInvalid, Why: why}
 	}
-	if req.Target.Adapter != "github" {
+	if req.Target.Adapter != githubspec.Adapter {
 		return bad("target.adapter must be github")
 	}
 	repo, err := gh.ParseRepo(req.Target.Ref)
@@ -94,7 +105,7 @@ func (p *PROpen) parse(req *Request) (prOpenParams, error) {
 	}
 	for k := range req.Params {
 		if !prOpenKeys[k] {
-			return bad("unknown param " + clamp(k, 40) + "; pr.open takes title, body, head, base, draft")
+			return bad("unknown param " + clamp(k, 40) + "; pr.open takes " + strings.Join(githubspec.PROpen.ParamNames(), ", "))
 		}
 	}
 	str := func(k string, required bool, max int) (string, bool) {

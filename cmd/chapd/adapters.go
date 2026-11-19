@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
+	"github.com/joshua-noel/chaperone/internal/connectors/kit"
 	"github.com/joshua-noel/chaperone/internal/gh"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
@@ -67,6 +69,10 @@ func adapters(d adapterDeps) (map[string]ops.Adapter, error) {
 	}
 	m["health"] = ops.NewHealthAdapter(pilot)
 	if d.github != nil {
+		// The adapters of the github connector. kit.Bind below refuses to
+		// start when a declared operation has no adapter here, or an adapter
+		// here has no declaration (internal/connectors/github/githubspec).
+		g := map[string]ops.Adapter{}
 		// L1-10. The baseline turns both on; a project is mergeable only if its
 		// policy file has a `pr:` block (the adapters refuse any other).
 		merger, err := ops.NewPRMerger(ops.PRMergerConfig{GitHub: d.github, Tokens: d.minter})
@@ -74,8 +80,8 @@ func adapters(d adapterDeps) (map[string]ops.Adapter, error) {
 			return nil, err
 		}
 		pol := ops.PRPolicyFromEngine(d.policy)
-		m["pr.merge"] = ops.NewPRMergeAdapter(merger, pol)
-		m["pr.update"] = ops.NewPRUpdateAdapter(merger, pol)
+		g[githubspec.NamePRMerge] = ops.NewPRMergeAdapter(merger, pol)
+		g[githubspec.NamePRUpdate] = ops.NewPRUpdateAdapter(merger, pol)
 
 		// L1-09. A run opens a PR from its own branch; the orchestrator may name
 		// any head in a project whose policy file has a `pr:` block.
@@ -90,7 +96,7 @@ func adapters(d adapterDeps) (map[string]ops.Adapter, error) {
 		if err != nil {
 			return nil, err
 		}
-		m["pr.open"] = opener
+		g[githubspec.NamePROpen] = opener
 
 		// ADR-002 amendment 10. On in the baseline; a project is reportable only if its policy file has a
 		// `pr.local_ci` block.
@@ -99,7 +105,13 @@ func adapters(d adapterDeps) (map[string]ops.Adapter, error) {
 			if err != nil {
 				return nil, err
 			}
-			m["ci.report"] = ci
+			ciBound, err := kit.Bind(githubspec.CI, map[string]ops.Adapter{githubspec.NameCIReport: ci})
+			if err != nil {
+				return nil, err
+			}
+			for op, a := range ciBound {
+				m[op] = a
+			}
 		}
 
 		// The error watcher files issues through the orchestrator
@@ -110,7 +122,7 @@ func adapters(d adapterDeps) (map[string]ops.Adapter, error) {
 			if err != nil {
 				return nil, err
 			}
-			m[op] = a
+			g[op] = a
 		}
 
 		// ADR-002 amendment 12. Read-only views of a pull request (pr.view, pr.diff, pr.checks, pr.files) for the
@@ -120,6 +132,13 @@ func adapters(d adapterDeps) (map[string]ops.Adapter, error) {
 			if err != nil {
 				return nil, err
 			}
+			g[op] = a
+		}
+		bound, err := kit.Bind(githubspec.Connector, g)
+		if err != nil {
+			return nil, err
+		}
+		for op, a := range bound {
 			m[op] = a
 		}
 	}

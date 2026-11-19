@@ -1,24 +1,14 @@
 package main
 
-import (
-	"errors"
-	"flag"
-	"fmt"
-	"strconv"
-)
+import "flag"
 
 // `chap issue open|comment|reopen`: the error watcher files and
 // follows issues through chapd with its orchestrator token. chapd takes the
 // repository from the project and refuses any issue that lacks the label
-// source:error-watcher; these commands only build the request.
-
-func parseIssue(s string) (int, error) {
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 {
-		return 0, errors.New("the issue number must be a positive integer")
-	}
-	return n, nil
-}
+// source:error-watcher; these commands only build the request. `issue comment`
+// and `issue reopen` are built from their declarations (cmd/chap/kitcmd.go);
+// `issue open` stays here because its usage line names the label the watcher
+// must give.
 
 func cmdIssueOpen(a *app, c *command, args []string) int {
 	var co common
@@ -56,61 +46,4 @@ func cmdIssueOpen(a *app, c *command, args []string) int {
 		params["body"] = text
 	}
 	return a.ask(&co, opReq{op: "issue.open", target: target{"github", r}, params: params})
-}
-
-func cmdIssueComment(a *app, c *command, args []string) int {
-	var co common
-	var tf textFlags
-	var repo string
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	tf.register(fs)
-	fs.StringVar(&repo, "repo", "", "owner/name (default: from the git remote origin)")
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	n, err := parseIssue(pos[0])
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	text, hasBody, err := tf.resolve(a)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	if !hasBody {
-		return a.usageErr(c, "--body or --body-file is required")
-	}
-	r, err := a.repoArg(repo)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	return a.ask(&co, opReq{op: "issue.comment", target: target{"github", fmt.Sprintf("%s#%d", r, n)}, params: map[string]any{"body": text}})
-}
-
-func cmdIssueReopen(a *app, c *command, args []string) int {
-	var co common
-	var repo string
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	fs.StringVar(&repo, "repo", "", "owner/name (default: from the git remote origin)")
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	n, err := parseIssue(pos[0])
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	r, err := a.repoArg(repo)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	return a.ask(&co, opReq{op: "issue.reopen", target: target{"github", fmt.Sprintf("%s#%d", r, n)}, params: map[string]any{}})
 }

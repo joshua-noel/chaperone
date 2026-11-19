@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/gh"
 	"github.com/joshua-noel/chaperone/internal/policy"
 )
@@ -85,7 +86,7 @@ func projectPR(pol PRPolicyFunc, r *Request, repo gh.Repo, op string) (PRPolicy,
 
 // targetPR parses a target ref "owner/repo#N" (number optional when optNum).
 func targetPR(r *Request, optNum bool) (gh.Repo, int, error) {
-	if r.Target.Adapter != "github" {
+	if r.Target.Adapter != githubspec.Adapter {
 		return gh.Repo{}, 0, paramsInvalid("target adapter must be github, got %q", clip(r.Target.Adapter, 40))
 	}
 	ref, num, hasNum := strings.Cut(r.Target.Ref, "#")
@@ -204,7 +205,7 @@ func (a *prMergeAdapter) request(r *Request) (PRMergeRequest, error) {
 	if err != nil {
 		return PRMergeRequest{}, err
 	}
-	if err := onlyParams(r.Params, "base", "head_sha", "method"); err != nil {
+	if err := onlyParams(r.Params, githubspec.PRMerge.ParamNames()...); err != nil {
 		return PRMergeRequest{}, err
 	}
 	base, err := paramString(r.Params, "base")
@@ -323,7 +324,7 @@ func (a *prUpdateAdapter) request(r *Request) (PRUpdateRequest, error) {
 	if err != nil {
 		return PRUpdateRequest{}, err
 	}
-	if err := onlyParams(r.Params, "number", "expected_head_sha", "update_branch", "title", "body"); err != nil {
+	if err := onlyParams(r.Params, githubspec.PRUpdate.ParamNames()...); err != nil {
 		return PRUpdateRequest{}, err
 	}
 	n, hasN, err := paramInt(r.Params, "number")

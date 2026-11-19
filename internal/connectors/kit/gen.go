@@ -87,21 +87,12 @@ func (o Op) writeManual(b *strings.Builder) {
 // MCP tool schema is built from.
 func (o Op) writeParams(b *strings.Builder) {
 	fmt.Fprintf(b, "    %s:\n", o.ParamsSchemaName())
-	fmt.Fprintf(b, "      description: %s\n", yamlQuoted(o.Doc))
+	fmt.Fprintf(b, "      description: %s\n", docScalar(o.Doc))
 	b.WriteString("      type: object\n")
 	if len(o.Params) > 0 {
 		b.WriteString("      properties:\n")
 		for _, p := range o.Params {
-			switch p.Kind {
-			case Bool:
-				fmt.Fprintf(b, "        %s: { type: boolean }\n", p.Name)
-			default:
-				min := ""
-				if p.MinLength > 0 {
-					min = fmt.Sprintf(", minLength: %d", p.MinLength)
-				}
-				fmt.Fprintf(b, "        %s: { type: string%s, maxLength: %d }\n", p.Name, min, p.MaxLength)
-			}
+			fmt.Fprintf(b, "        %s: %s\n", p.Name, p.schema())
 		}
 	}
 	var req []string
@@ -116,7 +107,54 @@ func (o Op) writeParams(b *strings.Builder) {
 	b.WriteString("      additionalProperties: false\n")
 }
 
-var plainRE = regexp.MustCompile("^[A-Za-z][A-Za-z0-9 .,;()\\[\\]<>/'|=+*@~$%^&!?_`-]*$")
+// schema is the flow-style schema of one param: `{ type: string, maxLength: 80 }`.
+func (p Param) schema() string {
+	var f []string
+	add := func(format string, a ...any) { f = append(f, fmt.Sprintf(format, a...)) }
+	length := func() {
+		if p.MinLength > 0 {
+			add("minLength: %d", p.MinLength)
+		}
+		if p.MaxLength > 0 {
+			add("maxLength: %d", p.MaxLength)
+		}
+	}
+	switch p.Kind {
+	case Bool:
+		add("type: boolean")
+	case Int:
+		add("type: integer")
+		add("minimum: %d", p.Min)
+		if p.Max > 0 {
+			add("maximum: %d", p.Max)
+		}
+		if p.Default > 0 {
+			add("default: %d", p.Default)
+		}
+	case List:
+		add("type: array")
+		if p.MinItems > 0 {
+			add("minItems: %d", p.MinItems)
+		}
+		add("maxItems: %d", p.MaxItems)
+		item := Param{Kind: String, MinLength: p.MinLength, MaxLength: p.MaxLength}
+		add("items: %s", item.schema())
+	default:
+		if p.Const != "" {
+			add("const: %s", yamlScalar(p.Const))
+			break
+		}
+		add("type: string")
+		if p.Pattern != "" {
+			add("pattern: %s", yamlQuoted(p.Pattern))
+		}
+		length()
+	}
+	return "{ " + strings.Join(f, ", ") + " }"
+}
+
+// A colon is allowed inside a plain scalar when no space follows it (`source:error-watcher`).
+var plainRE = regexp.MustCompile("^[A-Za-z][A-Za-z0-9 .,;:()\\[\\]<>/'|=+*@~$%^&!?_`-]*$")
 
 // yamlScalar writes s as a plain scalar when that reads back as the same
 // string, and as a double-quoted one when it does not.
@@ -125,7 +163,7 @@ func yamlScalar(s string) string {
 	case "true", "false", "yes", "no", "on", "off", "null", "y", "n":
 		return yamlQuoted(s)
 	}
-	if !plainRE.MatchString(s) || strings.HasSuffix(s, " ") || strings.Contains(s, " #") {
+	if !plainRE.MatchString(s) || strings.HasSuffix(s, " ") || strings.Contains(s, " #") || strings.Contains(s, ": ") || strings.HasSuffix(s, ":") {
 		return yamlQuoted(s)
 	}
 	if _, err := strconv.ParseFloat(s, 64); err == nil {
@@ -267,4 +305,17 @@ func SyncAll(root string, conns []Connector, write bool) (changed []string, err 
 		}
 	}
 	return changed, nil
+}
+
+// longDoc is the length from which a description is always quoted: a long
+// prose line is easier to read, and to diff, in one quoted string.
+const longDoc = 160
+
+// docScalar writes the prose of a params schema: short and plain it stays
+// plain, anything else is quoted.
+func docScalar(s string) string {
+	if len(s) > longDoc {
+		return yamlQuoted(s)
+	}
+	return yamlScalar(s)
 }

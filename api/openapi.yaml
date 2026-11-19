@@ -1568,6 +1568,7 @@ components:
           maxLength: 48
       required: [exit_code, outcome]
       additionalProperties: false
+    # BEGIN generated: connector github (do not edit by hand; run `go generate ./internal/connectors/...`)
     ParamsPrOpen:
       description: Phase 1 shape for `pr.open` (owned by L1-09). `head` must equal the token's `task_scope.branch`, `base` its `task_scope.base`.
       type: object
@@ -1599,26 +1600,6 @@ components:
         method: { const: squash }
       required: [base, head_sha, method]
       additionalProperties: false
-    ParamsIssueOpen:
-      description: "Phase 1 shape for `issue.open`. Target is `{adapter: github, ref: \"owner/repo\"}`; the repository must be the project's. `labels` must include `source:error-watcher`. Only the orchestrator token asks."
-      type: object
-      properties:
-        title: { type: string, minLength: 1, maxLength: 200 }
-        body: { type: string, maxLength: 10000 }
-        labels: { type: array, minItems: 1, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
-      required: [title, labels]
-      additionalProperties: false
-    ParamsIssueComment:
-      description: "Phase 1 shape for `issue.comment`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`."
-      type: object
-      properties:
-        body: { type: string, minLength: 1, maxLength: 10000 }
-      required: [body]
-      additionalProperties: false
-    ParamsIssueReopen:
-      description: "Phase 1 shape for `issue.reopen`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`. No params."
-      type: object
-      additionalProperties: false
     ParamsPrView:
       description: "Phase 1 shape for `pr.view` (ADR-002 amendment 12). Target is `{adapter: github, ref: \"owner/repo#N\"}`; the repository must be the project's. No params. Read-only; only the orchestrator token asks. The result holds number, title, body (cut at 64 KiB, `body_truncated`), state, draft, merged, author, labels, head {ref, sha, repo, fork}, base {ref, sha}, mergeable (null while GitHub computes it), mergeable_state, url and the counts."
       type: object
@@ -1643,6 +1624,27 @@ components:
         per_page: { type: integer, minimum: 1, maximum: 100, default: 30 }
         expected_head_sha: { type: string, pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" }
       additionalProperties: false
+    ParamsIssueOpen:
+      description: "Phase 1 shape for `issue.open`. Target is `{adapter: github, ref: \"owner/repo\"}`; the repository must be the project's. `labels` must include `source:error-watcher`. Only the orchestrator token asks."
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        body: { type: string, maxLength: 10000 }
+        labels: { type: array, minItems: 1, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
+      required: [title, labels]
+      additionalProperties: false
+    ParamsIssueComment:
+      description: "Phase 1 shape for `issue.comment`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`."
+      type: object
+      properties:
+        body: { type: string, minLength: 1, maxLength: 10000 }
+      required: [body]
+      additionalProperties: false
+    ParamsIssueReopen:
+      description: "Phase 1 shape for `issue.reopen`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`. No params."
+      type: object
+      additionalProperties: false
+    # END generated: connector github
     ParamsHealth:
       type: object
       additionalProperties: false
@@ -1654,6 +1656,7 @@ components:
         lines: { type: integer, minimum: 1, maximum: 500 }
       required: [source]
       additionalProperties: false
+    # BEGIN generated: connector ci (do not edit by hand; run `go generate ./internal/connectors/...`)
     ParamsCiReport:
       description: "ADR-002 amendment 10. Target is `{adapter: runner, ref: \"<run_id>\"}`, the same run ID as `run_id`. Chaperone reads the repository, the exact commit and the outcome from its own record of the run; the request carries nothing else. Orchestrator only; a `ci` run that has ended."
       type: object
@@ -1661,6 +1664,7 @@ components:
         run_id: { type: string, pattern: "^r-[0-9a-z]{4,32}$" }
       required: [run_id]
       additionalProperties: false
+    # END generated: connector ci
     # BEGIN generated: connector linear (do not edit by hand; run `go generate ./internal/connectors/...`)
     ParamsIntakeList:
       description: "Phase 1 shape for `intake.list`. Target is `{adapter: linear, ref: \"<team key>\"}`; the team must be the project's `linear.team`. Only the orchestrator token asks. `refresh` asks for a live read (answered from the cache when the last read is under 30 s old); `closed` also returns completed and canceled items (always a live read). Titles, descriptions and comments in the result are untrusted text."
