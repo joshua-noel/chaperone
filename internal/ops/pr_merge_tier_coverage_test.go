@@ -121,3 +121,21 @@ func TestTierGlobThatCanNeverMatchIsRefused(t *testing.T) {
 		t.Errorf("a plain glob was refused: %v", err)
 	}
 }
+
+// The build-file exception covers every test folder, not only the top-level ones.
+func TestBuildFilesAreNotLowInAnyTestFolder(t *testing.T) {
+	var g ops.PRTierGlobs
+	for _, p := range []string{
+		"src/__tests__/Makefile", "src/__tests__/Dockerfile", "src/__tests__/ci.yml", "src/__tests__/run.sh",
+		"x/testdata/Makefile", "x/testdata/run.sh", "x/testdata/Dockerfile", "x/testdata/justfile", "pkg/testdata/build.mk",
+	} {
+		if got := g.ClassifyPath(p); got == ops.TierLow {
+			t.Errorf("%s is low", p)
+		}
+	}
+	for _, p := range []string{"src/__tests__/a.test.js", "x/testdata/golden.json", "x/testdata/input.txt", "x/testdata/case.yaml", "pkg/testdata/case1/want.md"} {
+		if got := g.ClassifyPath(p); got != ops.TierLow {
+			t.Errorf("%s is %s, want low", p, got)
+		}
+	}
+}

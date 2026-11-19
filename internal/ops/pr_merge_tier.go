@@ -102,11 +102,13 @@ var (
 	baselineLow = []string{
 		"**/*.md", "**/*.mdx", "**/*.txt", "license", "license.*",
 		"docs/**/*.rst", "docs/**/*.adoc", "docs/**/*.png", "docs/**/*.jpg", "docs/**/*.jpeg", "docs/**/*.gif", "docs/**/*.webp",
-		"**/__tests__/**", "**/testdata/**",
 		"**/*_test.go", "**/*.test.*", "**/*.spec.*",
 	}
 	// testDirs are low on their own (CI runs the tests), except the build and shell files in them: see lowByBaseline.
-	testDirs = []string{"test/**", "tests/**", "e2e/**"}
+	testDirs = []string{"test/**", "tests/**", "e2e/**", "**/__tests__/**"}
+	// testdata holds fixtures, and a YAML file there is data for a test, so only the files a build or a shell runs
+	// are taken out of it.
+	testdataDirs = []string{"**/testdata/**"}
 	// Code and asset extensions that count as "any other code path". A path with
 	// none of these, and no glob above, cannot be classified and is high.
 	codeExt = map[string]bool{
@@ -372,12 +374,16 @@ func (g PRTierGlobs) Classify(files []PRFile) PRTierResult {
 	return res
 }
 
-// lowByBaseline reports whether the baseline calls a (plain, lower-case) path low. Anything under test/, tests/ and
-// e2e/ is low, as tests are, except a build or shell file there (a Makefile, a Dockerfile, a script, a workflow or
+// lowByBaseline reports whether the baseline calls a (plain, lower-case) path low. Anything under test/, tests/,
+// e2e/, __tests__/ and testdata/ is low, as tests are, except a build or shell file there (a Makefile, a Dockerfile, a script, a workflow or
 // compose file): that is run by a build or by a person, and is not a test.
 func lowByBaseline(name string) bool {
 	if anyGlob(testDirs, name) && buildFile(name) {
 		return false
+	}
+	if anyGlob(testdataDirs, name) {
+		ext := path.Ext(name)
+		return !buildFile(name) || ext == ".yml" || ext == ".yaml"
 	}
 	return anyGlob(baselineLow, name) || anyGlob(testDirs, name)
 }
