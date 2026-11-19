@@ -2,6 +2,7 @@ package declared
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -295,4 +296,40 @@ func swapLinear(c kit.Connector) []kit.Connector {
 		out = append(out, d)
 	}
 	return out
+}
+
+// paramPins is the params of every operation that is not routine, written out
+// by hand like the class pins. The adapter's allow-list is the declaration, so
+// adding a param to a declaration widens what the adapter accepts; for an
+// operation that needs approval or a gate, that takes this second edit.
+var paramPins = map[string][]string{
+	"pr.merge": {"base", "head_sha", "method"},
+}
+
+func TestNonRoutineOpsPinTheirParams(t *testing.T) {
+	for _, o := range Ops() {
+		if o.Class == kit.Routine {
+			if _, ok := paramPins[o.Name]; ok {
+				t.Errorf("%s is routine and has a params pin: delete the pin", o.Name)
+			}
+			continue
+		}
+		want, ok := paramPins[o.Name]
+		if !ok {
+			t.Errorf("%s is %s: add its params to paramPins", o.Name, o.Class)
+			continue
+		}
+		if got := o.ParamNames(); !slices.Equal(got, want) {
+			t.Errorf("%s: declared params %v, the pin says %v", o.Name, got, want)
+		}
+	}
+	for name := range paramPins {
+		found := false
+		for _, o := range Ops() {
+			found = found || o.Name == name
+		}
+		if !found {
+			t.Errorf("paramPins lists %s, which no connector declares", name)
+		}
+	}
 }

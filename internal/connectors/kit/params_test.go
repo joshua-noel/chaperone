@@ -24,12 +24,26 @@ func TestRepoTargetAndNewKindsValidate(t *testing.T) {
 		{Name: "number", Kind: Int, Required: true, Min: 1, FromRef: true},
 		{Name: "page", Kind: Int, Min: 1, Max: 100, Default: 30, Placeholder: "p", Help: "h"},
 		{Name: "sha", Kind: String, Pattern: `^[0-9a-f]{40}$`, Why: "w", Placeholder: "sha", Help: "h"},
-		{Name: "labels", Kind: List, MinItems: 1, MaxItems: 5, MinLength: 1, MaxLength: 20, Placeholder: "l", Help: "h"},
-		{Name: "method", Kind: String, Required: true, Const: "squash"},
 		{Name: "base", Kind: String, Unbounded: true, Placeholder: "b", Help: "h"},
 	}
 	if err := ok.Validate(); err != nil {
 		t.Fatal(err)
+	}
+	// A list and a const are written in the schema; the generic command has
+	// no flag for either, so only a custom command may have them.
+	for name, p := range map[string]Param{
+		"a list":  {Name: "labels", Kind: List, MinItems: 1, MaxItems: 5, MinLength: 1, MaxLength: 20, Placeholder: "l", Help: "h"},
+		"a const": {Name: "method", Kind: String, Required: true, Const: "squash"},
+	} {
+		g := repoOp()
+		g.Params = []Param{p}
+		if err := g.Validate(); err == nil || !strings.Contains(err.Error(), "CLI.Custom") {
+			t.Errorf("%s in a generated command: want an error that says CLI.Custom, got %v", name, err)
+		}
+		g.CLI.Custom = true
+		if err := g.Validate(); err != nil {
+			t.Errorf("%s in a custom command: %v", name, err)
+		}
 	}
 	for name, mutate := range map[string]func(o *Op){
 		"repo target with a pattern":    func(o *Op) { o.Target.Pattern = `^x$` },
@@ -79,7 +93,6 @@ func TestRepoTargetAndNewKindsValidate(t *testing.T) {
 			o.Params = []Param{{Name: "m", Kind: String, Const: "squash", Required: true, MaxLength: 9}}
 		},
 		"const that is not a plain word": func(o *Op) { o.Params = []Param{{Name: "m", Kind: String, Const: "a b: c", Required: true}} },
-		"const with a flag":              func(o *Op) { o.Params = []Param{{Name: "m", Kind: String, Const: "squash", Required: true, Flag: "m"}} },
 		"from ref that is not required":  func(o *Op) { o.Params = []Param{{Name: "n", Kind: Int, Min: 1, FromRef: true}} },
 		"from ref with a flag": func(o *Op) {
 			o.Params = []Param{{Name: "n", Kind: Int, Min: 1, Required: true, FromRef: true, Flag: "n"}}
@@ -103,6 +116,9 @@ func TestRepoTargetAndNewKindsValidate(t *testing.T) {
 	} {
 		o := repoOp()
 		mutate(&o)
+		// A list and a const are only for a custom command (below), so their
+		// schema rules are tried on one.
+		o.CLI.Custom = o.CLI.Custom || strings.HasPrefix(name, "list ") || strings.HasPrefix(name, "const ")
 		if err := o.Validate(); err == nil {
 			t.Errorf("%s: want an error", name)
 		}
@@ -182,13 +198,10 @@ func TestDerivedCommandLineOfNewKinds(t *testing.T) {
 	o.CLI.DryRun = "check only"
 	o.Params = []Param{
 		{Name: "number", Kind: Int, Required: true, Min: 1, FromRef: true},
-		{Name: "method", Kind: String, Required: true, Const: "squash"},
 		{Name: "per_page", Kind: Int, Min: 1, Flag: "per-page", Placeholder: "n", Help: "h"},
-		{Name: "labels", Kind: List, MaxItems: 3, MaxLength: 5, Placeholder: "l", Help: "h"},
-		{Name: "must", Kind: List, Required: true, MaxItems: 3, MaxLength: 5, Placeholder: "m", Help: "h"},
 		{Name: "sha", Kind: String, Required: true, Pattern: `^a$`, Why: "w", Placeholder: "sha", Help: "h"},
 	}
-	want := "chap pulls show <n> [--per-page <n>] [--labels <l>] --must <m> [--must <m>] --sha <sha> [--repo owner/name] [--dry-run]"
+	want := "chap pulls show <n> [--per-page <n>] --sha <sha> [--repo owner/name] [--dry-run]"
 	if got := o.CLIUsage(); got != want {
 		t.Errorf("usage = %q, want %q", got, want)
 	}

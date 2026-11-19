@@ -87,8 +87,9 @@ type Kind int
 const (
 	// Bool is a flag with no value; it is sent only when set.
 	Bool Kind = iota + 1
-	// String is a flag with a text value. With Const it is a fixed word the
-	// command sends and the caller never chooses; with FromRef it is the ref.
+	// String is a flag with a text value. With FromRef it is the ref. With
+	// Const it is a fixed word of the schema; no generated command sends one,
+	// so an operation with a Const needs CLI.Custom.
 	String
 	// Text is the parameter `body`, given as --body or --body-file.
 	Text
@@ -97,8 +98,8 @@ const (
 	// command sends nothing when the flag is left out, and the adapter
 	// applies it). With FromRef it is the number of the ref.
 	Int
-	// List is a flag that may be repeated (or carry a comma list); each item
-	// is a string.
+	// List is an array of strings in the params schema. The generic command
+	// has no list flag, so an operation with a List needs CLI.Custom.
 	List
 )
 
@@ -128,8 +129,8 @@ type Param struct {
 	// Pattern (the schema accepts a 40 or a 64 character sha, the command
 	// only a 40 character one). It defaults to Pattern.
 	CLIPattern string
-	// Const is the one value the schema allows (`const:`). The command sends
-	// it and has no flag for it; the param is Required.
+	// Const is the one value the schema allows (`const:`). The param is
+	// Required, and the command (hand-written: see Kind String) sends it.
 	Const string
 	// Min, Max and Default are the bounds of an Int. Min is at least 1,
 	// because 0 stands for "the flag was left out"; Max 0 is no maximum;
@@ -152,7 +153,7 @@ type Param struct {
 }
 
 // hasFlag reports whether the generated command has a flag for the param.
-func (p Param) hasFlag() bool { return !p.FromRef && p.Const == "" }
+func (p Param) hasFlag() bool { return !p.FromRef }
 
 // FlagName is the command-line flag of the parameter, without dashes.
 func (p Param) FlagName() string {
@@ -463,11 +464,11 @@ func (p Param) validate(custom bool) error {
 		}
 		return nil
 	}
-	if p.Const != "" {
-		if p.Flag != "" || p.Placeholder != "" || p.Help != "" {
-			return errors.New("a const param has no flag, Placeholder or Help")
-		}
-		return nil
+	switch {
+	case p.Const != "":
+		return errors.New("the generic command cannot send a Const; set CLI.Custom and write the command")
+	case p.Kind == List:
+		return errors.New("the generic command has no list flag; set CLI.Custom and write the command")
 	}
 	switch p.Kind {
 	case Bool:
@@ -477,9 +478,9 @@ func (p Param) validate(custom bool) error {
 		if p.Help == "" {
 			return errors.New("a bool flag needs Help")
 		}
-	case String, Int, List:
+	case String, Int:
 		if p.Placeholder == "" || p.Help == "" {
-			return errors.New("a string, int or list flag needs Placeholder and Help")
+			return errors.New("a string or int flag needs Placeholder and Help")
 		}
 		if p.Pattern != "" && p.Why == "" {
 			return errors.New("a pattern needs Why, the usage error for a value that does not match")

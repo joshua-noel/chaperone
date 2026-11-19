@@ -44,14 +44,6 @@ func (o Op) CLIUsage() string {
 				s = "[" + s + "]"
 			}
 			parts = append(parts, s)
-		case List:
-			s := f + " <" + p.Placeholder + ">"
-			if p.Required {
-				s += " [" + f + " <" + p.Placeholder + ">]"
-			} else {
-				s = "[" + s + "]"
-			}
-			parts = append(parts, s)
 		case Text:
 			parts = append(parts, "[--body <b> | --body-file <f>]")
 		}

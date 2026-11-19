@@ -9,9 +9,9 @@ import (
 )
 
 // Two test-only operations that stand for what the next connector may need and
-// no shipped operation uses yet: a repository with no number, a repeatable
-// list flag, a required whole number with a maximum, a fixed word, and a ref
-// that is also a param. They are not in the shipped catalog.
+// no shipped operation uses yet: a repository with no number, a required
+// whole number with a maximum, a stricter command-line pattern, and a ref that
+// is also a param. They are not in the shipped catalog.
 func widgetOps(t *testing.T) []kit.Op {
 	t.Helper()
 	add := kit.Op{
@@ -19,16 +19,14 @@ func widgetOps(t *testing.T) []kit.Op {
 		Class:         kit.Routine,
 		Reversibility: kit.Reversible,
 		Summary:       "Add a widget.",
-		Usage:         "chap widgets add --size <n> --label <l>",
+		Usage:         "chap widgets add --size <n>",
 		RatePerMinute: 6,
 		Doc:           "Target is the repository.",
 		Target:        kit.Target{Adapter: "github", Repo: true},
 		Params: []kit.Param{
 			{Name: "size", Kind: kit.Int, Required: true, Min: 1, Max: 100, Placeholder: "n", Help: "the size, 1 to 100"},
-			{Name: "labels", Kind: kit.List, Required: true, MaxItems: 5, MinLength: 1, MaxLength: 20, Flag: "label", Placeholder: "l", Help: "a label"},
 			{Name: "ref", Kind: kit.String, Pattern: githubspec.SHAPattern, CLIPattern: `^[0-9a-f]{7}$`, Why: "--ref must be a 7-character lowercase hex id", Placeholder: "id", Help: "a commit"},
 			{Name: "offset", Kind: kit.Int, Min: 5, Placeholder: "n", Help: "where to start"},
-			{Name: "mode", Kind: kit.String, Required: true, Const: "fixed"},
 		},
 		CLI: kit.CLI{DryRun: "check only"},
 	}
@@ -59,12 +57,12 @@ func withWidgets(t *testing.T) {
 	t.Cleanup(func() { declaredOps = prev })
 }
 
-func TestGeneratedCommandFromRepoListIntAndConst(t *testing.T) {
+func TestGeneratedCommandFromRepoAndInt(t *testing.T) {
 	withWidgets(t)
 	t.Run("usage", func(t *testing.T) {
 		ta := newTestApp(t, env{})
 		code := ta.run([]string{"widgets", "add", "-h"})
-		want := "usage: chap widgets add --size <n> --label <l> [--label <l>] [--ref <id>] [--offset <n>] [--repo owner/name] [--dry-run]\n"
+		want := "usage: chap widgets add --size <n> [--ref <id>] [--offset <n>] [--repo owner/name] [--dry-run]\n"
 		if code != 0 || !strings.HasPrefix(ta.out.String(), want) {
 			t.Errorf("exit %d, help:\n%s", code, ta.out)
 		}
@@ -72,11 +70,11 @@ func TestGeneratedCommandFromRepoListIntAndConst(t *testing.T) {
 	t.Run("sends the request, the repository from --repo", func(t *testing.T) {
 		chapd := newFakeChapd(t, *ok200("op-intake-states"))
 		ta := newTestApp(t, env{chapd: chapd, token: "orch"})
-		args := []string{"widgets", "add", "--size", "7", "--label", "a,b", "--label", "c", "--ref", "0588aa4", "--offset", "9", "--repo", "example-org/storefront", "--project", "p", "--dry-run"}
+		args := []string{"widgets", "add", "--size", "7", "--ref", "0588aa4", "--offset", "9", "--repo", "example-org/storefront", "--project", "p", "--dry-run"}
 		if code := ta.run(args); code != 0 {
 			t.Fatalf("exit %d: %s", code, ta.errb)
 		}
-		want := `{"dry_run":true,"op":"widgets.add","params":{"labels":["a","b","c"],"mode":"fixed","offset":9,"ref":"0588aa4","size":7},"project":"p","target":{"adapter":"github","ref":"example-org/storefront"}}`
+		want := `{"dry_run":true,"op":"widgets.add","params":{"offset":9,"ref":"0588aa4","size":7},"project":"p","target":{"adapter":"github","ref":"example-org/storefront"}}`
 		if len(chapd.reqs) != 1 || !strings.HasSuffix(chapd.reqs[0], "\n"+want) {
 			t.Errorf("requests = %q, want a body %s", chapd.reqs, want)
 		}
@@ -84,7 +82,7 @@ func TestGeneratedCommandFromRepoListIntAndConst(t *testing.T) {
 	t.Run("the repository from the git remote", func(t *testing.T) {
 		chapd := newFakeChapd(t, *ok200("op-intake-states"))
 		ta := newTestApp(t, env{chapd: chapd, token: "orch", git: gitOrigin})
-		if code := ta.run([]string{"widgets", "add", "--size", "7", "--label", "a", "--project", "p"}); code != 0 {
+		if code := ta.run([]string{"widgets", "add", "--size", "7", "--project", "p"}); code != 0 {
 			t.Fatalf("exit %d: %s", code, ta.errb)
 		}
 		if len(chapd.reqs) != 1 || !strings.Contains(chapd.reqs[0], `"ref":"acme/shop"`) {
@@ -95,14 +93,13 @@ func TestGeneratedCommandFromRepoListIntAndConst(t *testing.T) {
 		args []string
 		want string
 	}{
-		"a required int left out":    {[]string{"widgets", "add", "--label", "a"}, "--size is required"},
-		"a required list left out":   {[]string{"widgets", "add", "--size", "3"}, "--label is required"},
-		"an int above the maximum":   {[]string{"widgets", "add", "--size", "101", "--label", "a"}, "--size must be 1 to 100"},
-		"a negative int":             {[]string{"widgets", "add", "--size", "-4", "--label", "a"}, "--size must be 1 to 100"},
-		"an int with no maximum":     {[]string{"widgets", "add", "--size", "3", "--label", "a", "--offset", "2"}, "--offset must be 5 or more"},
-		"a flag the declaration has": {[]string{"widgets", "add", "--size", "3", "--label", "a", "--mode", "x"}, "flag provided but not defined: -mode"},
-		"a stricter command pattern": {[]string{"widgets", "add", "--size", "3", "--label", "a", "--ref", githubspec.SHAPattern}, "--ref must be a 7-character lowercase hex id"},
-		"a bad repo":                 {[]string{"widgets", "add", "--size", "3", "--label", "a", "--repo", "nope"}, "--repo must be owner/name"},
+		"a required int left out":      {[]string{"widgets", "add"}, "--size is required"},
+		"an int above the maximum":     {[]string{"widgets", "add", "--size", "101"}, "--size must be 1 to 100"},
+		"a negative int":               {[]string{"widgets", "add", "--size", "-4"}, "--size must be 1 to 100"},
+		"an int with no maximum":       {[]string{"widgets", "add", "--size", "3", "--offset", "2"}, "--offset must be 5 or more"},
+		"a flag the declaration lacks": {[]string{"widgets", "add", "--size", "3", "--mode", "x"}, "flag provided but not defined: -mode"},
+		"a stricter command pattern":   {[]string{"widgets", "add", "--size", "3", "--ref", githubspec.SHAPattern}, "--ref must be a 7-character lowercase hex id"},
+		"a bad repo":                   {[]string{"widgets", "add", "--size", "3", "--repo", "nope"}, "--repo must be owner/name"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			chapd := newFakeChapd(t, *ok200("op-intake-states"))

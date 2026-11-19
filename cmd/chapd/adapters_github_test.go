@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/gh"
 	"github.com/joshua-noel/chaperone/internal/ops"
+	"github.com/joshua-noel/chaperone/internal/spec"
 )
 
 // With a GitHub client, chapd installs an adapter for every GitHub operation
@@ -61,5 +64,40 @@ func TestCIReportNeedsTheRunRegistry(t *testing.T) {
 	}
 	if ads[githubspec.NamePRMerge] == nil {
 		t.Error("pr.merge has no adapter")
+	}
+}
+
+// Each GitHub adapter refuses a param its declaration does not list: the
+// allow-list is the declaration, so adding a param to a declaration is what
+// widens an adapter, and declared_test.go pins the params of the operations
+// that are not routine.
+func TestEachGitHubAdapterRefusesAnUndeclaredParam(t *testing.T) {
+	d := newAdapterDeps(&gh.Client{}, nil)
+	d.ciRun = func(context.Context, string) (ops.CIRun, error) { return ops.CIRun{}, nil }
+	ads, err := adapters(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range githubspec.Connectors {
+		for _, o := range c.Ops {
+			ref := "example-org/storefront#7"
+			switch {
+			case o.Target.Adapter == githubspec.CIAdapter:
+				ref = "r-7f3a"
+			case !o.Target.Repo || o.Target.Positional == "":
+				ref = "example-org/storefront"
+			}
+			req := &ops.Request{
+				Op: o.Name, Project: "storefront",
+				Target: spec.Target{Adapter: o.Target.Adapter, Ref: ref},
+				Params: map[string]any{"made_up": true},
+				Caller: &ops.Caller{Kind: ops.KindOrchestrator},
+			}
+			_, err := ads[o.Name].Check(t.Context(), req)
+			var refusal *ops.Refusal
+			if !errors.As(err, &refusal) || refusal.Code != ops.CodeParamsInvalid || !strings.Contains(refusal.Why, "made_up") {
+				t.Errorf("%s: an undeclared param must be refused as OP_PARAMS_INVALID naming it, got %v", o.Name, err)
+			}
+		}
 	}
 }

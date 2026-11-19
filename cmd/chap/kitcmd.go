@@ -57,7 +57,6 @@ type declaredFlags struct {
 	bools    map[string]*bool
 	strs     map[string]*string
 	ints     map[string]*int
-	lists    map[string]*listFlag
 }
 
 // registerDeclared defines every flag of the generated command of o: the
@@ -66,10 +65,10 @@ type declaredFlags struct {
 // flag and a common one fails TestGeneratedCommandsHaveNoFlagClash instead of
 // surprising a user.
 func registerDeclared(o kit.Op, fs *flag.FlagSet, a *app) *declaredFlags {
-	d := &declaredFlags{bools: map[string]*bool{}, strs: map[string]*string{}, ints: map[string]*int{}, lists: map[string]*listFlag{}}
+	d := &declaredFlags{bools: map[string]*bool{}, strs: map[string]*string{}, ints: map[string]*int{}}
 	d.co.register(fs, a)
 	for _, p := range o.Params {
-		if p.FromRef || p.Const != "" {
+		if p.FromRef {
 			continue
 		}
 		switch p.Kind {
@@ -79,10 +78,6 @@ func registerDeclared(o kit.Op, fs *flag.FlagSet, a *app) *declaredFlags {
 			d.strs[p.Name] = fs.String(p.FlagName(), "", p.Help)
 		case kit.Int:
 			d.ints[p.Name] = fs.Int(p.FlagName(), 0, p.Help)
-		case kit.List:
-			l := &listFlag{}
-			d.lists[p.Name] = l
-			fs.Var(l, p.FlagName(), p.Help)
 		case kit.Text:
 			d.tf.register(fs)
 		}
@@ -150,9 +145,6 @@ func runDeclared(o kit.Op, a *app, c *command, args []string) int {
 		case p.FromRef:
 			params[p.Name] = ref
 			continue
-		case p.Const != "":
-			params[p.Name] = p.Const
-			continue
 		}
 		switch p.Kind {
 		case kit.Bool:
@@ -192,15 +184,6 @@ func runDeclared(o kit.Op, a *app, c *command, args []string) int {
 				return a.usageErr(c, "--%s must be %d or more", p.FlagName(), p.Min)
 			}
 			params[p.Name] = v
-		case kit.List:
-			l := *d.lists[p.Name]
-			if len(l) == 0 {
-				if p.Required {
-					return a.usageErr(c, "--%s is required", p.FlagName())
-				}
-				continue
-			}
-			params[p.Name] = []string(l)
 		case kit.Text:
 			text, has, err := tf.resolve(a)
 			if err != nil {

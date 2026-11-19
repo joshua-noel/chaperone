@@ -76,7 +76,7 @@ What is derived from a declaration:
 | Catalog entry in `api/manual.yaml` | Generated into a marked region by `go generate ./internal/connectors/...` | `TestGeneratedRegionsAreUpToDate` and `TestCatalogAgreesWithTheDeclarations` in `internal/connectors/declared` |
 | Params schema in `api/openapi.yaml` (and so the MCP tool schema) | Generated into a marked region, the same command | The same tests, and the existing schema tests of `internal/mcpfront` |
 | Adapter registration | `kit.Bind` in `linear.Adapters`, and in `adapters` of `cmd/chapd/adapters.go` for GitHub, refuses to start when an operation has no adapter, or an adapter has no declaration | `TestAdaptersAreTheDeclaredOperations`, `TestBindIsOneToOne`, `TestGitHubAdaptersAreTheDeclaredOperations` |
-| Allowed param names in `parse` | `onlyParams(r.Params, linearspec.Move.ParamNames()...)`; the GitHub adapters of `internal/ops` do the same with `githubspec` | `TestEachAdapterTakesTheDeclaredParamsOnly` |
+| Allowed param names in `parse` | `onlyParams(r.Params, linearspec.Move.ParamNames()...)`; the GitHub adapters of `internal/ops` do the same with `githubspec` | `TestEachAdapterTakesTheDeclaredParamsOnly` (Linear), `TestEachGitHubAdapterRefusesAnUndeclaredParam` (`cmd/chapd`, every operation of `githubspec.Connectors`) |
 | `chap` command, help, usage errors | Built at start-up by `cmd/chap/kitcmd.go` | The golden files and `docs/manualgen` (unchanged), `TestEveryDeclaredOpHasExactlyOneCommand` |
 | Usage line of the command | Computed from the declared params | `TestGeneratedCommandLines` |
 
@@ -93,7 +93,8 @@ What is NOT derived, on purpose, and stays hand-written in the connector:
 
 - The class is also written in the generated manual entry, so a change of class is a visible change in the same pull request.
 - Every declared operation is pinned in one table written by hand, `pins` in `internal/connectors/declared/declared_test.go`. `TestEveryDeclaredOpIsPinned` fails for an operation with no pin, so a new connector cannot skip it. Loosening a class means changing the declaration, the manual entry and the pin together.
-- This was tried for `pr.merge`, the one gated GitHub operation. With the class lowered to routine in the declaration, `TestEveryDeclaredOpIsPinned`, `TestGeneratedRegionsAreUpToDate` and `TestCatalogAgreesWithTheDeclarations` fail. With the manual entry regenerated as well, `TestEveryDeclaredOpIsPinned` still fails, and so do `TestClassesAndCriticalOps` in `internal/policy` and the `manual-code` golden of `cmd/chap`.
+- This was tried for `pr.merge`, the one gated GitHub operation. With the class lowered to routine in the declaration, `TestEveryDeclaredOpIsPinned`, `TestGeneratedRegionsAreUpToDate` and `TestCatalogAgreesWithTheDeclarations` fail. With the manual entry regenerated as well, `TestEveryDeclaredOpIsPinned` still fails. So do `TestClassesAndCriticalOps` in `internal/policy`, `TestCatalogNarrowsToToken` in `internal/ops`, the `manual-code` golden of `cmd/chap`, `TestManualIsCurrent` in `docs/manualgen`, and the `cmd/chapd` tests that merge under an approval (`TestE2EApprovedMergeRunsExactlyOnce`, `TestE2EDenyIsSticky`, `TestE2EExpirySweepMovesTheOp`, `TestE2ERetitledPRIsNotMergedUnderTheApprovedCard`, `TestE2EWakeUpGoesToNtfyOverTheVaultTopic`, `TestQuickstartServesLoopbackOnlyAndRefusesThenMakesACard`).
+- The adapter's allow-list is the declaration, so adding a param to a declaration widens what the adapter accepts. The params of every operation that is not routine are pinned in `paramPins` of `declared_test.go` (`TestNonRoutineOpsPinTheirParams`), next to the class pins: widening `pr.merge` takes that second edit.
 - `kit.Op.Validate` refuses an irreversible operation that is routine or gated. *Decided for now:* this rule stays. The owner has not answered yet.
 - The catalog loader still refuses a duplicate key and a `secrets.*` operation that is not critical. A declared operation cannot replace a hand-written entry: the generator only rewrites its own marked regions, and a test counts the entries.
 - The baseline loader still refuses a catalog operation with no baseline rule, so a declared operation is off until a policy change turns it on.
@@ -103,15 +104,15 @@ What is NOT derived, on purpose, and stays hand-written in the connector:
 Set `CLI: kit.CLI{Custom: true}` in the declaration and write the command in `cmd/chap/ops.go` as before. `TestEveryDeclaredOpHasExactlyOneCommand` fails when an operation has both or neither. The generic command handles:
 
 - one ref: a positional argument, or a flag with a default, or a repository (`owner/name`, or `owner/name#N` with the number as the positional argument) read from `--repo` and else from the git remote origin;
-- bool flags, string flags (with a pattern check and its usage error), whole-number flags (a minimum, a maximum, 0 means "left out"), repeatable list flags, and the `--body` / `--body-file` pair;
+- bool flags, string flags (with a pattern check and its usage error), whole-number flags (a minimum, a maximum, 0 means "left out"), and the `--body` / `--body-file` pair;
 - a `--dry-run` flag;
-- a param the command fills from the ref (the number, or the ref itself) and a param with one fixed value.
+- a param the command fills from the ref (the number, or the ref itself).
 
-Anything else needs a custom command: a param read from git, a default for a flag that the schema does not have, a flag that depends on another, a hint written into the usage line, a command whose flags are not in the order of the schema.
+Anything else needs a custom command: a list flag, a param with one fixed value (`Const`), a param read from git, a default for a flag that the schema does not have, a flag that depends on another, a hint written into the usage line, a command whose flags are not in the order of the schema.
 
 For a custom command, `kit` checks only what the catalog and the params schema need: the adapter name, and each param's name, kind and bounds (length, pattern, const, number bounds, list bounds). It does not check the ref's shape (`Target.Pattern`, `Positional`, `Flag`, `Default`, `Why`), the flag names, the `body` name of a text param, or the placeholders and help of a flag, because the hand-written command owns those. Set `Target: kit.Target{Adapter: "github", Repo: true}` for a ref that is read from git.
 
-The params schema is written from these kinds: bool; string (a length, or a pattern, or `Const`, or `Unbounded` when the schema has no maximum and the adapter bounds it); text; integer (minimum, maximum, default); list of strings (item count and item length). An enum, a one-of or a nested object cannot be declared yet.
+The params schema is written from these kinds: bool; string (a length, or a pattern, or `Const`, or `Unbounded` when the schema has no maximum and the adapter bounds it); text; integer (minimum, maximum, default); list of strings (item count and item length). An enum, a one-of or a nested object cannot be declared yet. `kit.Op.Validate` refuses a list or a `Const` in an operation with a generated command, because the generic command has no flag for them; they are for a custom command.
 
 `TestGeneratedCommandsHaveNoFlagClash` builds the flag set of every generated command, so a declared flag that has the name of a common flag (`--json`, `--project`, `--reason`, `--approval`, `--request`, `--wait`) fails a test. `TestKitKnowsTheCommonFlags` checks that `kit.CommonFlags` is the list `chap` registers.
 
@@ -204,7 +205,7 @@ Without a declaration the new adapter is refused as well: `kit.Bind` stops `chap
 - **The kit cannot express a default that the schema does not have.** `pr merge --base main` and `pr open --base main` are command defaults and not schema defaults, so those two commands stay custom. The same holds for a param that is read from git (`pr open --branch`).
 - **The kit cannot express an enum, a one-of or a nested object** in a params schema.
 - **The kit declares the per-minute rate only.** The baseline also has per-hour rates for the GitHub reads and issues, and no test compares them with the declaration.
-- **`Unbounded` strings.** The schemas of `head` and `base` in `pr.open` and `base` in `pr.merge` have no `maxLength`, as before; the adapters cap them (250 bytes in `pr.open`). The declaration says `Unbounded` so the gap shows. Adding a `maxLength` is a change of the contract and was not made here.
+- **`Unbounded` strings.** The schemas of `head` and `base` in `pr.open` and `base` in `pr.merge` have no `maxLength`, as before; `pr.open` caps them in the adapter (250 bytes), and `pr.merge` bounds `base` because it must equal the policy's base. The declaration says `Unbounded` so the gap shows. Adding a `maxLength` is a change of the contract and was not made here.
 - **The command line is stricter than the schema for a sha.** The reads accept a 40 or a 64 character sha in the schema; the command accepts the 40 character one (`Param.CLIPattern`). That is how it was.
 - **Order of two simultaneous usage errors.** The generic command checks the params in the order they are declared, which is the order of the schema. For `pr files` that means `--page` and `--per-page` are checked before `--expected-head`; the hand-written command checked `--expected-head` first. It matters only when two flags are wrong at once.
 - **An unknown param is refused with the declared names in declaration order.** The refusal of `pr.files` lists `page, per_page, expected_head_sha`; it listed `expected_head_sha, page, per_page`.
