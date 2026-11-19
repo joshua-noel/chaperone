@@ -202,3 +202,29 @@ func TestClassifyDeletedOrSkippedTestsIsMedium(t *testing.T) {
 		t.Errorf("%+v", r)
 	}
 }
+
+// A backslash is one file name to GitHub and a path separator on Windows, and a
+// rename's old name is as much a part of the change as its new one. Neither may
+// reach low.
+func TestBackslashAndRenameSourceAreNeverLow(t *testing.T) {
+	g := ops.PRTierGlobs{}
+	for _, p := range []string{
+		`.github\copilot-instructions.md`, `docs\..\AGENTS.md`, `vendor\x.md`, `docs/a\b.md`, `\AGENTS.md`,
+	} {
+		if r := g.Classify([]ops.PRFile{{Path: p}}); r.Tier != ops.TierHigh || !r.Unclassified {
+			t.Errorf("%q: %+v", p, r)
+		}
+	}
+	for _, prev := range []string{
+		`.github\copilot-instructions.md`, "github~1/copilot-instructions.md", "AGENT\u017f.md", "docs/caf\u00e9.md", "docs/a.md ", "agents.md:x.md",
+	} {
+		r := g.Classify([]ops.PRFile{{Path: "docs/a.md", PreviousPath: prev, Status: "renamed"}})
+		if r.Tier != ops.TierHigh {
+			t.Errorf("rename from %q to a plain docs path: %+v", prev, r)
+		}
+	}
+	// The plain rename stays low, so the cases above are not high for another reason.
+	if r := g.Classify([]ops.PRFile{{Path: "docs/a.md", PreviousPath: "docs/b.md", Status: "renamed"}}); r.Tier != ops.TierLow {
+		t.Errorf("plain rename inside docs: %+v", r)
+	}
+}

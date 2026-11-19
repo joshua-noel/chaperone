@@ -80,3 +80,26 @@ func TestCleanOrdersCleaningBeforeTheCap(t *testing.T) {
 		t.Errorf("Clean = %q", got)
 	}
 }
+
+func TestHiddenSetIsRemovedByTheCleaning(t *testing.T) {
+	for _, r := range []rune{
+		0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x180b, 0x180f, 0x2065, 0x3164, 0xffa0, 0xfe00, 0xfe0f,
+		0xfff0, 0xfff8, 0xe0000, 0xe007f, 0xe0080, 0xe00ff, 0xe0100, 0xe01ef, 0xe01f0, 0xe0fff,
+		0x200b, 0x200d, 0x202e, 0x2060, 0xfeff,
+	} {
+		if !untrusted.Hidden(r) {
+			t.Errorf("U+%04X is not Hidden", r)
+		}
+		if got := untrusted.Line("a" + string(r) + "b"); got != "a b" {
+			t.Errorf("U+%04X: Line = %q", r, got)
+		}
+	}
+	for _, r := range []rune{'a', ' ', '\u00e9', '\u65e5', 0xe1000 + 0x1000, 0xfe10, 0x1d} {
+		if r < 0x20 {
+			continue
+		}
+		if untrusted.Hidden(r) {
+			t.Errorf("U+%04X is Hidden", r)
+		}
+	}
+}

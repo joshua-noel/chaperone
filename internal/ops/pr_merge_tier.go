@@ -5,7 +5,6 @@ import (
 	"path"
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 // PRTier is the review tier of a pull request (decision #22, ADR-002 step 5).
@@ -174,37 +173,48 @@ func anyGlob(globs []string, name string) bool {
 	return false
 }
 
-// cleanPath returns the lower-case form of a repository path, or false if it
-// is not a plain relative slash path. Such a path cannot be classified, and
-// the classifier then calls it high. A path is not plain when it is empty,
-// absolute, holds a backslash, a dot segment or a control character (these
-// five were refused before), or when a file system could read it as another
-// name than the one it has:
+// cleanPath returns the lower-case form of a repository path, or false if it is not a plain path. A path that is not
+// plain cannot be classified, and the classifier calls it high, whatever pattern it would match.
 //
-//   - a hidden character: a Unicode format character (bidi controls,
-//     zero-width characters, a byte order mark) or another default-ignorable
-//     code point (a variation selector, a tag, U+034F, U+115F, U+1160,
-//     U+17B4, U+17B5, U+180B-U+180F, U+3164, U+FFA0). macOS HFS+ ignores
-//     some of them in names, so `agents<U+200C>.md` is `agents.md` there, and
-//     a glob would take it for a doc;
-//   - a name that ends in a dot or a space: Windows drops them, so
-//     `agents.md.` and `agents.md ` are `agents.md` on a Windows checkout;
-//   - a colon: on NTFS `agents.md::` is the stream of `agents.md`.
+// The rule is a form, not a list of bad characters. A file system can read a name as another one in more ways than
+// any list holds: Windows drops a trailing dot or space and has 8.3 short names (`github~1` is `.github`), NTFS has
+// stream names (`agents.md::$DATA`), HFS+ ignores some invisible characters, case-insensitive APFS folds `ſ` to `s`
+// and `ﬆ` to `st`. So only a path whose every component is made of ASCII letters and digits and the punctuation
+// `. _ - + @ ( ) [ ] , =` and the space can be low (or get any test-path treatment), and the component
+//
+//   - is not empty, `.` or `..`;
+//   - does not start or end with a space and does not end with a dot;
+//   - has no `~`, so it is no short name.
+//
+// A name outside that form, such as `docs/café.md` or `docs/日本語.md`, is high and needs an approval. That is the
+// price of not having to know every alias. A path that is absolute or holds a backslash is not plain either.
 func cleanPath(p string) (string, bool) {
-	if p == "" || strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") || strings.Contains(p, `\`) || strings.Contains(p, ":") {
+	if p == "" {
 		return "", false
 	}
-	for _, r := range p {
-		if r < 0x20 || r == 0x7f || hiddenRune(r) {
-			return "", false
-		}
-	}
 	for _, seg := range strings.Split(p, "/") {
-		if seg == "" || seg == "." || seg == ".." || strings.HasSuffix(seg, ".") || strings.HasSuffix(seg, " ") {
+		if !plainSegment(seg) {
 			return "", false
 		}
 	}
 	return strings.ToLower(p), true
+}
+
+// plainSegment reports whether one component of a path is in the form cleanPath allows.
+func plainSegment(seg string) bool {
+	if seg == "" || seg == "." || seg == ".." || seg[0] == ' ' || seg[len(seg)-1] == ' ' || seg[len(seg)-1] == '.' {
+		return false
+	}
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.IndexByte("._-+@()[],= ", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // ClassifyPath returns the tier of one repository path.
@@ -331,18 +341,4 @@ func (g PRTierGlobs) Classify(files []PRFile) PRTierResult {
 		res.Paths = setters
 	}
 	return res
-}
-
-// hiddenRune reports whether r is a character that shows as nothing, or that a file system ignores in a name: a
-// Unicode format character (class Cf) or another default-ignorable code point.
-func hiddenRune(r rune) bool {
-	switch {
-	case unicode.Is(unicode.Cf, r):
-		return true
-	case r == 0x034f, r == 0x115f, r == 0x1160, r == 0x17b4, r == 0x17b5, r == 0x3164, r == 0xffa0:
-		return true
-	case r >= 0x180b && r <= 0x180f, r >= 0xfe00 && r <= 0xfe0f, r >= 0xe0000 && r <= 0xe007f, r >= 0xe0100 && r <= 0xe01ef:
-		return true
-	}
-	return false
 }

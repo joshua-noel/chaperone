@@ -286,6 +286,19 @@ func TestPathsThatReadAsAnotherNameAreHigh(t *testing.T) {
 		"agents.md::$DATA", "docs/notes.md:stream", "AGENTS.md:Zone.Identifier",
 		// a control character: refused before
 		".github/\x07/x.yml", "agents\x00.md",
+		// Windows 8.3 short names: a fresh clone writes them into the protected name
+		"github~1/copilot-instructions.md", "GITHUB~1/workflows/ci.yml", "github~1/instructions/x.instructions.md", "REQUIR~1.TXT", "CONSTR~1.TXT",
+		"db/MIGRAT~1/README.md", "DEPLOY~1.MD", "AUTHEN~1/notes.md", "AUTHOR~1/x.md", "agents~1.md", "docs/readme~12.md",
+		// names that case-insensitive APFS folds to an ASCII name: long s, ligatures, dotless i, Kelvin sign
+		"AGENT\u017f.md", "sub/AGENT\u017f.md", "requirement\u017f.txt", "con\ufb06raints.txt", "con\ufb05raints.txt", "\u017fcripts/README.md",
+		"db/migration\u017f/README.md", "payment\u017f/x.txt", "\u0131nternal/app.go", "pyproject.to\u212aen", "\u212aeys/x.md", "docs/\u0130nfo.md",
+		"fo\ufb00.md", "stra\u00dfe/x.md", "\u1e9e/x.md",
+		// ordinary names outside the allowed form need an approval: accents and other scripts
+		"docs/caf\u00e9.md", "docs/\u65e5\u672c\u8a9e.md", "docs/na\u00efve.md", "docs/\u0645\u0644\u0641.md",
+		// characters outside the allowed set, one by one, in a doc name
+		"docs/a#b.md", "docs/a$b.md", "docs/a%b.md", "docs/a&b.md", "docs/a'b.md", "docs/a!b.md", "docs/a;b.md", "docs/a`b.md", "docs/a{b}.md",
+		"docs/a^b.md", "docs/a|b.md", "docs/a<b>.md", "docs/a?b.md", "docs/a*b.md", "docs/a\"b.md", "docs/a\tb.md", "docs/\u00a0notes.md", "docs/a\u00a0b.md",
+		" docs/notes.md", "docs/ notes.md", "docs/notes.md ", "docs//notes.md", "/docs/notes.md", "docs/notes.md/", "docs\\notes.md", "docs/./notes.md", "docs/../notes.md", "docs/.", "..",
 	}
 	for _, p := range protected {
 		got := g.ClassifyPath(p)
@@ -307,11 +320,13 @@ func TestPathsThatReadAsAnotherNameAreHigh(t *testing.T) {
 			t.Errorf("a removed test path under %q is %s, want high", p, res.Tier)
 		}
 	}
-	// Plain names are classified as before.
+	// Plain names are classified by their patterns, as before.
 	for p, want := range map[string]ops.PRTier{
-		"agents.md": ops.TierHigh, "docs/notes.md": ops.TierLow, "README.md": ops.TierLow, "docs/caf\u00e9.md": ops.TierLow,
-		"internal/app/app.go": ops.TierMedium, "internal/app/app_test.go": ops.TierLow, "docs/v1.2/notes.md": ops.TierLow,
-		"requirements.txt": ops.TierMedium, "pyproject.toml": ops.TierMedium, "CODEOWNERS": ops.TierHigh,
+		"agents.md": ops.TierHigh, "docs/notes.md": ops.TierLow, "README.md": ops.TierLow,
+		"docs/Getting Started.md": ops.TierLow, "docs/v1.2/release-notes (draft).md": ops.TierLow, "docs/a+b@c[1],d=e_f-g.md": ops.TierLow,
+		"tests/foo_test.go": ops.TierLow, "internal/app/app_test.go": ops.TierLow, "internal/app/app.go": ops.TierMedium,
+		"requirements.txt": ops.TierMedium, "Requirements-dev.txt": ops.TierMedium, "pyproject.toml": ops.TierMedium, "CODEOWNERS": ops.TierHigh,
+		".github/workflows/ci.yml": ops.TierHigh, "Docs/README.MD": ops.TierLow,
 	} {
 		if got := g.ClassifyPath(p); got != want {
 			t.Errorf("ClassifyPath(%q) = %s, want %s", p, got, want)
