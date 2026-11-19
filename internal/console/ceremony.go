@@ -391,6 +391,10 @@ func (c *Console) enrollFinish(w http.ResponseWriter, r *http.Request) {
 		c.refused(w, r, http.StatusForbidden, reasonOf(err), err, Event{CredentialID: parsed.RawID})
 		return
 	}
+	// What the browser said about the transports is free text: keep the known ones. An attachment it did not give is
+	// recorded as the wider kind under the wider setting (recordedAttachment).
+	cred.Transport = cleanTransports(cred.Transport)
+	cred.Authenticator.Attachment = c.recordedAttachment(cred.Authenticator.Attachment)
 	approverID, err := c.saveEnrollment(r.Context(), cm, st.rp.Origin, cred)
 	if err != nil {
 		c.refusedEnroll(w, r, err)

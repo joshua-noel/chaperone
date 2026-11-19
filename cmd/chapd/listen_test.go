@@ -2,18 +2,19 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/joshua-noel/chaperone/internal/loopback"
-	"time"
 )
 
 // startServe builds a chapd on addr and serves it with listen, as `chapd run`
@@ -34,7 +35,14 @@ func startServe(t *testing.T, addr string, listen loopback.ListenFunc) (log *syn
 	}
 	var serr error
 	fin := make(chan struct{})
-	go func() { serr = app.serveWith(ctx, listen); close(fin) }()
+	go func() {
+		lns, err := app.listenWith(listen)
+		if err == nil {
+			err = app.Serve(ctx, lns)
+		}
+		serr = err
+		close(fin)
+	}()
 	var once sync.Once
 	stop = func() error {
 		once.Do(func() {
@@ -167,7 +175,7 @@ func TestServeRefusesATakenIPv6Port(t *testing.T) {
 func TestServeToleratesNoIPv6(t *testing.T) {
 	no6 := func(network, addr string) (net.Listener, error) {
 		if network == "tcp6" {
-			return nil, errors.New("IPv6 is off")
+			return nil, &net.OpError{Op: "listen", Net: "tcp6", Err: os.NewSyscallError("bind", syscall.EAFNOSUPPORT)}
 		}
 		return net.Listen(network, addr)
 	}
@@ -187,5 +195,58 @@ func TestServeToleratesNoIPv6(t *testing.T) {
 	}
 	if n := strings.Count(log.String(), "no IPv6 loopback"); n != 1 {
 		t.Errorf("the log says it %d times, want once:\n%s", n, log.String())
+	}
+}
+
+// runDaemon takes the console's port before it starts anything: with another program on [::1]:PORT it stops with the
+// error and runs neither the "listening" hook nor the after-start hook; with the port free the port is held first.
+func TestRunDaemonTakesThePortBeforeStart(t *testing.T) {
+	if !ipv6Loopback() {
+		t.Skip("no IPv6 loopback on this machine")
+	}
+	port := freeBothPort(t)
+	squatter, err := net.Listen("tcp6", "[::1]:"+port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	var events []string
+	cfg := Config{
+		DBPath: filepath.Join(dir, "state.db"), KeysPath: writeKeys(t, dir), Instance: "test", Addr: "127.0.0.1:" + port,
+		Log:         slog.New(slog.NewTextHandler(&syncBuf{}, nil)),
+		onListening: func() { events = append(events, "listening") },
+		afterBuild: func(context.Context, *App) error {
+			events = append(events, "started")
+			return nil
+		},
+	}
+	if err := runDaemon(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "[::1]:"+port) {
+		t.Fatalf("runDaemon with another program on [::1]: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("it went on: %v", events)
+	}
+	squatter.Close()
+
+	// Free: the port is held before start-up, and nothing is accepted until the start-up has finished.
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg.DBPath = filepath.Join(dir, "state2.db")
+	cfg.afterBuild = func(context.Context, *App) error {
+		events = append(events, "started")
+		if l, err := net.Listen("tcp4", "127.0.0.1:"+port); err == nil {
+			l.Close()
+			t.Error("the port was not held when start-up finished")
+		}
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- runDaemon(ctx, cfg) }()
+	waitServing(t, "tcp6", "[::1]:"+port)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("runDaemon: %v", err)
+	}
+	if strings.Join(events, ",") != "listening,started" {
+		t.Fatalf("order: %v", events)
 	}
 }

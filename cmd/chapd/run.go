@@ -12,6 +12,7 @@ import (
 
 	"github.com/joshua-noel/chaperone/internal/console"
 	"github.com/joshua-noel/chaperone/internal/logrot"
+	"github.com/joshua-noel/chaperone/internal/loopback"
 )
 
 // runCmd is `chapd run`: chapd in the foreground. The Windows service host
@@ -56,7 +57,7 @@ func parseRunFlags(name string, args []string, stderr io.Writer, demo bool) (Con
 	fs.StringVar(&cfg.InterimSecretID, "interim-secret", "", "vault secret id of the interim issuer's Ed25519 seed")
 	fs.StringVar(&cfg.InterimKID, "interim-kid", "", "kid of the interim issuer in the key set")
 	fs.StringVar(&cfg.GitHubAppID, "github-app-id", "", "GitHub App id or client id; turns on pr.merge and pr.update (needs -vault-dir and `chapd vault import`)")
-	fs.StringVar(&cfg.Addr, "addr", "", "listen address, loopback only (default 127.0.0.1:55398)")
+	fs.StringVar(&cfg.Addr, "addr", "", "listen address: 127.0.0.1 or ::1 and a port (default 127.0.0.1:55398); both loopback addresses are held on that port")
 	fs.StringVar(&cfg.LogDir, "log-dir", "", "write the log to a size-rotated chapd.log in this folder as well (10 MiB x 10 files)")
 	fs.StringVar(&cfg.NtfyTopicSecretID, "ntfy-topic-secret", "", "vault secret id of the ntfy topic: turns on the phone wake-up (needs -vault-dir)")
 	fs.StringVar(&cfg.NtfyURL, "ntfy-url", "", "ntfy server base URL (default https://ntfy.sh)")
@@ -113,13 +114,24 @@ func newLogger(dir string, w io.Writer) (*slog.Logger, func(), error) {
 	return slog.New(slog.NewTextHandler(io.MultiWriter(w, f), nil)), func() { _ = f.Close() }, nil
 }
 
-// runDaemon builds chapd, starts its background work and serves until ctx ends.
+// runDaemon builds chapd, takes the console's port, starts its background work and serves until ctx ends. The port is
+// taken before Start (and so before anything printed for the operator, such as the demo's enrolment address): if
+// another program holds it, chapd stops there, and a service that restarts does not repeat start-up work each time.
+// The listeners accept connections only after Start has finished.
 func runDaemon(ctx context.Context, cfg Config) error {
 	app, err := Build(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer app.Close()
+	lns, err := app.Listen()
+	if err != nil {
+		return err
+	}
+	defer loopback.CloseAll(lns)
+	if cfg.onListening != nil {
+		cfg.onListening()
+	}
 	if err := app.Start(ctx); err != nil {
 		return err
 	}
@@ -128,7 +140,7 @@ func runDaemon(ctx context.Context, cfg Config) error {
 			return err
 		}
 	}
-	return app.Serve(ctx)
+	return app.Serve(ctx, lns)
 }
 
 func isDir(p string) bool {

@@ -264,7 +264,7 @@ func TestRunUsage(t *testing.T) {
 }
 
 func TestListenAddressMustBeLoopback(t *testing.T) {
-	for _, a := range []string{"0.0.0.0:55398", "192.0.2.2:55398", ":55398", "example.com:55398"} {
+	for _, a := range []string{"0.0.0.0:55398", "192.0.2.2:55398", ":55398", "example.com:55398", "127.0.0.2:55398", "127.1.2.3:55398", "localhost:55398"} {
 		if err := requireLoopback(a); err == nil {
 			t.Errorf("%s accepted", a)
 		}

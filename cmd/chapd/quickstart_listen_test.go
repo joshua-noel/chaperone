@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/joshua-noel/chaperone/internal/loopback"
@@ -115,18 +116,21 @@ func TestBindQuickstartIPv6Rules(t *testing.T) {
 	stub := func(failOn string) loopback.ListenFunc {
 		return func(network, addr string) (net.Listener, error) {
 			if strings.HasPrefix(failOn, network+" ") && strings.HasSuffix(failOn, addr) || failOn == network {
+				if failOn == "tcp6" { // no IPv6 on the machine, as the system says it
+					return nil, &net.OpError{Op: "listen", Net: "tcp6", Err: os.NewSyscallError("bind", syscall.EADDRNOTAVAIL)}
+				}
 				return nil, errors.New("refused")
 			}
 			return net.Listen("tcp4", "127.0.0.1:0") // a real listener to close
 		}
 	}
-	// No IPv6 at all: the probe fails, the IPv4 listener alone is fine.
+	// No IPv6 at all: address not available on [::1], the IPv4 listener alone is fine.
 	lns, err := bindQuickstart("127.0.0.1:55999", stub("tcp6"))
 	if err != nil || len(lns) != 1 {
 		t.Fatalf("no IPv6: %d listeners, %v", len(lns), err)
 	}
 	loopback.CloseAll(lns)
-	// IPv6 works (the probe succeeds) but the real port is taken: an error, and the IPv4 listener is closed.
+	// IPv6 works but the real port is taken: an error, and the IPv4 listener is closed.
 	lns, err = bindQuickstart("127.0.0.1:55999", stub("tcp6 [::1]:55999"))
 	if err == nil || !strings.Contains(err.Error(), "[::1]:55999") {
 		t.Fatalf("taken IPv6 port tolerated: %v (%d listeners)", err, len(lns))

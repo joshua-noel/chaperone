@@ -512,7 +512,7 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	}
 	// Listen first: a second quickstart on the same folder stops here, before it touches the database.
 	// Both loopback addresses, because the browser is sent to "localhost" (see quickstart_listen.go).
-	lns, err := bindQuickstart(addr, net.Listen)
+	lns, err := bindQuickstart(addr, loopback.Listen)
 	if err != nil {
 		return err
 	}

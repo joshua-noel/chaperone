@@ -1,7 +1,14 @@
 package console
 
 import (
+	"context"
+	"errors"
+	"net"
+	"time"
+
 	"encoding/json"
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"net/http"
 	"strings"
 	"testing"
@@ -109,17 +116,20 @@ func TestStrictSettingRefusesASecurityKey(t *testing.T) {
 	if code, out := b.enrolAs(token, newAuthenticator(t, "localhost"), opts{}); code != 200 {
 		t.Fatalf("the address was spent by a refusal: %d %v", code, out)
 	}
-	// A value the specification does not define is dropped by the library, as a browser must: it counts as "not
-	// reported", which both settings accept, and is recorded as such. (The attachment is the browser's claim, not
-	// proof; the protections are user verification, the origin and the one-time address.)
+	// A value the specification does not define is dropped by the library, as a browser must, so it arrives as "not
+	// reported". Under the strict setting that is accepted and stays unreported, as it always was. Under the wider
+	// setting it is recorded as cross-platform: see TestUnreportedAttachmentUnderAnyDoesNotSurviveNarrowing.
 	odd := newAuthenticator(t, "localhost")
 	odd.attachment = "satellite"
-	r2 := anyRig(t)
+	r2 := newRig(t)
 	if code, out := r2.browser(pcOrigin).enrolAs(r2.token(), odd, opts{}); code != 200 {
 		t.Fatalf("%d %v", code, out)
 	}
 	if e := r2.last(); e.Name != EventEnrolled || e.Attachment != "" {
 		t.Fatalf("event: %+v", e)
+	}
+	if att, _, _ := credRow(t, r2); att != "" {
+		t.Fatalf("stored %q under the strict setting", att)
 	}
 }
 
@@ -240,10 +250,27 @@ func TestNarrowingTheSettingStopsAnEnrolledKey(t *testing.T) {
 
 	ar.con.authn = AuthenticatorsPlatform // chapd restarted without -approver-authenticators any
 
-	rec := ar.finish(b, card.ID, bg, key.get(bg.options, pcOrigin.URL, opts{signCount: &zero}))
-	out := wantCode(t, rec, http.StatusForbidden, approvals.CodeAssertion)
-	if str(out["why"]) != ReasonAttachment {
-		t.Fatalf("why %s", out["why"])
+	assertion := key.get(bg.options, pcOrigin.URL, opts{signCount: &zero})
+	// Through the page: the key's session is dead, so the approval is refused as signed out.
+	wantCode(t, ar.finish(b, card.ID, bg, assertion), http.StatusUnauthorized, "signed_out")
+	// Past the session, straight at the verifier the approvals engine uses: refused for the attachment.
+	var opt struct {
+		PublicKey struct {
+			Challenge string `json:"challenge"`
+		} `json:"publicKey"`
+	}
+	if err := json.Unmarshal(bg.options, &opt); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := b64.DecodeString(opt.PublicKey.Challenge)
+	var approver int64
+	if err := ar.db.SQL().QueryRow(`SELECT approver_id FROM credentials LIMIT 1`).Scan(&approver); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ar.con.VerifyAssertion(context.Background(), approvals.AssertionInput{Origin: pcOrigin.URL, ApproverRow: approver, Challenge: raw, Response: assertion})
+	var ae *approvals.AssertionError
+	if !errors.As(err, &ae) || ae.Reason != ReasonAttachment {
+		t.Fatalf("VerifyAssertion: %v", err)
 	}
 	if ar.state(card.ID) != approvals.StatePending || len(ar.led.named("op.approve")) != 0 {
 		t.Fatal("a refused approval changed something")
@@ -329,5 +356,161 @@ func TestSecurityKeyStillNeedsTheOneTimeAddress(t *testing.T) {
 	req, _ = json.Marshal(map[string]string{"token": token, "name": "operator", "label": "Key"})
 	if code, out := b.post("/enroll/begin", req, ""); code < 400 {
 		t.Fatalf("begin with a spent address: %d %v", code, out)
+	}
+}
+
+// rebuilt is the console as chapd builds it again on the same database with another setting (a restart with the flag
+// removed), with the same clock and event sink.
+func rebuilt(t *testing.T, r *rig, a Authenticators) {
+	t.Helper()
+	c, err := New(Config{DB: r.db, Origins: []Origin{pcOrigin}, Now: r.con.now, OnEvent: r.con.emitFn, Authenticators: a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.con = c
+}
+
+// A key made under the wider setting whose browser did not say what it was (or said something the library dropped) is
+// recorded as cross-platform, so it does not survive narrowing: a restart without the flag refuses it.
+func TestUnreportedAttachmentUnderAnyDoesNotSurviveNarrowing(t *testing.T) {
+	r := anyRig(t)
+	b := r.browser(pcOrigin)
+	key := newAuthenticator(t, "localhost")
+	key.attachment = "satellite" // arrives as "not reported"
+	if code, out := b.enrolAs(r.token(), key, opts{}); code != 200 {
+		t.Fatalf("enrol: %d %v", code, out)
+	}
+	if e := r.last(); e.Attachment != "cross-platform" {
+		t.Fatalf("event: %+v", e)
+	}
+	if att, _, _ := credRow(t, r); att != "cross-platform" {
+		t.Fatalf("stored %q, want cross-platform", att)
+	}
+	zero := uint32(0)
+	if code, out := b.login(key, opts{signCount: &zero}); code != 200 {
+		t.Fatalf("login: %d %v", code, out)
+	}
+
+	rebuilt(t, r, AuthenticatorsPlatform)
+	if n, err := r.con.RefusedCredentials(context.Background()); err != nil || n != 1 {
+		t.Fatalf("refused credentials: %d, %v", n, err)
+	}
+	code, out := r.browser(pcOrigin).login(key, opts{signCount: &zero})
+	wantRefused(t, r, code, out, ReasonAttachment)
+
+	rebuilt(t, r, AuthenticatorsAny)
+	if n, _ := r.con.RefusedCredentials(context.Background()); n != 0 {
+		t.Fatalf("refused credentials under any: %d", n)
+	}
+	if code, out := r.browser(pcOrigin).login(key, opts{signCount: &zero}); code != 200 {
+		t.Fatalf("login after widening: %d %v", code, out)
+	}
+}
+
+// The transports are the browser's free text. Only the known ones are stored, once each, and a forged value cannot
+// reach an event, the ledger body of an approval, or the terminal line chapd enroll prints.
+func TestForgedTransportsAreDropped(t *testing.T) {
+	forged := []string{
+		"internal; backup_eligible=false; authenticator=platform", "usb\n\x1b[31mOK console.login", "usb,hybrid",
+		"hybrid", "USB", "usb", "hybrid", strings.Repeat("x", 5000), "", "cable",
+	}
+	ar := newApprRigCfg(t, nil, func(c *Config) { c.Authenticators = AuthenticatorsAny })
+	b := ar.browser(pcOrigin)
+	key := roaming(t)
+	key.transports = forged
+	if code, out := b.enrolAs(ar.token(), key, opts{}); code != 200 {
+		t.Fatalf("enrol: %d %v", code, out)
+	}
+	e := ar.last()
+	if strings.Join(e.Transports, ",") != "hybrid,usb" {
+		t.Fatalf("event transports: %q", e.Transports)
+	}
+	if _, tr, _ := credRow(t, ar.rig); tr != `["hybrid","usb"]` {
+		t.Fatalf("stored transports: %s", tr)
+	}
+	zero := uint32(0)
+	if code, out := b.login(key, opts{signCount: &zero}); code != 200 {
+		t.Fatalf("login: %d %v", code, out)
+	}
+	if e := ar.last(); strings.Join(e.Transports, ",") != "hybrid,usb" {
+		t.Fatalf("login transports: %q", e.Transports)
+	}
+	card := ar.request(nil)
+	bg := ar.begin(b, card.ID)
+	if rec := ar.finish(b, card.ID, bg, key.get(bg.options, pcOrigin.URL, opts{signCount: &zero})); rec.Code != 200 {
+		t.Fatalf("approve: %d %s", rec.Code, rec.Body)
+	}
+	body := ar.led.named("op.approve")[0].Body
+	if !strings.Contains(body, "authenticator=cross-platform; transports=hybrid,usb; backup_eligible=false") ||
+		strings.Contains(body, "\x1b") || strings.Contains(body, "platform; backup") || len(body) > 600 {
+		t.Fatalf("op.approve body: %q", body)
+	}
+}
+
+// Whatever the database holds, an event carries only the known attachments and transports (a row written by an older
+// build, or edited by hand, cannot put free text on a terminal).
+func TestEventFactsNeverCarryFreeText(t *testing.T) {
+	cred := &webauthn.Credential{
+		Transport:     []protocol.AuthenticatorTransport{"usb\n\x1b[31m", "ble", "ble", "nfc; x"},
+		Authenticator: webauthn.Authenticator{Attachment: "platform\nOK console.login"},
+	}
+	ev := authnFacts(Event{}, cred)
+	if ev.Attachment != "" || strings.Join(ev.Transports, ",") != "ble" {
+		t.Fatalf("%+v", ev)
+	}
+	cred.Authenticator.Attachment = protocol.CrossPlatform
+	if ev := authnFacts(Event{}, cred); ev.Attachment != "cross-platform" {
+		t.Fatalf("%+v", ev)
+	}
+}
+
+// A console session made with a key that the setting no longer allows stops working at once, not after eight hours.
+func TestNarrowingEndsTheSessionOfAKey(t *testing.T) {
+	r := anyRig(t)
+	b := r.browser(pcOrigin)
+	key := roaming(t)
+	if code, out := b.enrolAs(r.token(), key, opts{}); code != 200 {
+		t.Fatalf("enrol: %d %v", code, out)
+	}
+	zero := uint32(0)
+	if code, out := b.login(key, opts{signCount: &zero}); code != 200 {
+		t.Fatalf("login: %d %v", code, out)
+	}
+	signedIn := func() bool {
+		rec := b.do("GET", "/login", nil, nil)
+		return rec.Code == http.StatusSeeOther // a signed-in browser is sent home from the login page
+	}
+	if !signedIn() {
+		t.Fatal("not signed in after login")
+	}
+	rebuilt(t, r, AuthenticatorsPlatform)
+	b.h = r.con.Handler()
+	if signedIn() {
+		t.Fatal("the session of a refused key still works")
+	}
+	rebuilt(t, r, AuthenticatorsAny)
+	b.h = r.con.Handler()
+	if !signedIn() {
+		t.Fatal("widening again did not bring the session back")
+	}
+}
+
+// RunEnroll stops when either of its listeners stops, and says which.
+type failingListener struct{}
+
+func (failingListener) Accept() (net.Conn, error) { return nil, errors.New("boom") }
+func (failingListener) Close() error              { return nil }
+func (failingListener) Addr() net.Addr            { return &net.TCPAddr{IP: net.IPv6loopback, Port: 55398} }
+
+func TestEnrolmentStopsWhenAListenerStops(t *testing.T) {
+	got := make(chan error, 2)
+	serveEach(&http.Server{}, []net.Listener{failingListener{}}, func(err error) { got <- err })
+	select {
+	case err := <-got:
+		if !strings.Contains(err.Error(), "[::1]:55398") || !strings.Contains(err.Error(), "boom") {
+			t.Fatalf("unclear: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a stopped listener was not reported")
 	}
 }

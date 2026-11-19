@@ -372,16 +372,16 @@ func (c *Console) lookupSession(ctx context.Context, token string, slide bool) (
 	var s session
 	var created string
 	var expires int64
-	var disabled sql.NullString
+	var disabled, attach sql.NullString
 	var a approver
 	ts := sum([]byte(token))
 	err := c.db.SQL().QueryRowContext(ctx,
 		`SELECT s.approver_id, s.credential, s.origin, s.created_at, s.last_seen_unix, s.expires_unix,
-		        a.id, a.user_handle, a.name, a.disabled_at
+		        a.id, a.user_handle, a.name, a.disabled_at, (SELECT c.attachment FROM credentials c WHERE c.id = s.credential)
 		 FROM console_sessions s JOIN approvers a ON a.id = s.approver_id
 		 WHERE s.token_sha256 = ? AND s.revoked_at IS NULL`, ts).
 		Scan(&s.ApproverID, &s.Credential, &s.Origin, &created, &s.LastSeen, &expires,
-			&a.ID, &a.Handle, &a.Name, &disabled)
+			&a.ID, &a.Handle, &a.Name, &disabled, &attach)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, nil
 	}
@@ -393,7 +393,9 @@ func (c *Console) lookupSession(ctx context.Context, token string, slide bool) (
 	if err != nil {
 		return nil, nil, fmt.Errorf("console: session created_at: %w", err)
 	}
-	if disabled.Valid || expires < now.Unix() || now.After(born.Add(c.sessionMax)) {
+	// The session of a credential the authenticators setting no longer allows (narrowed since it signed in) is dead too:
+	// it must not keep browsing, denying or revoking until it runs out.
+	if disabled.Valid || expires < now.Unix() || now.After(born.Add(c.sessionMax)) || !c.attachmentAllowed(protocol.AuthenticatorAttachment(attach.String)) {
 		return nil, nil, nil
 	}
 	s.TokenSum = ts

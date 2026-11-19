@@ -109,7 +109,7 @@ func RunEnroll(ctx context.Context, o EnrollOptions) error {
 	}
 	// Both loopback addresses: the browser is sent to localhost, which may mean ::1, and
 	// whoever listens there would read the one-time address (internal/loopback).
-	lns, err := loopback.Bind(o.Addr, net.Listen, " (is chapd already running? stop it first)")
+	lns, err := loopback.Bind(o.Addr, loopback.Listen, " (is chapd already running? stop it first)")
 	if err != nil {
 		return fmt.Errorf("chapd enroll: %w", err)
 	}
@@ -122,9 +122,11 @@ func RunEnroll(ctx context.Context, o EnrollOptions) error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	for _, ln := range lns {
-		go func() { _ = srv.Serve(ln) }()
-	}
+	// One listener stopping ends the command: enrolment must not go on over one loopback address after the other has stopped being
+	// served (compare serveListeners in cmd/chapd).
+	ctx, stopServing := context.WithCancelCause(ctx)
+	defer stopServing(nil)
+	serveEach(srv, lns, stopServing)
 	defer func() {
 		shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
@@ -169,7 +171,19 @@ func waitFor(ctx context.Context, events <-chan Event, want string, ttl time.Dur
 		case <-timer.C:
 			return Event{}, fmt.Errorf("chapd enroll: timed out after %s waiting for %s", ttl, want)
 		case <-ctx.Done():
-			return Event{}, ctx.Err()
+			return Event{}, context.Cause(ctx)
 		}
+	}
+}
+
+// serveEach serves srv on every listener. A listener whose Serve ends for any reason but a shutdown is reported to fail,
+// once, with the address.
+func serveEach(srv *http.Server, lns []net.Listener, fail func(error)) {
+	for _, ln := range lns {
+		go func() {
+			if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+				fail(fmt.Errorf("chapd enroll: the listener on %s stopped: %w", ln.Addr(), err))
+			}
+		}()
 	}
 }

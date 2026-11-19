@@ -112,6 +112,9 @@ type Config struct {
 	// afterBuild, when set, runs once chapd is built and started (the demo
 	// build's -dev-enroll prints an enrolment address).
 	afterBuild func(context.Context, *App) error
+	// onListening, when set, is called once the console port is held, before Start (the Windows service reports that it
+	// is running then, not before).
+	onListening func()
 }
 
 // App is a built chapd: the database, the ledger, the services and the handler.
@@ -256,6 +259,11 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	a.Console = con
 	if cfg.Authenticators == console.AuthenticatorsAny {
 		a.log.Warn("approver authenticators: any. A hardware security key or a phone passkey may be enrolled and may approve, as well as one built into the device (ADR-004 amendment 15)")
+	}
+	if refused, err := con.RefusedCredentials(ctx); err != nil {
+		return nil, err
+	} else if refused > 0 {
+		a.log.Warn("enrolled passkeys the authenticators setting refuses (a security key or phone made while it was any): they cannot sign in or approve until chapd runs with -approver-authenticators any again", "count", refused)
 	}
 
 	ntf, err := a.buildNotifier(ctx)
@@ -531,26 +539,33 @@ func (a *App) Start(ctx context.Context) error {
 	return nil
 }
 
-// Serve listens on cfg.Addr (loopback only) and serves until ctx ends. It holds
-// 127.0.0.1:PORT and [::1]:PORT (see listen.go) and serves one handler on both.
-func (a *App) Serve(ctx context.Context) error { return a.serveWith(ctx, net.Listen) }
+// Listen takes the console's port on cfg.Addr (loopback only): 127.0.0.1:PORT and [::1]:PORT (internal/loopback). It
+// is called before Start, so a port somebody else holds stops chapd before crash recovery, the sweeps and the release of
+// approved ops run (each service restart would repeat them), and before the
+// service reports that it is running. The listeners accept nothing until Serve.
+func (a *App) Listen() ([]net.Listener, error) { return a.listenWith(loopback.Listen) }
 
-func (a *App) serveWith(ctx context.Context, listen loopback.ListenFunc) error {
+func (a *App) listenWith(listen loopback.ListenFunc) ([]net.Listener, error) {
 	addr := a.cfg.Addr
 	if addr == "" {
 		addr = ops.ListenAddr
 	}
 	if err := requireLoopback(addr); err != nil {
-		return err
+		return nil, err
 	}
 	lns, err := loopback.Bind(addr, listen, "\nIs another chapd running? Stop it first, or use -addr with another port")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer loopback.CloseAll(lns)
 	if len(lns) == 1 {
 		a.log.Warn("no IPv6 loopback on this machine: listening on IPv4 only", "addr", lns[0].Addr().String())
 	}
+	return lns, nil
+}
+
+// Serve serves the handler on the listeners Listen returned until ctx ends, then closes them.
+func (a *App) Serve(ctx context.Context, lns []net.Listener) error {
+	defer loopback.CloseAll(lns)
 	return serveListeners(ctx, a, lns)
 }
 
@@ -580,8 +595,10 @@ func requireLoopback(addr string) error {
 		return fmt.Errorf("chapd: bad listen address %q: %w", addr, err)
 	}
 	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("chapd: listen address %q is not a loopback IP address (127.0.0.1 or ::1)", addr)
+	if ip == nil || !(ip.Equal(net.IPv4(127, 0, 0, 1)) || ip.Equal(net.IPv6loopback)) {
+		// Only these two: the console is held on both (internal/loopback), so another 127.x address would
+		// name a port whose 127.0.0.1 side nobody holds, and the Host allowlist knows no other.
+		return fmt.Errorf("chapd: listen address %q must be 127.0.0.1 or ::1 with a port (both are held)", addr)
 	}
 	return nil
 }
