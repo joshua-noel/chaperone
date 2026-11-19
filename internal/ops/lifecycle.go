@@ -447,8 +447,9 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 
 // Recover runs once at start: an op found `executing` was dispatched by a
 // process that died. Nobody knows whether the action happened, so it becomes
-// `unconfirmed`, and its adapter resolves it with the same execution_id
-// (never a second execution).
+// `unconfirmed`. The adapter is not run again: a second execution could repeat
+// the write. The op stays unconfirmed until [Service.Reconcile] settles it, and
+// no shipped code calls that yet.
 func (s *Service) Recover(ctx context.Context) (int, error) {
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT `+recordColumns+` FROM ops WHERE state = 'executing'`)
 	if err != nil {

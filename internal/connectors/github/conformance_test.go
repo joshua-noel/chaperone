@@ -304,8 +304,10 @@ func withHead(params map[string]any) build {
 	}
 }
 
-// readOp is the samples shared by the four read operations.
-func readOp(op string, valid []conformance.Sample, plant func(*conformance.Rig, conformance.Planted), known string) conformance.Op {
+// readOp is the samples shared by the four read operations. They return text
+// written by the PR's author, so the suite holds them to CleanedText: cleaned and
+// capped. (They also set untrusted_text; the ops tests check that.)
+func readOp(op string, valid []conformance.Sample, plant func(*conformance.Rig, conformance.Planted)) conformance.Op {
 	invalid := []conformance.Sample{
 		refused("a run asks", ops.CodePolicyRefused, op, githubspec.Adapter, readPR(nil), asRun),
 		refused("another repository", ops.CodeScopePath, op, githubspec.Adapter, onRepo("example-org/other#1", nil), nil),
@@ -318,16 +320,9 @@ func readOp(op string, valid []conformance.Sample, plant func(*conformance.Rig, 
 			readPR(map[string]any{"expected_head_sha": "abc123"}), nil))
 	}
 	return conformance.Op{
-		Valid: valid, Invalid: invalid, ReadOnly: true, Text: conformance.ServiceText, Plant: plant,
-		Known: map[conformance.CheckID]string{conformance.CheckServiceText: known},
+		Valid: valid, Invalid: invalid, ReadOnly: true, Text: conformance.CleanedText, Plant: plant,
 	}
 }
-
-// pr.view, pr.diff, pr.checks and pr.files return text written by the PR's
-// author. They cap it, and chapd redacts the result as a whole, but they do
-// not set untrusted_text, clean control characters or withhold secret-shaped
-// text as rule 5 of docs/connectors.md says.
-const readsGap = "the result carries the pull request author's text with no untrusted_text flag, control and format characters kept, and secret-shaped text not withheld. It is capped, chapd redacts the whole result, and the MCP front and chap mark it as data, but the adapter does none of what rule 5 of docs/connectors.md asks"
 
 func TestConformanceGitHub(t *testing.T) {
 	newPR := func(w *world) (string, map[string]any) {
@@ -339,7 +334,7 @@ func TestConformanceGitHub(t *testing.T) {
 			[]conformance.Sample{sample("the read PR", ops.OpPRView, githubspec.Adapter, readPR(nil), nil)},
 			func(r *conformance.Rig, p conformance.Planted) {
 				r.World.(*world).hostilePR(p, orDefault(p.Control, "docs: plain title"), []ghtest.File{{Filename: "docs/notes.md"}})
-			}, readsGap),
+			}),
 		githubspec.NamePRDiff: readOp(ops.OpPRDiff,
 			[]conformance.Sample{
 				sample("the read PR", ops.OpPRDiff, githubspec.Adapter, readPR(nil), nil),
@@ -348,7 +343,7 @@ func TestConformanceGitHub(t *testing.T) {
 			func(r *conformance.Rig, p conformance.Planted) {
 				name := strings.TrimSpace(p.Control + " " + p.Secret)
 				r.World.(*world).hostilePR(p, "docs: plain title", []ghtest.File{{Filename: orDefault(name, "docs/notes.md"), Additions: 1, Patch: "@@ -1 +1 @@\n+" + p.Long + p.Secret + "\n"}})
-			}, readsGap),
+			}),
 		githubspec.NamePRChecks: readOp(ops.OpPRChecks,
 			[]conformance.Sample{
 				sample("the read PR", ops.OpPRChecks, githubspec.Adapter, readPR(nil), nil),
@@ -358,7 +353,7 @@ func TestConformanceGitHub(t *testing.T) {
 				name := strings.TrimSpace(p.Control + " " + p.Secret)
 				r.World.(*world).hostilePR(p, "docs: plain title", []ghtest.File{{Filename: "docs/notes.md"}},
 					ghtest.Check{Name: orDefault(name, "lint"), AppID: gh.GitHubActionsAppID, Status: "completed", Conclusion: "success"})
-			}, readsGap),
+			}),
 		githubspec.NamePRFiles: readOp(ops.OpPRFiles,
 			[]conformance.Sample{
 				sample("the read PR", ops.OpPRFiles, githubspec.Adapter, readPR(nil), nil),
@@ -367,7 +362,7 @@ func TestConformanceGitHub(t *testing.T) {
 			func(r *conformance.Rig, p conformance.Planted) {
 				name := strings.TrimSpace(p.Control + " " + p.Secret)
 				r.World.(*world).hostilePR(p, "docs: plain title", []ghtest.File{{Filename: orDefault(name, "docs/notes.md")}})
-			}, readsGap),
+			}),
 
 		githubspec.NamePROpen: {
 			Valid: []conformance.Sample{sample("a branch with a commit", ops.OpPROpen, githubspec.Adapter, newPR, nil)},
@@ -429,11 +424,10 @@ func TestConformanceGitHub(t *testing.T) {
 				}, nil),
 				refused("a project with no pr block", ops.CodePolicyRefused, githubspec.NamePRMerge, githubspec.Adapter, mergeBuild, otherProject),
 			},
-			Text: conformance.NoServiceText,
+			Text: conformance.CleanedText,
 			Plant: func(r *conformance.Rig, p conformance.Planted) {
 				r.World.(*world).hostilePR(p, "docs: update notes", []ghtest.File{{Filename: strings.TrimSpace("docs/" + p.Control + ".md")}})
 			},
-			Known: map[conformance.CheckID]string{conformance.CheckServiceText: mergePaths},
 		},
 
 		githubspec.NameIssueOpen: {
@@ -501,12 +495,15 @@ func issueBuild(params map[string]any) build {
 	return func(w *world) (string, map[string]any) { return w.pr(w.issue), params }
 }
 
-// issueRepeat is the finding: GitHub's issue API has no idempotency key, and
-// the adapters send the write again when Execute is called again with the
-// same execution id. chapd never does that (an op that was executing when the
-// process died becomes unconfirmed and is not run again), so the declaration
-// records the behaviour instead of hiding it.
-const issueRepeat = "GitHub has no idempotency key for creating an issue or a comment, and the adapter does not look for its earlier write: a second Execute with the same execution id posts again. chapd does not call Execute twice for one op (a crash leaves it unconfirmed)"
+// issueRepeat says why issue.open and issue.comment are not repeat-safe.
+// GitHub's issue API has no idempotency key, and a hidden marker in the body
+// would change what is posted, so the adapters send the write again when
+// Execute is called again with the same execution id. chapd calls Execute once
+// for each execution id and never retries a write (Service.execute is the only
+// caller; Recover marks an op that was executing as unconfirmed and does not run
+// the adapter; no shipped code calls Reconcile). The declaration records the
+// behaviour instead of hiding it.
+const issueRepeat = "GitHub has no idempotency key for creating an issue or a comment, and a marker in the body would change what is posted, so a second Execute with the same execution id posts again. chapd calls Execute once for each execution id and never retries a write"
 
 func TestConformanceCI(t *testing.T) {
 	report := func(id string) build {
@@ -529,19 +526,10 @@ func TestConformanceCI(t *testing.T) {
 					}, nil),
 					refused("a project with no pr block", ops.CodePolicyRefused, githubspec.NameCIReport, githubspec.CIAdapter, report(ciRun), otherProject),
 				},
-				NotRepeatable: "a second report posts a second check run; pr.merge reads the latest check run of that name on the head, so the repeat replaces the first and the effect is the same (ADR-002, amendment 10)",
+				NotRepeatable: "a second report posts a second check run, because the adapter does not look for its earlier one by external_id (gh.CheckRun has no ExternalID yet); pr.merge reads the latest check run of that name on the head, so the repeat replaces the first and the effect is the same (ADR-002, amendment 10). chapd calls Execute once for each execution id",
 				Text:          conformance.NoServiceText,
 				Plant:         func(*conformance.Rig, conformance.Planted) {}, // the result is chapd's own record of the run
 			},
 		},
 	})
 }
-
-// mergePaths is a finding on the one gated operation. The risk_tier check
-// names the paths that set the tier, and result.checks repeats it. The paths
-// are the pull request author's text. A format character (a bidi override, a
-// zero-width joiner) goes through both unchanged; a control character is
-// replaced by "?" in the check line only. The result has no untrusted_text
-// flag. The approval card shows the same paths as evidence, which it labels
-// untrusted, but the check line and the stored result are not marked.
-const mergePaths = "risk_tier detail and result.checks carry the paths of the pull request's changed files (the author's text) with format characters (U+202E, U+200D) unchanged and no untrusted_text flag"

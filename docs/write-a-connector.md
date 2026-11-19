@@ -133,7 +133,7 @@ The suite drives your real adapter against the fake service. A check fails with 
 | `no_secret_in_output` | The credential is in no `CheckResult`, no `Outcome`, no error, no refusal and no log line. The suite makes its own value the credential. It also looks for every credential the fake saw. It runs the samples again against a service that rejects the credential and repeats it in its error text. |
 | `refusals_have_a_known_code` | Every refusal your invalid samples cause is a `*ops.Refusal` with a cause code that chapd knows. `Execute` does not act on the same requests. |
 | `params_and_limits_are_enforced` | A param that is not declared, a missing required param, a value of the wrong kind and a value past a declared limit are refused. The suite makes these requests from your declaration. It checks `Check` and `Execute`. |
-| `service_text_is_untrusted` | Text from the service is marked `untrusted_text`, cleaned, capped and withheld when it looks like a secret. An operation that says it returns no service text does not echo any. |
+| `service_text_is_untrusted` | Text from the service is cleaned of control and format characters and capped, in the result, in the check lines and in refusals. An operation of the strict kind (`ServiceText`) also marks the result `untrusted_text` and withholds an item that looks like a secret. An operation that says it returns no service text does not echo any. |
 | `class_matches_pin` | The class and the reversibility in the declaration are the ones in the table that was written by hand. |
 
 ## 6. Write your own samples
@@ -143,7 +143,7 @@ The suite drives your real adapter against the fake service. A check fails with 
 - `Valid`: requests the adapter must accept. The first one is the base of the generated requests that break a limit, so give it every optional param.
 - `Invalid`: requests that `Check` must refuse. Give each refusal the adapter makes by hand, with the cause code you expect.
 - `ReadOnly`: `true` for an operation that never writes. The suite then fails the operation if `Execute` sends a write.
-- `Text`: `conformance.ServiceText` when the result holds text the service wrote, `conformance.NoServiceText` when it does not.
+- `Text`: `conformance.ServiceText` when the result holds text the service wrote and you follow rule 5 in full (clean, cap, mark `untrusted_text`, withhold an item that looks like a secret); `conformance.CleanedText` when the text is part of the answer and you clean and cap it, as the GitHub adapters do for a path in a check line (the front ends mark the result and chapd redacts it as a whole); `conformance.NoServiceText` when the result holds none.
 - `Plant`: how to put hostile text in the fake where the first valid sample reads it.
 
 The fake is yours too. Make `notestest/server.go` answer what your service answers. Count every call that changes state in `WriteCalls`, and in `WritesApplied` only when the fake acts on it.
@@ -212,10 +212,10 @@ The suite tests your adapter against a fake that you wrote. It does not prove:
 - **That the real service behaves like the fake.** A fake is your reading of the service. Check the real service by hand once, with a token that can do no harm.
 - **That the credential is safe in every place.** It looks in what the adapter returns, in the log output of the default loggers, and in `Rig.Logs`. It does not look in a log that goes elsewhere, in the memory of the process, or in the ledger.
 - **That a hostile service cannot trick the adapter.** It tries one: a service that rejects the credential and repeats it. Other tricks are for your own tests.
-- **That text is safe to show.** It checks control and format characters, length, and text shaped like a secret. It does not judge what the words say. A hostile instruction in a title is still an instruction. The front ends put results behind a notice, and chapd and the operator decide what runs next.
+- **That text is safe to show.** It checks control and format characters, length, and (for the strict kind) text shaped like a secret. It does not judge what the words say. A hostile instruction in a title is still an instruction. The front ends put results behind a notice, and chapd and the operator decide what runs next.
 - **That `Check` leaves nothing behind.** It counts writes. A token that the adapter mints and does not revoke is not a write, and the suite does not see it.
 - **That the adapter is idempotent against the real service.** It proves it against the fake. The fake only refuses a repeat if you wrote it to.
 - **Limits that the declaration cannot express.** A `Pattern`, a string with `Unbounded`, a ref with a shape of its own, a policy that depends on the project: write `Invalid` samples for these.
 - **That the operation is on, or allowed.** The baseline and the policy decide that.
 
-The suite also has the findings it made against Linear and GitHub, in the `Known` lists of `internal/connectors/linear/conformance_test.go` and `internal/connectors/github/conformance_test.go`.
+The suite also made findings against Linear and GitHub. They are fixed, except three repeat-safety gaps that are declared `NotRepeatable` in `internal/connectors/github/conformance_test.go`: see [What the conformance suite found](connectors.md#what-the-conformance-suite-found). The `Known` lists of both connectors are empty.

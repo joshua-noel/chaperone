@@ -29,7 +29,10 @@ import (
 //   - GitHub is written with one token narrowed to the repository and `checks: write`, minted after the last check,
 //     used for the one POST and revoked at once, whatever the answer.
 //   - A report can be repeated: pr.merge reads the latest check run of that name on the head, so a second report
-//     for the same run replaces the first.
+//     for the same run replaces the first. It is not repeat-safe in the strict sense: a second Execute with the
+//     same execution id posts a second check run. chapd calls Execute once per execution id, so that does not
+//     happen today. Looking the run up by external_id before posting would close it; gh.CheckRun has no
+//     ExternalID yet.
 
 // ciReportAdapterTarget is the target adapter of a ci.report request; the ref is the run's ID.
 const ciReportAdapterTarget = githubspec.CIAdapter

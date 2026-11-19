@@ -241,6 +241,7 @@ func TestPlaygroundFakeKeepsABoundedLog(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 	reqs := f.srv.Requests()

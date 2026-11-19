@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
+	"github.com/joshua-noel/chaperone/internal/connectors/untrusted"
 	"github.com/joshua-noel/chaperone/internal/gh"
 	"github.com/joshua-noel/chaperone/internal/policy"
 )
@@ -147,6 +148,16 @@ func paramInt(p map[string]any, key string) (int, bool, error) {
 	return 0, true, paramsInvalid("param %s must be a positive integer", key)
 }
 
+// linePaths returns the paths for the card, each on one line with no control or
+// format character: a pull request author chooses them.
+func linePaths(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = untrusted.Line(p)
+	}
+	return out
+}
+
 func verdictChecks(v PRVerdict) []Check {
 	out := make([]Check, 0, len(v.Checks))
 	for _, c := range v.Checks {
@@ -190,7 +201,7 @@ func refusalOf(v PRVerdict) error {
 	if code == "" {
 		code = CodePolicyRefused
 	}
-	return &Refusal{Code: code, Why: clip(why, 400)}
+	return &Refusal{Code: code, Why: clip(untrusted.Line(why), 400)}
 }
 
 // ---- pr.merge --------------------------------------------------------------
@@ -253,7 +264,7 @@ func (a *prMergeAdapter) Check(ctx context.Context, r *Request) (CheckResult, er
 		if len(paths) > 40 {
 			paths, more = paths[:40], fmt.Sprintf("\n... and %d more", len(v.TierPaths)-40)
 		}
-		cr.Evidence = append(cr.Evidence, Evidence{Name: "paths that set the tier (" + string(v.Tier) + ")", Text: clip(strings.Join(paths, "\n"), 4000) + more})
+		cr.Evidence = append(cr.Evidence, Evidence{Name: "paths that set the tier (" + string(v.Tier) + ")", Text: clip(strings.Join(linePaths(paths), "\n"), 4000) + more})
 	}
 	switch v.Outcome {
 	case PRRefuse:
@@ -288,18 +299,18 @@ func (a *prMergeAdapter) Execute(ctx context.Context, r *Request) (Outcome, erro
 	res, err := a.m.Merge(ctx, req)
 	switch {
 	case errors.Is(err, ErrMergeUnconfirmed):
-		return Outcome{Unconfirmed: true, Result: map[string]any{"error": clip(err.Error(), 400)}}, nil
+		return Outcome{Unconfirmed: true, Result: map[string]any{"error": clip(untrusted.Line(err.Error()), 400)}}, nil
 	case err != nil:
 		// Every other error comes before the write or after a read-back that
 		// showed the PR open: it did not merge.
-		return Outcome{Failed: true, Result: map[string]any{"error": clip(err.Error(), 400)}}, nil
+		return Outcome{Failed: true, Result: map[string]any{"error": clip(untrusted.Line(err.Error()), 400)}}, nil
 	}
 	out := Outcome{Result: verdictResult(res.Verdict)}
 	out.Result["merged"] = res.Merged
 	if len(res.Warnings) > 0 {
 		ws := make([]any, len(res.Warnings))
 		for i, w := range res.Warnings {
-			ws[i] = clip(w, 300)
+			ws[i] = clip(untrusted.Line(w), 300)
 		}
 		out.Result["warnings"] = ws
 	}
@@ -388,7 +399,7 @@ func (a *prUpdateAdapter) Execute(ctx context.Context, r *Request) (Outcome, err
 	if len(res.Warnings) > 0 {
 		ws := make([]any, len(res.Warnings))
 		for i, w := range res.Warnings {
-			ws[i] = clip(w, 300)
+			ws[i] = clip(untrusted.Line(w), 300)
 		}
 		out.Result["warnings"] = ws
 	}

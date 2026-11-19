@@ -297,27 +297,3 @@ func writeErr(err error, res map[string]any) (ops.Outcome, error) {
 	}
 	return ops.Outcome{Result: res}, err
 }
-
-// ---- text of results -------------------------------------------------------
-
-// clean shortens s to max bytes on a rune boundary and removes control and
-// format characters, keeping tabs and newlines. It is how Linear's text (which
-// is not ours to trust) is put into a result.
-func clean(s string, max int) string {
-	s = strings.ToValidUTF8(s, "")
-	s = strings.Map(func(r rune) rune {
-		switch {
-		case r == '\t' || r == '\n':
-			return r
-		case r == '\r':
-			return -1
-		case r < ' ' || r == 0x7f || unicode.Is(unicode.C, r):
-			return ' '
-		}
-		return r
-	}, s)
-	if len(s) <= max {
-		return s
-	}
-	return strings.ToValidUTF8(s[:max-3], "") + "..."
-}

@@ -323,12 +323,13 @@ func (h *harness) checkServiceText() []string {
 				}
 			}
 		}
-	case ServiceText:
+	case ServiceText, CleanedText:
+		strict := h.spec.Text == ServiceText
 		// Phase A: control characters, words and a very long text.
 		a := h.plantAndRun(Planted{Control: full.Control, Long: full.Long})
 		checkLines(a)
 		if ran(a) {
-			if a.out.Result[UntrustedFlag] != true {
+			if strict && a.out.Result[UntrustedFlag] != true {
 				out = append(out, problem(who, "the result is not marked %s: true, and it carries text the service wrote", UntrustedFlag))
 			}
 			reached, longest := false, 0
@@ -347,6 +348,9 @@ func (h *harness) checkServiceText() []string {
 			}
 		}
 		// Phase B: text shaped like a secret.
+		if !strict {
+			break
+		}
 		b := h.plantAndRun(Planted{Control: "plain words", Secret: full.Secret})
 		checkLines(b)
 		if ran(b) {

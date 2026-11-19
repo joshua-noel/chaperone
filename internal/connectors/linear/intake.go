@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
+	"github.com/joshua-noel/chaperone/internal/connectors/untrusted"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
 )
@@ -75,7 +76,7 @@ func (a *listAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outcome,
 	}
 	snap, err := a.cfg.Board.Get(ctx, pol.Team, pol.Label, p.refresh, p.closed)
 	if err != nil {
-		return failed(err, nil), nil
+		return failed(credentialRefusal(err), nil), nil
 	}
 	items := make([]any, 0, len(snap.Items))
 	for _, it := range snap.Items {
@@ -103,32 +104,32 @@ func (a *listAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outcome,
 // cleaned and capped, and withheld whole when it looks like a secret.
 func (a *listAdapter) itemResult(it Item) map[string]any {
 	m := map[string]any{
-		"identifier": clean(it.Identifier, maxName),
-		"url":        clean(it.URL, maxURL),
-		"state":      map[string]any{"name": clean(it.State.Name, maxName), "type": clean(it.State.Type, maxName)},
-		"created_at": clean(it.CreatedAt, 40),
-		"updated_at": clean(it.UpdatedAt, 40),
+		"identifier": untrusted.Clean(it.Identifier, maxName),
+		"url":        untrusted.Clean(it.URL, maxURL),
+		"state":      map[string]any{"name": untrusted.Clean(it.State.Name, maxName), "type": untrusted.Clean(it.State.Type, maxName)},
+		"created_at": untrusted.Clean(it.CreatedAt, 40),
+		"updated_at": untrusted.Clean(it.UpdatedAt, 40),
 	}
 	if it.Assignee != "" {
-		m["assignee"] = clean(it.Assignee, maxName)
+		m["assignee"] = untrusted.Clean(it.Assignee, maxName)
 	}
 	labels := make([]any, 0, len(it.Labels))
 	for _, l := range it.Labels {
-		labels = append(labels, clean(l, maxName))
+		labels = append(labels, untrusted.Clean(l, maxName))
 	}
 	m["labels"] = labels
 
-	title, desc := clean(it.Title, maxTitle), clean(it.Description, maxDescription)
+	title, desc := untrusted.Clean(it.Title, maxTitle), untrusted.Clean(it.Description, maxDescription)
 	comments := make([]any, 0, len(it.Comments))
 	for _, c := range it.Comments {
 		comments = append(comments, map[string]any{
-			"author": clean(c.Author, maxName), "created_at": clean(c.CreatedAt, 40), "body": clean(c.Body, maxCommentText),
+			"author": untrusted.Clean(c.Author, maxName), "created_at": untrusted.Clean(c.CreatedAt, 40), "body": untrusted.Clean(c.Body, maxCommentText),
 		})
 	}
 	links := make([]any, 0, len(it.Links))
 	for _, l := range it.Links {
 		links = append(links, map[string]any{
-			"url": clean(l.URL, maxURL), "title": clean(l.Title, maxLinkTitle), "source": clean(l.Source, maxName),
+			"url": untrusted.Clean(l.URL, maxURL), "title": untrusted.Clean(l.Title, maxLinkTitle), "source": untrusted.Clean(l.Source, maxName),
 		})
 	}
 	if a.looksSecret(title, desc, it) {
@@ -199,7 +200,7 @@ func (a *statesAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outcom
 		return failed(errors.New("Linear has no team "+pol.Team+" that the app can see: check the team key in the policy and the app's team access"), nil), nil
 	}
 	if err != nil {
-		return failed(err, nil), nil
+		return failed(credentialRefusal(err), nil), nil
 	}
 	if strings.EqualFold(strings.TrimSpace(team.Name), "engineering") {
 		return failed(errors.New("team "+pol.Team+" is the Engineering team, which the intake never uses"), nil), nil
@@ -209,7 +210,7 @@ func (a *statesAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outcom
 	for _, s := range team.States {
 		_, ok := pol.StateAllowed(s.Name)
 		have[strings.ToLower(s.Name)] = true
-		states = append(states, map[string]any{"name": clean(s.Name, maxName), "type": clean(s.Type, maxName), "in_policy": ok})
+		states = append(states, map[string]any{"name": untrusted.Clean(s.Name, maxName), "type": untrusted.Clean(s.Type, maxName), "in_policy": ok})
 	}
 	var missing []any
 	allowed := make([]any, 0, len(pol.States))
@@ -224,7 +225,7 @@ func (a *statesAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outcom
 	}
 	return ops.Outcome{Result: map[string]any{
 		"team":               pol.Team,
-		"team_name":          clean(team.Name, maxName),
+		"team_name":          untrusted.Clean(team.Name, maxName),
 		"label":              pol.Label,
 		"states":             states,
 		"policy_states":      allowed,
@@ -282,7 +283,7 @@ func (a *commentAdapter) Check(ctx context.Context, r *ops.Request) (ops.CheckRe
 	return ops.CheckResult{Checks: []ops.Check{
 		{Name: "team", Passed: true, Detail: g.TeamKey},
 		{Name: "label", Passed: true, Detail: p.pol.Label},
-		{Name: "issue", Passed: true, Detail: g.Identifier + " is " + clean(g.State.Name, maxName)},
+		{Name: "issue", Passed: true, Detail: g.Identifier + " is " + untrusted.Clean(g.State.Name, maxName)},
 	}}, nil
 }
 
@@ -305,16 +306,16 @@ func (a *commentAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outco
 	if err != nil {
 		return writeErr(err, res)
 	}
-	url := clean(c.URL, maxURL)
+	url := untrusted.Clean(c.URL, maxURL)
 	res["url"] = url
 	return ops.Outcome{ExternalRef: refOr(url, g.URL), Result: res}, nil
 }
 
 func refOr(a, b string) string {
 	if a != "" {
-		return clean(a, maxURL)
+		return untrusted.Clean(a, maxURL)
 	}
-	return clean(b, maxURL)
+	return untrusted.Clean(b, maxURL)
 }
 
 // ---- intake.move -----------------------------------------------------------
@@ -385,7 +386,7 @@ func (a *moveAdapter) Check(ctx context.Context, r *ops.Request) (ops.CheckResul
 	return ops.CheckResult{Checks: []ops.Check{
 		{Name: "team", Passed: true, Detail: g.TeamKey},
 		{Name: "label", Passed: true, Detail: p.pol.Label},
-		{Name: "state_in_policy", Passed: true, Detail: clean(g.State.Name, maxName) + " -> " + p.state},
+		{Name: "state_in_policy", Passed: true, Detail: untrusted.Clean(g.State.Name, maxName) + " -> " + p.state},
 	}}, nil
 }
 
@@ -405,7 +406,7 @@ func (a *moveAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outcome,
 	if err != nil {
 		return failed(err, res), nil // nothing was written
 	}
-	res["from"] = clean(g.State.Name, maxName)
+	res["from"] = untrusted.Clean(g.State.Name, maxName)
 	if strings.EqualFold(g.State.Name, to.Name) {
 		res["moved"] = false
 		return ops.Outcome{ExternalRef: refOr(g.URL, ""), Result: res}, nil
@@ -418,8 +419,8 @@ func (a *moveAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outcome,
 	res["moved"] = true
 	if !strings.EqualFold(got, to.Name) {
 		// Linear acted but reports another state: say so, do not claim success.
-		res["error"] = "Linear reports the state " + clean(got, maxName) + " after the move"
-		res["now"] = clean(got, maxName)
+		res["error"] = "Linear reports the state " + untrusted.Clean(got, maxName) + " after the move"
+		res["now"] = untrusted.Clean(got, maxName)
 		return ops.Outcome{Unconfirmed: true, Result: res}, nil
 	}
 	return ops.Outcome{ExternalRef: refOr(g.URL, ""), Result: res}, nil

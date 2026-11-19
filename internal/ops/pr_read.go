@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
+	"github.com/joshua-noel/chaperone/internal/connectors/untrusted"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -247,7 +248,7 @@ func (a *PRReadAdapter) Execute(ctx context.Context, req *Request) (Outcome, err
 	if err != nil {
 		var ref *Refusal
 		if errors.As(err, &ref) {
-			return failedOutcome(ref.Why), nil
+			return failedOutcome(untrusted.Line(ref.Why)), nil
 		}
 		return failedOutcome("chapd could not get a GitHub token; nothing was read, ask again"), nil
 	}
@@ -260,7 +261,7 @@ func (a *PRReadAdapter) Execute(ctx context.Context, req *Request) (Outcome, err
 	if p.expectHead != "" && pull.Head.SHA != p.expectHead {
 		return Outcome{Failed: true, Result: map[string]any{
 			"error":    fmt.Sprintf("the head of #%d is not %s any more: ask again without expected_head_sha, or with the new head", p.number, p.expectHead[:12]),
-			"head_sha": pull.Head.SHA,
+			"head_sha": untrusted.Line(pull.Head.SHA),
 		}}, nil
 	}
 	var res map[string]any
@@ -286,7 +287,8 @@ func (a *PRReadAdapter) Execute(ctx context.Context, req *Request) (Outcome, err
 		}
 		res = filesResult(pull, files, p)
 	}
-	return Outcome{ExternalRef: clip(pull.HTMLURL, 300), Result: res}, nil
+	res["untrusted_text"] = true
+	return Outcome{ExternalRef: clip(untrusted.Line(pull.HTMLURL), 300), Result: res}, nil
 }
 
 // fromGitHub turns a GitHub error into a failed outcome with words a person
@@ -310,9 +312,9 @@ func (a *PRReadAdapter) fromGitHub(err error, p prReadParams) Outcome {
 		out.Result["error"] = clip(msg, 300)
 		return out
 	case errors.Is(err, gh.ErrListTruncated):
-		return failedOutcome(a.op + " cannot list this completely: " + err.Error())
+		return failedOutcome(a.op + " cannot list this completely: " + untrusted.Line(err.Error()))
 	case errors.As(err, &api):
-		return failedOutcome(fmt.Sprintf("GitHub refused %s (%d): %s", a.op, api.Status, api.Detail()))
+		return failedOutcome(fmt.Sprintf("GitHub refused %s (%d): %s", a.op, api.Status, untrusted.Line(api.Detail())))
 	}
 	return failedOutcome("chapd could not reach GitHub for " + a.op + "; nothing was changed, ask again")
 }
@@ -320,43 +322,43 @@ func (a *PRReadAdapter) fromGitHub(err error, p prReadParams) Outcome {
 // ---- results ---------------------------------------------------------------
 
 func viewResult(p *gh.Pull, repo gh.Repo) map[string]any {
-	body, bodyCut := cutText(p.Body, PRBodyMax)
+	body, bodyCut := cutText(untrusted.Strip(p.Body), PRBodyMax)
 	labels := make([]string, 0, len(p.Labels))
 	for _, l := range p.Labels {
 		if len(labels) == prLabelsMax {
 			break
 		}
-		labels = append(labels, clip(l.Name, 100))
+		labels = append(labels, clip(untrusted.Line(l.Name), 100))
 	}
-	head := map[string]any{"ref": p.Head.Ref, "sha": p.Head.SHA, "repo": "", "fork": true}
+	head := map[string]any{"ref": untrusted.Line(p.Head.Ref), "sha": untrusted.Line(p.Head.SHA), "repo": "", "fork": true}
 	if p.Head.Repo != nil {
-		head["repo"] = p.Head.Repo.FullName
+		head["repo"] = untrusted.Line(p.Head.Repo.FullName)
 		head["fork"] = !strings.EqualFold(p.Head.Repo.FullName, repo.String())
 	}
 	author := ""
 	if p.User != nil {
-		author = p.User.Login
+		author = untrusted.Line(p.User.Login)
 	}
 	var mergeable any // null while GitHub computes it
 	if p.Mergeable != nil {
 		mergeable = *p.Mergeable
 	}
 	res := map[string]any{
-		"number": p.Number, "title": p.Title, "body": body, "body_truncated": bodyCut,
-		"state": p.State, "draft": p.Draft, "merged": p.Merged, "author": author, "labels": labels,
-		"head": head, "base": map[string]any{"ref": p.Base.Ref, "sha": p.Base.SHA},
-		"mergeable": mergeable, "mergeable_state": p.MergeableState,
-		"url": p.HTMLURL, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt,
+		"number": p.Number, "title": untrusted.Line(p.Title), "body": body, "body_truncated": bodyCut,
+		"state": untrusted.Line(p.State), "draft": p.Draft, "merged": p.Merged, "author": author, "labels": labels,
+		"head": head, "base": map[string]any{"ref": untrusted.Line(p.Base.Ref), "sha": untrusted.Line(p.Base.SHA)},
+		"mergeable": mergeable, "mergeable_state": untrusted.Line(p.MergeableState),
+		"url": untrusted.Line(p.HTMLURL), "created_at": untrusted.Line(p.CreatedAt), "updated_at": untrusted.Line(p.UpdatedAt),
 		"commits": p.Commits, "additions": p.Additions, "deletions": p.Deletions, "changed_files": p.ChangedFiles,
 	}
 	if p.ClosedAt != "" {
-		res["closed_at"] = p.ClosedAt
+		res["closed_at"] = untrusted.Line(p.ClosedAt)
 	}
 	if p.MergedAt != "" {
-		res["merged_at"] = p.MergedAt
+		res["merged_at"] = untrusted.Line(p.MergedAt)
 	}
 	if p.MergeCommitSHA != "" {
-		res["merge_commit_sha"] = p.MergeCommitSHA
+		res["merge_commit_sha"] = untrusted.Line(p.MergeCommitSHA)
 	}
 	return res
 }
@@ -371,7 +373,7 @@ func cutText(s string, max int) (string, bool) {
 }
 
 func diffResult(p *gh.Pull, raw []byte) map[string]any {
-	text := strings.ToValidUTF8(string(raw), "\uFFFD")
+	text := untrusted.Strip(strings.ToValidUTF8(string(raw), "\uFFFD"))
 	truncated := len(text) > PRDiffMax
 	if truncated {
 		text = clamp(text, PRDiffMax)
@@ -380,7 +382,7 @@ func diffResult(p *gh.Pull, raw []byte) map[string]any {
 		}
 	}
 	return map[string]any{
-		"number": p.Number, "head_sha": p.Head.SHA, "base_ref": p.Base.Ref,
+		"number": p.Number, "head_sha": untrusted.Line(p.Head.SHA), "base_ref": untrusted.Line(p.Base.Ref),
 		"diff": text, "size": len(raw), "returned": len(text), "truncated": truncated, "cap": PRDiffMax,
 	}
 }
@@ -388,15 +390,15 @@ func diffResult(p *gh.Pull, raw []byte) map[string]any {
 func filesResult(p *gh.Pull, files []gh.PullFile, q prReadParams) map[string]any {
 	list := make([]any, 0, len(files))
 	for _, f := range files {
-		m := map[string]any{"filename": f.Filename, "status": f.Status, "additions": f.Additions, "deletions": f.Deletions, "has_patch": f.Patch != ""}
+		m := map[string]any{"filename": untrusted.Line(f.Filename), "status": untrusted.Line(f.Status), "additions": f.Additions, "deletions": f.Deletions, "has_patch": f.Patch != ""}
 		if f.PreviousFilename != "" {
-			m["previous_filename"] = f.PreviousFilename
+			m["previous_filename"] = untrusted.Line(f.PreviousFilename)
 		}
 		list = append(list, m)
 	}
 	total := min(p.ChangedFiles, prFilesMaxItems)
 	return map[string]any{
-		"number": p.Number, "head_sha": p.Head.SHA, "page": q.page, "per_page": q.perPage,
+		"number": p.Number, "head_sha": untrusted.Line(p.Head.SHA), "page": q.page, "per_page": q.perPage,
 		"total": p.ChangedFiles, "count": len(list), "has_more": q.page*q.perPage < total, "files": list,
 	}
 }
@@ -430,14 +432,14 @@ func checksResult(p *gh.Pull, runs []gh.CheckRun) map[string]any {
 		default:
 			other++
 		}
-		m := map[string]any{"id": r.ID, "name": clip(r.Name, 100), "status": r.Status, "conclusion": r.Conclusion, "app_id": r.AppID, "url": clip(r.HTMLURL, 300)}
+		m := map[string]any{"id": r.ID, "name": clip(untrusted.Line(r.Name), 100), "status": untrusted.Line(r.Status), "conclusion": untrusted.Line(r.Conclusion), "app_id": r.AppID, "url": clip(untrusted.Line(r.HTMLURL), 300)}
 		if !r.StartedAt.IsZero() {
 			m["started_at"] = r.StartedAt.UTC().Format(time.RFC3339)
 		}
 		list = append(list, m)
 	}
 	return map[string]any{
-		"number": p.Number, "head_sha": p.Head.SHA,
+		"number": p.Number, "head_sha": untrusted.Line(p.Head.SHA),
 		"summary": map[string]any{"total": len(sorted), "passed": passed, "failed": failed, "pending": pending, "other": other},
 		"runs":    list,
 	}

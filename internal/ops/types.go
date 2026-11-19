@@ -146,8 +146,26 @@ type Outcome struct {
 }
 
 // Adapter is one op kind's implementation. Check has no side effects and may
-// be called many times (submit, dry run, approval request, release). Execute is
-// idempotent per Request.ExecutionID: a retry after a crash reuses the id.
+// be called many times (submit, dry run, approval request, release).
+//
+// Execute is called at most once for each execution id, and chapd never retries
+// a write by itself. The op moves from allowed to executing in one transaction
+// before Execute is called, and only one caller wins that move. An op that was
+// executing when the process died is marked unconfirmed at the next start
+// (Service.Recover) and its adapter is not run again; no shipped code calls
+// Service.Reconcile. A caller who asks again for the same action while the op
+// is live (pending, allowed, executing or unconfirmed) is given the same op.
+//
+// Most adapters are repeat-safe anyway: a second Execute with the same
+// Request.ExecutionID changes the service once (Linear derives its comment id
+// from it, a move to the state the item is in sends nothing, pr.merge is bound
+// to one head sha, issue.reopen checks the state first). Three are not:
+// issue.open, issue.comment and ci.report send their write again, because
+// GitHub has no idempotency key for an issue or a comment, and a check run
+// would need an external_id lookup that is not built. Their connector tests
+// declare it (NotRepeatable). They are safe only because chapd does not repeat
+// an Execute: a new path that does (a Reconcile that runs the adapter again)
+// must make them repeat-safe first.
 type Adapter interface {
 	Check(ctx context.Context, req *Request) (CheckResult, error)
 	Execute(ctx context.Context, req *Request) (Outcome, error)

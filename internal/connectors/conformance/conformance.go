@@ -21,10 +21,12 @@
 //  5. [CheckParamsAndLimits]: an undeclared param, a missing required param, a
 //     value of the wrong kind and a value past a declared limit are refused by
 //     the adapter itself, in Check and in Execute.
-//  6. [CheckServiceText]: text that came from the service is marked
-//     `untrusted_text`, cleaned of control and format characters, capped, and
-//     withheld when it looks like a secret, as rule 5 of docs/connectors.md
-//     says; an operation that returns no service text echoes none.
+//  6. [CheckServiceText]: text that came from the service is cleaned of control
+//     and format characters and capped, in the result, in the check lines and
+//     in refusals. An operation of the [ServiceText] kind also marks the
+//     result `untrusted_text` and withholds an item that looks like a secret;
+//     an operation that returns no service text echoes none. Rule 5 of
+//     docs/connectors.md says which is which.
 //  7. [CheckClassMatchesPin]: the operation's declared class and reversibility
 //     are the ones written in the independent pin table.
 //
@@ -140,8 +142,16 @@ const (
 	// the service wrote (a comment write, a move).
 	NoServiceText Text = iota + 1
 	// ServiceText: the result carries text the service wrote (titles, bodies,
-	// comments, names). Rule 5 applies in full.
+	// comments, names). Rule 5 applies in full: the text is cleaned and capped,
+	// the result is marked `untrusted_text`, and an item whose text looks like
+	// a secret is withheld by the adapter.
 	ServiceText
+	// CleanedText: the result, a check or a refusal carries text the service
+	// wrote, cleaned and capped, and nothing more: the suite does not ask for
+	// the `untrusted_text` mark or for withholding. It is for text that is
+	// part of the answer (a path in a risk check, a state name), where the
+	// front end marks the result and chapd redacts it as a whole.
+	CleanedText
 )
 
 // Op is the samples and declarations of one operation.
@@ -285,7 +295,7 @@ func (c Connector) validate() []string {
 			continue
 		case len(spec.Valid) == 0:
 			errs = append(errs, fmt.Sprintf("%s: no valid sample", o.Name))
-		case spec.Text != NoServiceText && spec.Text != ServiceText:
+		case spec.Text != NoServiceText && spec.Text != ServiceText && spec.Text != CleanedText:
 			errs = append(errs, fmt.Sprintf("%s: Text is not set: say whether the operation returns text from the service", o.Name))
 		case spec.Plant == nil:
 			errs = append(errs, fmt.Sprintf("%s: Plant is not set: say where service text lives in the fake", o.Name))

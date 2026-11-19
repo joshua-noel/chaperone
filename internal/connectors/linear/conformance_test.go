@@ -161,15 +161,6 @@ func asRun(q *ops.Request) {
 func otherProject(q *ops.Request) { q.Project = "another-project" }
 func notLinear(q *ops.Request)    { q.Target.Adapter = "github" }
 
-// tokenEcho is a finding the suite makes against the Linear adapters as
-// shipped. When Linear's token endpoint refuses the client credentials, the
-// two reads put the endpoint's own error text in result.error. intake.comment
-// and intake.move turn the same failure into a fixed sentence with the OAuth
-// error code only (credentialRefusal). Real Linear sends a fixed description,
-// so nothing leaks today; a service that echoed what it received would leak the
-// client secret, which chapd's redaction would then have to catch.
-const tokenEcho = "a failed token request puts the token endpoint's error text in result.error (Board.Get and TeamStates return the TokenError whole; the writes go through credentialRefusal and send the code only). With a service that echoes the credential it received, the client secret is in the result"
-
 func TestConformance(t *testing.T) {
 	secretBody := "token ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
 	conformance.Run(t, conformance.Connector{
@@ -192,7 +183,6 @@ func TestConformance(t *testing.T) {
 					refused("refresh is not a bool", ops.CodeParamsInvalid, OpList, BoardRef, map[string]any{"refresh": "yes"}, nil),
 				},
 				ReadOnly: true, Text: conformance.ServiceText, Plant: plantIssue,
-				Known: map[conformance.CheckID]string{conformance.CheckNoSecretInOutput: tokenEcho},
 			},
 			OpStates: {
 				Valid: []conformance.Sample{sample("the board", OpStates, BoardRef, nil)},
@@ -201,11 +191,7 @@ func TestConformance(t *testing.T) {
 					refused("another team", ops.CodeScopePath, OpStates, "OPS", nil, nil),
 					refused("not a team key", ops.CodeParamsInvalid, OpStates, "shop", nil, nil),
 				},
-				ReadOnly: true, Text: conformance.ServiceText, Plant: plantState,
-				Known: map[conformance.CheckID]string{
-					conformance.CheckServiceText:      "state names are Linear text. The list cleans and caps them, but the result has no untrusted_text flag and a name shaped like a secret is not withheld",
-					conformance.CheckNoSecretInOutput: tokenEcho,
-				},
+				ReadOnly: true, Text: conformance.CleanedText, Plant: plantState,
 			},
 			OpComment: {
 				Valid: []conformance.Sample{sample("comment", OpComment, "SHOP-1", map[string]any{"body": "Picked up by the orchestrator."})},
@@ -229,10 +215,7 @@ func TestConformance(t *testing.T) {
 					refused("an item of another team", ops.CodeScopePath, OpMove, "ENG-1", map[string]any{"state": "In Progress"}, nil),
 					refused("not an identifier", ops.CodeParamsInvalid, OpMove, "shop-1", map[string]any{"state": "In Progress"}, nil),
 				},
-				Text: conformance.ServiceText, Plant: plantState,
-				Known: map[conformance.CheckID]string{
-					conformance.CheckServiceText: "the result and the check line carry the previous state's name (Linear text), cleaned and capped, with no untrusted_text flag, and a name shaped like a secret is not withheld",
-				},
+				Text: conformance.CleanedText, Plant: plantState,
 			},
 		},
 	})

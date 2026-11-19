@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/untrusted"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -159,16 +160,17 @@ const (
 	PRTitlePrefix     = "Title: "
 )
 
-// titleLine is the PR title as the evidence holds it: the whole title, control characters made visible. It is never
+// titleLine is the PR title as the evidence holds it: the whole title, control characters made visible ("?")
+// and format characters (bidi, zero width) replaced by a space. It is never
 // clipped (checkTitle already limits a title that can be merged to 72 characters), so the evidence is exactly the
 // text that merge compares with the PR's title.
 func titleLine(title string) string {
-	return strings.Map(func(r rune) rune {
+	return untrusted.Line(strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
 			return '?'
 		}
 		return r
-	}, title)
+	}, title))
 }
 
 // approvedTitle is the title the operator saw: the first line of the "pull request" evidence of the approval, without
@@ -236,7 +238,7 @@ func (v *PRVerdict) add(name string, passed bool, detail string) {
 	if passed {
 		detail = ""
 	}
-	v.Checks = append(v.Checks, PRCheck{Name: name, Passed: passed, Detail: clip(detail, 300)})
+	v.Checks = append(v.Checks, PRCheck{Name: name, Passed: passed, Detail: checkDetail(detail)})
 }
 
 func (v *PRVerdict) failed() bool {
@@ -447,7 +449,7 @@ func (m *PRMerger) merged(res *PRMergeResult, req PRMergeRequest, back *gh.Pull,
 	if res.ExternalRef == "" {
 		res.ExternalRef = fmt.Sprintf("https://github.com/%s/pull/%d", req.Repo, req.Number)
 	}
-	res.ExternalRef = clip(res.ExternalRef, 300)
+	res.ExternalRef = clip(untrusted.Line(res.ExternalRef), 300)
 	res.Verdict.add("merged", true, "")
 	return res
 }
@@ -482,7 +484,7 @@ func pullChecks(prefix string, pull *gh.Pull, req PRMergeRequest) []PRCheck {
 		if ok {
 			detail = ""
 		}
-		out = append(out, PRCheck{Name: prefix + name, Passed: ok, Detail: clip(detail, 300)})
+		out = append(out, PRCheck{Name: prefix + name, Passed: ok, Detail: checkDetail(detail)})
 	}
 	add("pr_open", pull.State == "open" && !pull.Merged, "pull request is "+oneWord(pull.State)+", merged="+fmt.Sprint(pull.Merged))
 	add("pr_not_draft", !pull.Draft, "pull request is a draft")
@@ -503,7 +505,8 @@ func short(sha string) string {
 	return oneWord(sha)
 }
 
-// oneWord makes attacker-influenced text safe to put in a one-line detail.
+// oneWord makes attacker-influenced text safe to put in a one-line detail: a
+// control character is shown as "?", a format character as a space.
 func oneWord(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
@@ -511,8 +514,13 @@ func oneWord(s string) string {
 		}
 		return r
 	}, s)
-	return clip(s, 80)
+	return clip(untrusted.Line(s), 80)
 }
+
+// checkDetail is the detail of a check: one line, with no control or format
+// character (a bidi override, a zero-width joiner) from the text it quotes,
+// and at most 300 bytes. The pull request author and GitHub wrote some of it.
+func checkDetail(s string) string { return clip(untrusted.Line(s), 300) }
 
 // titleEdited is why a merge is refused when the title is not the approved one. It never repeats a title (they are
 // the author's text).
@@ -641,7 +649,7 @@ func (m *PRMerger) evaluate(ctx context.Context, tok *gh.Token, req PRMergeReque
 		v.Why = clip("pr.merge needs an approval for this exact head: "+detail, 400)
 		return v, pull, nil
 	}
-	v.Checks = append(v.Checks, PRCheck{Name: "risk_tier", Passed: true, Detail: clip(detail, 300)})
+	v.Checks = append(v.Checks, PRCheck{Name: "risk_tier", Passed: true, Detail: checkDetail(detail)})
 	return v, pull, nil
 }
 
@@ -689,7 +697,7 @@ func judgeCheck(name string, appID int64, appName string, runs []gh.CheckRun, he
 		}
 	}
 	fail := func(stop, format string, a ...any) (PRCheck, string) {
-		return PRCheck{Name: name, Detail: clip(fmt.Sprintf(format, a...), 300)}, stop
+		return PRCheck{Name: name, Detail: checkDetail(fmt.Sprintf(format, a...))}, stop
 	}
 	if n == 0 {
 		return fail(StopCIStale, "no %s run from %s on head %s", name, appName, short(head))

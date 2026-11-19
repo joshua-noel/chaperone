@@ -519,3 +519,26 @@ func TestRunRefusesAnIncompleteInput(t *testing.T) {
 func TestRunOnTheHealthyToy(t *testing.T) {
 	conformance.Run(t, toyConnector(defects{}))
 }
+
+// CleanedText holds an operation to clean and cap, and nothing more: the
+// missing flag and the secret-shaped text that the strict kind refuses are
+// accepted, a control character kept and a missing cap are not.
+func TestCleanedTextAsksForCleanAndCapOnly(t *testing.T) {
+	cleaned := func(d defects) conformance.Connector {
+		c := toyConnector(d)
+		show := c.Ops["note.show"]
+		show.Text = conformance.CleanedText
+		c.Ops["note.show"] = show
+		return c
+	}
+	for name, d := range map[string]defects{"no flag": {noFlag: true}, "secret-shaped text kept": {noWithhold: true}} {
+		if ps := conformance.Evaluate(t, cleaned(d), "note.show", conformance.CheckServiceText); len(ps) != 0 {
+			t.Errorf("%s: CleanedText fails: %v", name, ps)
+		}
+	}
+	for name, d := range map[string]defects{"control characters kept": {noClean: true}, "no cap": {noCap: true}} {
+		if ps := conformance.Evaluate(t, cleaned(d), "note.show", conformance.CheckServiceText); len(ps) == 0 {
+			t.Errorf("%s: CleanedText did not fail", name)
+		}
+	}
+}
