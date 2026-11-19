@@ -262,4 +262,4 @@ A real GitHub App is not in this version of the quickstart. `chapd quickstart --
 - **Passkeys on macOS and Linux, security keys and phones.** Not tried by a person. The code accepts all three kinds in the playground (see [The passkey](#the-passkey)); someone with a real security key, a phone and a Linux desktop has to confirm it.
 - **Wording.** The Windows demo script still says "Windows Hello" and "Edge". The console pages and this page do not.
 - **Release binaries.** Until they exist you build from source.
-- **A real model call through `chap mcp`.** Not yet recorded.
+- **A real model call through `chap mcp`.** Seen once, with one MCP client that is not Claude Code: the model listed the tools, read a pull request with `pr_view`, and its `pr_merge` call was refused (`OP_PARAMS_INVALID`: it left out `params.base`). Not yet tried with Claude Code, and nobody has watched a model ask for an approval and then merge.
