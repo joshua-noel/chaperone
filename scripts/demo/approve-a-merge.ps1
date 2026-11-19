@@ -12,7 +12,7 @@
   (the script never opens a browser itself; paste the address into Edge):
     1. Create a passkey (Windows Hello asks once).
     2. Sign in (Windows Hello asks again).
-    3. Open Approvals, read the card, press "Approve with Windows Hello"
+    3. Open Approvals, read the card, press "Approve with your passkey"
        (Windows Hello asks a third time, for this card only).
 
   The script then checks, and prints, that GitHub saw exactly one merge, the
@@ -158,14 +158,14 @@ try {
   Write-Host "   $enrol" -ForegroundColor White
   Write-Host ''
   Write-Host '   1. Press "Create passkey" and approve with Windows Hello.'
-  Write-Host '   2. Sign in with Windows Hello.'
+  Write-Host '   2. Sign in with a passkey.'
   if ($AlsoDeny) {
     Write-Host ("   3. Open `"Approvals`". There are two cards. First DENY the one for PR #{0}: type a reason, press `"Deny`"." -f $pr2.number)
     Write-Host ("   4. Then read the card for PR #{0}: it names the pull request, the head commit and the file it changes." -f $pr.number)
-    Write-Host '      Press "Approve with Windows Hello" and approve.'
+    Write-Host '      Press "Approve with your passkey" and approve.'
   } else {
     Write-Host '   3. Open "Approvals". Read the card: it names the pull request, the head commit and the file it changes.'
-    Write-Host '      Press "Approve with Windows Hello" and approve.'
+    Write-Host '      Press "Approve with your passkey" and approve.'
   }
   Write-Host ''
   if ($AlsoDeny) {

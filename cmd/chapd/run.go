@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 
+	"github.com/joshua-noel/chaperone/internal/console"
 	"github.com/joshua-noel/chaperone/internal/logrot"
 )
 
@@ -60,6 +61,11 @@ func parseRunFlags(name string, args []string, stderr io.Writer, demo bool) (Con
 	fs.StringVar(&cfg.NtfyTopicSecretID, "ntfy-topic-secret", "", "vault secret id of the ntfy topic: turns on the phone wake-up (needs -vault-dir)")
 	fs.StringVar(&cfg.NtfyURL, "ntfy-url", "", "ntfy server base URL (default https://ntfy.sh)")
 	fs.StringVar(&cfg.PhoneHost, "phone-host", "", "the server's full tailnet name, e.g. server.tail1234.ts.net: turns on the phone passkey with number matching (Tailscale Serve in front of the console; docs/runbooks/phone.md)")
+	fs.Func("approver-authenticators", "which authenticators may be enrolled and approve: platform (the default: built into the device, such as Windows Hello or Touch ID) or any (also a hardware security key, and a phone through the browser's cross-device prompt). User verification is required either way. docs/running-chapd.md", func(v string) error {
+		var err error
+		cfg.Authenticators, err = console.ParseAuthenticators(v)
+		return err
+	})
 	fs.Func("console-frame-ancestor", "an origin (scheme://host[:port], e.g. http://localhost:55440) that may show the console's approvals, ledger and runs pages in a frame and ask for a passkey there; repeatable; off by default (docs/runbooks/dashboard-frame.md)", func(v string) error {
 		cfg.FrameAncestors = append(cfg.FrameAncestors, v)
 		return nil

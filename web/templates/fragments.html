@@ -136,7 +136,7 @@
     <footer class="approval-actions">
       <label for="reason-{{.ID}}">Reason, if you deny</label>
       <input id="reason-{{.ID}}" class="input" type="text" maxlength="500" autocomplete="off" placeholder="Needed only to deny">
-      {{if .Split}}<button class="btn approval-approve" type="button" data-action="approve"{{if .Restricted}} disabled{{end}}>Approve with Windows Hello</button>{{else}}<p class="approval-old">This request was made by an older version of Chaperone, so it cannot be approved here. Deny it, or let it run out; the orchestrator has to ask again.</p>{{end}}
+      {{if .Split}}<button class="btn approval-approve" type="button" data-action="approve"{{if .Restricted}} disabled{{end}}>Approve with your passkey</button>{{else}}<p class="approval-old">This request was made by an older version of Chaperone, so it cannot be approved here. Deny it, or let it run out; the orchestrator has to ask again.</p>{{end}}
       <button class="btn approval-deny" data-variant="destructive" type="button" data-action="deny"{{if .Restricted}} disabled{{end}}>Deny</button>
     </footer>
     <p class="approval-status" role="status" aria-live="polite"></p>

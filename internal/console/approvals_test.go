@@ -260,7 +260,7 @@ func TestApproveWithHelloEndToEnd(t *testing.T) {
 	if got := spec.SHA256Tagged([]byte(rendered)); got != m[2] || got != card.DisplaySHA256 {
 		t.Fatalf("hash of the rendered text %s, data attribute %s, display_sha256 %s", got, m[2], card.DisplaySHA256)
 	}
-	if !strings.Contains(page, "Approve with Windows Hello") || strings.Contains(page, "CRITICAL") {
+	if !strings.Contains(page, "Approve with your passkey") || strings.Contains(page, "CRITICAL") {
 		t.Fatalf("page: %s", page)
 	}
 	// The agent's reason is shown as text, never as markup.

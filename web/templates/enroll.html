@@ -3,7 +3,7 @@
   {{template "doorway"}}
   <header>
     <h1 class="card-title">Enrol a passkey</h1>
-    <p>{{if .Phone}}Creates a passkey on this phone for this console. It needs the one-time address the server console showed, including the part after #.{{else}}Creates a Windows Hello credential for this console. It needs the one-time address printed in the terminal where the console was set up (<code>chapd enroll</code>).{{end}}</p>
+    <p>{{if .Phone}}Creates a passkey on this phone for this console. It needs the one-time address the server console showed, including the part after #.{{else}}Creates a passkey for this console. {{if .Roaming}}Use the one built into this computer, a hardware security key, or a phone: choose it in the browser's prompt. The key or phone must ask for a PIN, fingerprint or face.{{else}}It uses the one built into this computer.{{end}} It needs the one-time address printed in the terminal where the console was set up (<code>chapd enroll</code>).{{end}}</p>
   </header>
   <section>
     <form id="enroll-form" class="form" autocomplete="off">
@@ -13,7 +13,7 @@
       </div>
       <div class="grid gap-2">
         <label for="label">Name for this passkey</label>
-        <input class="input" id="label" name="label" type="text" maxlength="64" value="{{if .Phone}}Phone passkey{{else}}Windows Hello on the server{{end}}">
+        <input class="input" id="label" name="label" type="text" maxlength="64" value="{{if .Phone}}Phone passkey{{else}}Passkey on the server{{end}}">
       </div>
       <button class="btn" id="enroll" type="submit">Create passkey</button>
     </form>

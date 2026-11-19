@@ -1,6 +1,7 @@
 package console
 
 import (
+	"cmp"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -21,6 +22,11 @@ type authenticator struct {
 	rpID       string
 	signCount  uint32
 	userHandle []byte
+	// attachment is what the browser reports ("platform" when empty); transports go in the registration response; be and bs are
+	// the backup-eligible and backup-state flags (a synced passkey has both).
+	attachment string
+	transports []string
+	be, bs     bool
 }
 
 func newAuthenticator(t *testing.T, rpID string) *authenticator {
@@ -93,6 +99,12 @@ func (a *authenticator) coseKey() []byte {
 func (a *authenticator) authData(attested bool, o opts) []byte {
 	h := sha256.Sum256([]byte(a.rpID))
 	flags := byte(0x01) // UP
+	if a.be {
+		flags |= 0x08
+	}
+	if a.bs {
+		flags |= 0x10
+	}
 	if o.noUP {
 		flags = 0
 	}
@@ -164,10 +176,11 @@ func (a *authenticator) create(options json.RawMessage, pageOrigin string, o opt
 	)
 	out, _ := json.Marshal(map[string]any{
 		"id": b64.EncodeToString(a.credID), "rawId": b64.EncodeToString(a.credID), "type": "public-key",
-		"authenticatorAttachment": "platform", "clientExtensionResults": map[string]any{},
+		"authenticatorAttachment": cmp.Or(a.attachment, "platform"), "clientExtensionResults": map[string]any{},
 		"response": map[string]any{
 			"attestationObject": b64.EncodeToString(att),
 			"clientDataJSON":    b64.EncodeToString(cd),
+			"transports":        a.transports,
 		},
 	})
 	return out
@@ -207,7 +220,7 @@ func (a *authenticator) get(options json.RawMessage, pageOrigin string, o opts) 
 	}
 	out, _ := json.Marshal(map[string]any{
 		"id": b64.EncodeToString(a.credID), "rawId": b64.EncodeToString(a.credID), "type": "public-key",
-		"authenticatorAttachment": "platform", "clientExtensionResults": map[string]any{},
+		"authenticatorAttachment": cmp.Or(a.attachment, "platform"), "clientExtensionResults": map[string]any{},
 		"response": map[string]any{
 			"authenticatorData": b64.EncodeToString(ad),
 			"clientDataJSON":    b64.EncodeToString(cd),

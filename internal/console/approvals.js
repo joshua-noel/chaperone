@@ -2,7 +2,7 @@
 //
 // Approve: hash the card text this page rendered and compare it with the
 // display_sha256 the server computed; only then ask the server for a challenge
-// (which covers that same display_sha256), and only then ask Windows Hello.
+// (which covers that same display_sha256), and only then ask for the passkey.
 // A page that shows one text while the server signed another fails the first check.
 (function () {
   'use strict';
@@ -56,7 +56,7 @@
   }
 
   // After "Approved.": an approval only lets the op start. At release the op is checked again and can still be
-  // refused (the CI head moved, the policy changed). Follow it and say how it ended, so a spent Hello is never silent.
+  // refused (the CI head moved, the policy changed). Follow it and say how it ended, so a spent passkey approval is never silent.
   async function follow(card, id) {
     say(card, 'Approved. Waiting for it to run...');
     let o = { kind: 'waiting', text: '' };

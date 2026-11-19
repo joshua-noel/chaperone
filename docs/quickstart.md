@@ -133,9 +133,11 @@ The address works once and for 15 minutes. If it has expired, or you lost it, st
 
 ### The passkey
 
-Chaperone asks for a passkey that checks it is you (a PIN, a fingerprint or a face). **This version is built for a passkey that lives on this computer: the built-in authenticator.** Windows Hello is that on Windows. Touch ID or your password is that on a Mac. The console rejects a passkey when the browser says it is not a built-in one (a security key or a phone passkey usually says so). Some browsers say nothing, and then it is accepted. Which security keys and phones work has not been tested. On Linux, whether your browser offers a built-in passkey depends on your setup.
+Chaperone asks for a passkey that checks it is you (a PIN, a fingerprint or a face). The playground accepts any of three kinds: the one built into this computer (Windows Hello on Windows, Touch ID or your password on a Mac), a hardware security key that asks for its PIN or fingerprint, and a phone used through the browser's "use a phone" prompt. A Linux desktop usually has no built-in authenticator, so there you use a security key or a phone. The console refuses any of them that does not verify you. A hardware key must be a FIDO2 key that can hold a passkey (a discoverable credential) and that has a PIN set; the browser offers to set one.
 
-None of these was tried by a person on a Mac or a Linux computer. Passkeys on all three systems are an open item (see [Open items](#open-items)). The console page may still say "Windows Hello" on other systems. It means the passkey your system offers.
+This is the playground only. The real service, `chapd run`, accepts only the built-in kind until its operator turns on `-approver-authenticators any` (see [running-chapd.md](running-chapd.md) and ADR-004, amendment 15).
+
+None of these was tried by a person on a Mac or a Linux computer, with a security key, or with a phone. These are open items (see [Open items](#open-items)).
 
 ### Ask for the merge
 
@@ -238,14 +240,14 @@ A real GitHub App is not in this version of the quickstart. `chapd quickstart --
 | `port 55398 is the real Chaperone service's` | Use another port. |
 | `this folder was set up for 127.0.0.1:55421 ...` | The passkey is tied to that address. Use that `--addr`, or a new `--dir`. |
 | The passkey address answers "not found" or is refused | It expired, was used, or a newer start replaced it. Stop and start again. |
-| The browser refuses the passkey | The console rejects a passkey that the browser reports as not built in. See [The passkey](#the-passkey). |
+| The browser refuses the passkey | Check that it asks for a PIN, a fingerprint or a face. The console refuses an authenticator that does not verify you. See [The passkey](#the-passkey). |
 | `chap: no token` or `chapd is not reachable` | The three setup lines were not run in this terminal. Run them again. |
 | `chap: unknown command` or `chap` is not found | Run the `PATH` line from the output, or use the full path of `chap`. |
 | `chap` says the token is invalid after a long break | The token lasts 7 days. Start `chapd quickstart` again: a token with less than a day left is replaced. |
 
 ## Open items
 
-- **Passkeys on macOS and Linux, and security keys and phones.** Not tried. The console is built for a built-in passkey.
-- **Wording.** The console pages still say "Windows Hello" and the Windows demo script says "Edge". This page does not.
+- **Passkeys on macOS and Linux, security keys and phones.** Not tried by a person. The code accepts all three kinds in the playground (see [The passkey](#the-passkey)); someone with a real security key, a phone and a Linux desktop has to confirm it.
+- **Wording.** The Windows demo script still says "Windows Hello" and "Edge". The console pages and this page do not.
 - **Release binaries.** Until they exist you build from source.
 - **A real model call through `chap mcp`.** Not yet recorded.

@@ -26,7 +26,7 @@ import (
 // Import and rotation are the critical-class op secrets.write. The operator is
 // the requester (orchestrator id "operator"), and the approval is the same
 // one every critical op gets: a card bound to the op hash, decided with a
-// fresh Windows Hello assertion (ADR-004), never by this session alone. The
+// fresh passkey assertion (ADR-004), never by this session alone. The
 // steps:
 //
 //  1. POST /secrets/request: the form carries the value. The value is held in
@@ -382,7 +382,7 @@ func (s *screens) secretRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.c.log.Warn("secret write requested", "op", "secrets.write", "action", action, "secret", id, "approval", res.Approval.ID)
 	w.Header().Set("HX-Refresh", "true")
-	s.say(w, http.StatusAccepted, "Approval requested", "Read the card below and approve it with Windows Hello. The value is held in memory until then.")
+	s.say(w, http.StatusAccepted, "Approval requested", "Read the card below and approve it with your passkey. The value is held in memory until then.")
 }
 
 func secretRequestEvent(req spec.Request, project, action string) approvals.LedgerEvent {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/joshua-noel/chaperone/internal/gh"
 	"github.com/joshua-noel/chaperone/internal/gitproxy"
 	"github.com/joshua-noel/chaperone/internal/ledger"
+	"github.com/joshua-noel/chaperone/internal/loopback"
 	"github.com/joshua-noel/chaperone/internal/notify"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
@@ -78,6 +80,11 @@ type Config struct {
 	// FrameAncestors are the origins that may show the console's framable pages in a frame and ask for a passkey there
 	// (-console-frame-ancestor, repeatable; internal/console Config.FrameAncestors). Empty: nothing is framed.
 	FrameAncestors []string
+
+	// Authenticators is which kinds of authenticator may be enrolled and used to approve (-approver-authenticators):
+	// "platform", the default, only one built into the device; "any" also a hardware security key and a phone through
+	// the browser's cross-device prompt. An existing install keeps "platform" until its operator opts in (ADR-004 amendment 15).
+	Authenticators console.Authenticators
 
 	Addr  string   // loopback only
 	Hosts []string // Host header allowlist; empty means 127.0.0.1:55398 and localhost:55398
@@ -234,7 +241,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		origins = append(origins, po)
 	}
 	con, err := console.New(console.Config{
-		DB: db, Origins: origins, Log: a.log, Now: cfg.now, FrameAncestors: cfg.FrameAncestors,
+		DB: db, Origins: origins, Log: a.log, Now: cfg.now, FrameAncestors: cfg.FrameAncestors, Authenticators: cfg.Authenticators,
 		OnEvent: func(e console.Event) {
 			select {
 			case a.auditCh <- e:
@@ -247,6 +254,9 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		return nil, err
 	}
 	a.Console = con
+	if cfg.Authenticators == console.AuthenticatorsAny {
+		a.log.Warn("approver authenticators: any. A hardware security key or a phone passkey may be enrolled and may approve, as well as one built into the device (ADR-004 amendment 15)")
+	}
 
 	ntf, err := a.buildNotifier(ctx)
 	if err != nil {
@@ -521,8 +531,11 @@ func (a *App) Start(ctx context.Context) error {
 	return nil
 }
 
-// Serve listens on cfg.Addr (loopback only) and serves until ctx ends.
-func (a *App) Serve(ctx context.Context) error {
+// Serve listens on cfg.Addr (loopback only) and serves until ctx ends. It holds
+// 127.0.0.1:PORT and [::1]:PORT (see listen.go) and serves one handler on both.
+func (a *App) Serve(ctx context.Context) error { return a.serveWith(ctx, net.Listen) }
+
+func (a *App) serveWith(ctx context.Context, listen loopback.ListenFunc) error {
 	addr := a.cfg.Addr
 	if addr == "" {
 		addr = ops.ListenAddr
@@ -530,30 +543,15 @@ func (a *App) Serve(ctx context.Context) error {
 	if err := requireLoopback(addr); err != nil {
 		return err
 	}
-	ln, err := net.Listen("tcp", addr)
+	lns, err := loopback.Bind(addr, listen, "\nIs another chapd running? Stop it first, or use -addr with another port")
 	if err != nil {
 		return err
 	}
-	return a.serve(ctx, ln)
-}
-
-func (a *App) serve(ctx context.Context, ln net.Listener) error {
-	srv := &http.Server{
-		Handler: a.handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute,
-		WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 32 << 10,
+	defer loopback.CloseAll(lns)
+	if len(lns) == 1 {
+		a.log.Warn("no IPv6 loopback on this machine: listening on IPv4 only", "addr", lns[0].Addr().String())
 	}
-	done := make(chan error, 1)
-	go func() { done <- srv.Serve(ln) }()
-	a.log.Info("chapd listening", "addr", ln.Addr().String(), "version", version.Version)
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(sctx)
-		return nil
-	}
+	return serveListeners(ctx, a, lns)
 }
 
 // localEndpoints is the console's origin and the Host allowlist for the listen
@@ -638,24 +636,25 @@ func (g *refusalGate) allow(now time.Time) (suppressed int, ok bool) {
 func (a *App) audit(ctx context.Context, e console.Event, gate *refusalGate) {
 	switch e.Name {
 	case console.EventEnrolled:
-		a.log.Warn("approver credential enrolled", "approver", e.ApproverID, "rp_id", e.RPID, "origin", e.Origin, "uv", e.UserVerified, "bootstrap", e.Bootstrap)
+		a.log.Warn("approver credential enrolled", "approver", e.ApproverID, "rp_id", e.RPID, "origin", e.Origin, "uv", e.UserVerified, "bootstrap", e.Bootstrap,
+			"attachment", e.Attachment, "transports", e.Transports, "backup_eligible", e.BackupEligible)
 		// Only the first approver is recorded here: no approver existed to approve it
 		// (spec v0.1.1, "Operator-recorded ops"). A later device is the approvers.enroll op.
 		if !e.Bootstrap {
 			return
 		}
-		if err := a.ledgerOperatorOp(ctx, "approvers.enroll", fmt.Sprintf("operator enrolled the first approver %d at %s", e.ApproverID, e.Origin)); err != nil {
+		if err := a.ledgerOperatorOp(ctx, "approvers.enroll", fmt.Sprintf("operator enrolled the first approver %d at %s; %s", e.ApproverID, e.Origin, authenticatorText(e))); err != nil {
 			a.log.Error("could not ledger the enrolment", "err", err)
 		}
 	case console.EventLogin:
-		a.log.Info("console sign-in", "approver", e.ApproverID, "rp_id", e.RPID, "uv", e.UserVerified)
+		a.log.Info("console sign-in", "approver", e.ApproverID, "rp_id", e.RPID, "uv", e.UserVerified, "attachment", e.Attachment, "transports", e.Transports, "backup_eligible", e.BackupEligible)
 		if e.ApproverSpecID == "" || !e.UserVerified {
 			return // a sign-in the spec cannot describe is not ledgered as one
 		}
-		a.ledgerConsole(ctx, "console.login", "INFO", map[string]any{
+		a.ledgerConsole(ctx, "console.login", "INFO", authenticatorText(e), map[string]any{
 			"factory.approver.id": e.ApproverSpecID, "factory.console.rp_id": e.RPID, "factory.console.user_verified": true})
 	default:
-		a.log.Warn("console refused a ceremony", "ceremony", e.Ceremony, "reason", e.Reason, "origin", e.Origin, "detail", e.Detail)
+		a.log.Warn("console refused a ceremony", "ceremony", e.Ceremony, "reason", e.Reason, "origin", e.Origin, "attachment", e.Attachment, "detail", e.Detail)
 		suppressed, ok := gate.allow(a.clock())
 		if !ok {
 			return
@@ -667,14 +666,21 @@ func (a *App) audit(ctx context.Context, e console.Event, gate *refusalGate) {
 		if suppressed > 0 {
 			attrs["factory.console.suppressed"] = float64(suppressed)
 		}
-		a.ledgerConsole(ctx, "console.refused", "WARN", attrs)
+		a.ledgerConsole(ctx, "console.refused", "WARN", "", attrs)
 	}
 }
 
+// authenticatorText says what kind of authenticator an event came from, for a ledger body (ADR-004 amendment 15):
+// the browser-reported attachment, its transports, and whether the passkey may be synced to an account.
+func authenticatorText(e console.Event) string {
+	return fmt.Sprintf("authenticator=%s; transports=%s; backup_eligible=%t",
+		cmp.Or(e.Attachment, "unreported"), cmp.Or(strings.Join(e.Transports, ","), "none"), e.BackupEligible)
+}
+
 // ledgerConsole appends one console event: about the console, so no run and no project.
-func (a *App) ledgerConsole(ctx context.Context, name, severity string, attrs map[string]any) {
+func (a *App) ledgerConsole(ctx context.Context, name, severity, body string, attrs map[string]any) {
 	err := a.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
-		return ledgerSink{l: a.Ledger}.AppendTx(ctx, tx, ops.Event{Name: name, Severity: severity, Attributes: attrs})
+		return ledgerSink{l: a.Ledger}.AppendTx(ctx, tx, ops.Event{Name: name, Severity: severity, Body: body, Attributes: attrs})
 	})
 	if err != nil {
 		a.log.Error("could not ledger the console event", "event", name, "err", err)

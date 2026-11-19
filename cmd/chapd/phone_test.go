@@ -48,7 +48,7 @@ func TestPhoneHostTurnsOnThePhoneOrigin(t *testing.T) {
 	if code, _, _ := getAt(t, e.srv.URL, "localhost:55398", "/phone"); code != http.StatusNotFound {
 		t.Fatalf("GET /phone at the PC: %d, want 404", code)
 	}
-	if code, _, body := getAt(t, e.srv.URL, "localhost:55398", "/login"); code != 200 || !strings.Contains(body, "Sign in with Windows Hello") {
+	if code, _, body := getAt(t, e.srv.URL, "localhost:55398", "/login"); code != 200 || !strings.Contains(body, "Sign in with a passkey") {
 		t.Fatalf("GET /login at the PC: %d", code)
 	}
 	for _, host := range []string{"pc.tail1234.ts.net.evil.example", "other.tail1234.ts.net", "pc.tail1234.ts.net:8443"} {

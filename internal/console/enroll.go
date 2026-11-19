@@ -1,14 +1,17 @@
 package console
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/joshua-noel/chaperone/internal/loopback"
 	"github.com/joshua-noel/chaperone/internal/store"
 )
 
@@ -22,6 +25,8 @@ type EnrollOptions struct {
 	Origin Origin        // default [LocalOrigin]; its host:port must be what Addr serves
 	TTL    time.Duration // how long each step may take; default 10 minutes
 	Name   string        // approver name for the first enrolment; default "operator"
+	// Authenticators is which kinds of authenticator may be enrolled; default [AuthenticatorsPlatform].
+	Authenticators Authenticators
 	// CheckOnly skips enrolment and waits for one sign-in (an approver must
 	// already exist). Use it to repeat the assertion half of the H3 check.
 	CheckOnly bool
@@ -70,8 +75,9 @@ func RunEnroll(ctx context.Context, o EnrollOptions) error {
 
 	events := make(chan Event, 8)
 	con, err := New(Config{
-		DB:      db,
-		Origins: []Origin{o.Origin},
+		DB:             db,
+		Authenticators: o.Authenticators,
+		Origins:        []Origin{o.Origin},
 		OnEvent: func(e Event) {
 			select {
 			case events <- e:
@@ -101,11 +107,14 @@ func RunEnroll(ctx context.Context, o EnrollOptions) error {
 			return err
 		}
 	}
-
-	ln, err := net.Listen("tcp", o.Addr)
+	// Both loopback addresses: the browser is sent to localhost, which may mean ::1, and
+	// whoever listens there would read the one-time address (internal/loopback).
+	lns, err := loopback.Bind(o.Addr, net.Listen, " (is chapd already running? stop it first)")
 	if err != nil {
-		return fmt.Errorf("chapd enroll: cannot listen on %s (is chapd already running? stop it first): %w", o.Addr, err)
+		return fmt.Errorf("chapd enroll: %w", err)
 	}
+	defer loopback.CloseAll(lns)
+
 	srv := &http.Server{
 		Handler:           con.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -113,7 +122,9 @@ func RunEnroll(ctx context.Context, o EnrollOptions) error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	go func() { _ = srv.Serve(ln) }()
+	for _, ln := range lns {
+		go func() { _ = srv.Serve(ln) }()
+	}
 	defer func() {
 		shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
@@ -121,15 +132,18 @@ func RunEnroll(ctx context.Context, o EnrollOptions) error {
 	}()
 
 	if !o.CheckOnly {
-		fmt.Fprintf(o.Out, "Windows Hello enrolment (step H3)\n\n"+
-			"1. Open this address in Microsoft Edge on the server (it works once, for %s):\n\n   %s/enroll#%s\n\n"+
-			"2. Click \"Create passkey\" and approve with your Windows Hello PIN, fingerprint or face.\n\n",
+		fmt.Fprintf(o.Out, "Passkey enrolment (step H3)\n\n"+
+			"1. Open this address in a browser on the server (it works once, for %s):\n\n   %s/enroll#%s\n\n"+
+			"2. Click \"Create passkey\" and approve with your PIN, fingerprint or face.\n\n",
 			o.TTL, o.Origin.URL, token)
+		if o.Authenticators == AuthenticatorsAny {
+			fmt.Fprint(o.Out, "   A hardware security key or a phone is allowed too: choose it in the browser's prompt.\n\n")
+		}
 		if _, err := waitFor(ctx, events, EventEnrolled, o.TTL, o.Out); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintf(o.Out, "\nNow test the assertion. Open %s/login, click \"Sign in with Windows Hello\" and approve.\n\n", o.Origin.URL)
+	fmt.Fprintf(o.Out, "\nNow test the assertion. Open %s/login, click \"Sign in with a passkey\" and approve.\n\n", o.Origin.URL)
 	if _, err := waitFor(ctx, events, EventLogin, o.TTL, o.Out); err != nil {
 		return err
 	}
@@ -146,8 +160,8 @@ func waitFor(ctx context.Context, events <-chan Event, want string, ttl time.Dur
 		case e := <-events:
 			switch e.Name {
 			case want:
-				fmt.Fprintf(out, "OK %s credential_id=%s rp_id=%s origin=%s uv=%t sign_count=%d approver_id=%d\n",
-					e.Name, b64.EncodeToString(e.CredentialID), e.RPID, e.Origin, e.UserVerified, e.SignCount, e.ApproverID)
+				fmt.Fprintf(out, "OK %s credential_id=%s rp_id=%s origin=%s uv=%t sign_count=%d approver_id=%d attachment=%s transports=%s backup_eligible=%t\n",
+					e.Name, b64.EncodeToString(e.CredentialID), e.RPID, e.Origin, e.UserVerified, e.SignCount, e.ApproverID, cmp.Or(e.Attachment, "unreported"), cmp.Or(strings.Join(e.Transports, ","), "none"), e.BackupEligible)
 				return e, nil
 			case EventRefused:
 				fmt.Fprintf(out, "REFUSED reason=%s detail=%q\n", e.Reason, e.Detail)

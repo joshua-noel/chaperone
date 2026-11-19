@@ -4,7 +4,7 @@
 {{if .Restricted}}{{if .Legacy}}{{template "restricted-legacy-note"}}{{else}}{{template "restricted-note" "/approvals"}}{{end}}{{end}}
 <div class="approvals-head">
   <h1>Approvals</h1>
-  <p class="muted">Signed in as {{.Approver}}. Open a request, read it, then decide. Approving asks for Windows Hello for that one request.</p>
+  <p class="muted">Signed in as {{.Approver}}. Open a request, read it, then decide. Approving asks for your passkey for that one request.</p>
 </div>
 {{range .Cards}}
 {{template "approval-card" .}}
@@ -31,7 +31,7 @@
 <details class="card" id="phone-panel">
   <summary class="phone-summary">Phone: approve from your phone</summary>
   <section>
-    <p class="muted">Your phone can approve at <code>{{.PhoneURL}}</code> (through Tailscale). To add a phone, ask below, approve that request here with Windows Hello, then show the address.</p>
+    <p class="muted">Your phone can approve at <code>{{.PhoneURL}}</code> (through Tailscale). To add a phone, ask below, approve that request here with your passkey, then show the address.</p>
     <form id="phone-enroll-form" class="form" autocomplete="off">
       <label for="phone-label">Name for the phone passkey</label>
       <input class="input" id="phone-label" name="label" type="text" maxlength="64" value="Phone passkey">

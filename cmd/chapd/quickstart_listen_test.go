@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/joshua-noel/chaperone/internal/loopback"
 )
 
 // ipv6Loopback reports whether this machine can listen on [::1].
@@ -69,7 +71,7 @@ func TestBindQuickstartHoldsBothLoopbackAddresses(t *testing.T) {
 			t.Errorf("%s was free while the quickstart held it", a.addr)
 		}
 	}
-	closeAll(lns)
+	loopback.CloseAll(lns)
 }
 
 // Somebody already on [::1]:PORT: refuse to start, and give the IPv4 port back.
@@ -85,7 +87,7 @@ func TestBindQuickstartRefusesATakenIPv6Port(t *testing.T) {
 	defer squatter.Close()
 	lns, err := bindQuickstart("127.0.0.1:"+port, net.Listen)
 	if err == nil {
-		closeAll(lns)
+		loopback.CloseAll(lns)
 		t.Fatal("started with another program on [::1]")
 	}
 	if !strings.Contains(err.Error(), "[::1]:"+port) || !strings.Contains(err.Error(), "Another program") {
@@ -110,7 +112,7 @@ func TestBindQuickstartRefusesATakenIPv6Port(t *testing.T) {
 
 // With fake listeners, so it holds on any machine.
 func TestBindQuickstartIPv6Rules(t *testing.T) {
-	stub := func(failOn string) listenFunc {
+	stub := func(failOn string) loopback.ListenFunc {
 		return func(network, addr string) (net.Listener, error) {
 			if strings.HasPrefix(failOn, network+" ") && strings.HasSuffix(failOn, addr) || failOn == network {
 				return nil, errors.New("refused")
@@ -123,7 +125,7 @@ func TestBindQuickstartIPv6Rules(t *testing.T) {
 	if err != nil || len(lns) != 1 {
 		t.Fatalf("no IPv6: %d listeners, %v", len(lns), err)
 	}
-	closeAll(lns)
+	loopback.CloseAll(lns)
 	// IPv6 works (the probe succeeds) but the real port is taken: an error, and the IPv4 listener is closed.
 	lns, err = bindQuickstart("127.0.0.1:55999", stub("tcp6 [::1]:55999"))
 	if err == nil || !strings.Contains(err.Error(), "[::1]:55999") {

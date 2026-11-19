@@ -3,7 +3,7 @@
   {{template "doorway"}}
   <header>
     <h1 class="card-title">Sign in</h1>
-    <p class="tagline">The threshold between agents and the world. {{if .Phone}}Unlock the console with the passkey on this phone. Your screen lock (PIN, fingerprint or face) is required.{{else}}Unlock the console with Windows Hello on the server. A PIN, fingerprint or face check is required.{{end}}</p>
+    <p class="tagline">The threshold between agents and the world. {{if .Phone}}Unlock the console with the passkey on this phone. Your screen lock (PIN, fingerprint or face) is required.{{else}}Unlock the console with a passkey. A PIN, fingerprint or face check is required.{{if .Roaming}} The passkey may be one built into this computer, a hardware security key, or a phone.{{end}}{{end}}</p>
   </header>
   <section>
     {{if .NoApprover}}
@@ -12,7 +12,7 @@
       <section>Run <code>chapd enroll</code> on the server, from an elevated prompt, and open the address it prints.</section>
     </div>
     {{else}}
-    <button class="btn" id="signin" type="button" data-passkey="login">{{if .Phone}}Sign in with your passkey{{else}}Sign in with Windows Hello{{end}}</button>
+    <button class="btn" id="signin" type="button" data-passkey="login">{{if .Phone}}Sign in with your passkey{{else}}Sign in with a passkey{{end}}</button>
     {{end}}
     <p id="status" role="status" aria-live="polite"></p>
   </section>

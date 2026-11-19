@@ -29,8 +29,13 @@ func enrollCmd(args []string, stdout, stderr io.Writer) int {
 	name := fs.String("name", "operator", "approver name for the first enrolment")
 	timeout := fs.Duration("timeout", 10*time.Minute, "how long each step may take")
 	addr := fs.String("addr", "", "listen address, loopback (default 127.0.0.1:55398); another port moves the console origin with it, for a scratch chapd next to the real one")
+	var authn console.Authenticators
+	fs.Func("approver-authenticators", "which authenticators may be enrolled: platform (the default: built into the device) or any (also a hardware security key, or a phone); use the same value as chapd run", func(v string) (err error) {
+		authn, err = console.ParseAuthenticators(v)
+		return err
+	})
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: chapd enroll [-db PATH | -scratch] [-addr HOST:PORT] [-name NAME] [-timeout 10m] [-check]")
+		fmt.Fprintln(stderr, "usage: chapd enroll [-db PATH | -scratch] [-addr HOST:PORT] [-approver-authenticators platform|any] [-name NAME] [-timeout 10m] [-check]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -69,7 +74,7 @@ func enrollCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	origin, _ := localEndpoints(*addr, nil)
 	err := console.RunEnroll(ctx, console.EnrollOptions{
-		DBPath: path, Addr: *addr, Origin: origin, Name: *name, TTL: *timeout, CheckOnly: *check, Out: stdout,
+		DBPath: path, Addr: *addr, Origin: origin, Name: *name, TTL: *timeout, CheckOnly: *check, Authenticators: authn, Out: stdout,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "chapd: %v\n", err)

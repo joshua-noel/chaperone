@@ -1,6 +1,7 @@
 package approvals
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -388,6 +389,10 @@ func (e *Engine) Approve(ctx context.Context, in ApproveInput) (*Approval, error
 		}
 		body := fmt.Sprintf("approved by %s on %s; assertion_sha256=%s; display_sha256=%s; challenge_sha256=%s",
 			ch.Approver, ev.Channel, assertionHash, a.DisplaySHA256, hash)
+		if ev.Attachment != "" {
+			body += fmt.Sprintf("; authenticator=%s; transports=%s; backup_eligible=%t",
+				ev.Attachment, cmp.Or(strings.Join(ev.Transports, ","), "none"), ev.BackupEligible)
+		}
 		if ev.Channel == "phone" {
 			body += "; number_matching=ok"
 		}

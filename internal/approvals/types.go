@@ -237,6 +237,12 @@ type AssertionEvidence struct {
 	CredentialID []byte // the authenticator's credential id
 	RPID         string
 	Origin       string
+	// The kind of authenticator, for the ledger (ADR-004 amendment 15). Attachment is "platform", "cross-platform" or
+	// "unreported", or empty when the verifier does not say (the ledger body then names no authenticator). Transports
+	// is the browser's list. BackupEligible is the BE flag: true is a passkey that may be synced to an account.
+	Attachment     string
+	Transports     []string
+	BackupEligible bool
 }
 
 // AssertionError is what a [Verifier] returns for a refused assertion. Reason

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/joshua-noel/chaperone/internal/console"
+	"github.com/joshua-noel/chaperone/internal/loopback"
 	"github.com/joshua-noel/chaperone/internal/runtoken"
 )
 
@@ -515,7 +516,7 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	if err != nil {
 		return err
 	}
-	defer closeAll(lns)
+	defer loopback.CloseAll(lns)
 
 	f, err := prepareQuickstartFolder(dir, state, o.Addr, time.Now())
 	if err != nil {
@@ -536,6 +537,9 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	app, err := Build(ctx, Config{
 		DBPath: f.DB, KeysPath: f.Keys, PolicyDir: f.PolicyDir, Instance: quickstartInstance,
 		Addr: f.Addr, Log: logger, github: fake.Client,
+		// A throwaway playground over a fake GitHub, on any system, is for trying the flow: a Linux desktop usually has no built-in
+		// authenticator, so the playground also takes a security key or a phone. `chapd run` stays strict until its operator opts in.
+		Authenticators: console.AuthenticatorsAny,
 	})
 	if err != nil {
 		return err
@@ -558,5 +562,5 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	}
 	info.Chap, info.ChapOnPath = findChap(runtime.GOOS)
 	fmt.Fprint(stdout, renderQuickstart(info))
-	return serveQuickstart(ctx, app, lns)
+	return serveListeners(ctx, app, lns)
 }

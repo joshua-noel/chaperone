@@ -14,7 +14,7 @@ cd chaperone
 .\scripts\demo\approve-a-merge.ps1
 ```
 
-The script prints one address. Open it in Edge, create a passkey, sign in, open Approvals, read the card and press **Approve with Windows Hello**. The script then checks that the fake GitHub saw exactly one merge and that the approval cannot be used again. Add `-AlsoDeny` to deny a second card first.
+The script prints one address. Open it in Edge, create a passkey, sign in, open Approvals, read the card and press **Approve with your passkey**. The script then checks that the fake GitHub saw exactly one merge and that the approval cannot be used again. Add `-AlsoDeny` to deny a second card first.
 
 ## The problem
 
