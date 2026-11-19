@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -155,13 +156,19 @@ func renderQuickstart(i quickstartInfo) string {
 	}
 	w("")
 	w("2. Connect Claude Code (optional)")
-	w("   Run this in another terminal. It adds the PLAYGROUND tools. Undo it with: claude mcp remove chaperone-playground --scope user")
+	w("   Run this in another terminal. It adds the PLAYGROUND tools:")
 	w("")
 	w("   %s", i.mcpLine())
 	if i.Chap == "chap" && !i.ChapOnPath {
 		w("")
 		w("   chap was not found next to chapd or on your PATH: put the full path of chap in place of \"chap\" above.")
 	}
+	w("")
+	w("   When you stop using the quickstart, remove it:")
+	w("")
+	w("   %s", i.mcpRemoveLine())
+	w("")
+	w("   Why: the entry stays in Claude Code's user settings and keeps pointing at port %s and the token file. Once the quickstart is stopped, another program could listen on that port and receive the token on the next tool call.", i.port())
 	w("")
 	w("3. Three commands to try (PLAYGROUND repository %s)", i.Repo)
 	w("   Open another terminal. Tell chap where this chapd is:")
@@ -207,4 +214,14 @@ func dirOf(goos, p string) string {
 		return p[:i]
 	}
 	return "."
+}
+
+// mcpRemoveLine undoes mcpLine.
+func (i quickstartInfo) mcpRemoveLine() string {
+	return "claude mcp remove chaperone-playground --scope user"
+}
+
+func (i quickstartInfo) port() string {
+	_, p, _ := net.SplitHostPort(i.Addr)
+	return p
 }

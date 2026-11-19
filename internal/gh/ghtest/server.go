@@ -89,6 +89,8 @@ type Server struct {
 	installs map[int64]*Installation
 	tokens   map[string]*tokenRec
 	log      []Request
+	logMax   int // 0: keep every request
+	bodyMax  int // 0: keep whole bodies
 	faults   []*fault
 	before   []*hook
 	mintAll  bool
@@ -423,4 +425,26 @@ func (s *Server) nextID() int64 {
 func hexSHA(n int64, salt string) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s/%d", salt, n)))
 	return fmt.Sprintf("%x", sum[:20])
+}
+
+// CapLog bounds the request log: at most maxEntries requests are kept (the
+// oldest are dropped) and each body is cut to maxBody bytes. Without it the log
+// keeps every request whole, which suits a test and not a long-running fake (the
+// quickstart playground, whose loopback port any local process can call).
+// Count and Requests then see only what is kept.
+func (s *Server) CapLog(maxEntries, maxBody int) {
+	s.mu.Lock()
+	s.logMax, s.bodyMax = maxEntries, maxBody
+	s.mu.Unlock()
+}
+
+// record appends to the log under s.mu, honouring CapLog.
+func (s *Server) record(r Request) {
+	if s.bodyMax > 0 && len(r.Body) > s.bodyMax {
+		r.Body = r.Body[:s.bodyMax]
+	}
+	s.log = append(s.log, r)
+	if s.logMax > 0 && len(s.log) > s.logMax {
+		s.log = append(s.log[:0], s.log[len(s.log)-s.logMax:]...)
+	}
 }

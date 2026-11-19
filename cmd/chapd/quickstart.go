@@ -11,7 +11,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"os/signal"
@@ -237,21 +236,81 @@ func within(p, dir string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
 }
 
+// realInstallDir is the real install's database folder where this system has a
+// known one (the Windows default of ADR-006), else "". A variable so tests can
+// point it at a scratch folder.
+var realInstallDir = func() string {
+	if filepath.IsAbs(defaultDB) {
+		return filepath.Dir(defaultDB)
+	}
+	return ""
+}
+
+// hasAncestorSameFile reports whether p, or a folder above it, is the very same
+// folder as target. It compares file identity (os.SameFile), not path text, so a
+// junction or link that leads into target is found: Go's EvalSymlinks does not
+// follow Windows junctions.
+func hasAncestorSameFile(p string, target os.FileInfo) bool {
+	for cur := p; ; {
+		if st, err := os.Stat(cur); err == nil && os.SameFile(st, target) {
+			return true
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return false
+		}
+		cur = parent
+	}
+}
+
+// overlapsRealInstall reports whether any of the paths is, holds or lies inside the
+// known real install folder, by path text after resolving links and by file identity.
+// It is a second line of defence: for every other place a real install may live the
+// rule that protects it is the marker rule of checkQuickstartDir.
+func overlapsRealInstall(paths ...string) bool {
+	real := realInstallDir()
+	if real == "" {
+		return false
+	}
+	realAbs, err := filepath.Abs(real)
+	if err != nil {
+		return false
+	}
+	realRes, _ := resolveExisting(realAbs)
+	realSt, realErr := os.Stat(realAbs)
+	for _, p := range paths {
+		for _, r := range []string{realAbs, realRes} {
+			if r != "" && (within(p, r) || within(r, p)) {
+				return true
+			}
+		}
+		if realErr == nil && hasAncestorSameFile(p, realSt) {
+			return true
+		}
+		if st, err := os.Stat(p); err == nil && hasAncestorSameFile(realAbs, st) {
+			return true
+		}
+	}
+	return false
+}
+
 // checkQuickstartDir decides whether dir may be used. It returns the folder's
 // marker when it is a quickstart folder, nil when it is new or empty. It
-// refuses the real install's database folder, a file, and any folder that
-// holds something but was not made by `chapd quickstart`: a real install has
-// a state.db and no marker.
+// refuses a file, any folder that holds something but was not made by
+// `chapd quickstart` (the marker rule: a real install has a state.db and no
+// marker, wherever it is, on any system), and, as a second check, the known real
+// install folder and anything above, below or linked into it.
 func checkQuickstartDir(dir string) (string, *quickstartState, error) {
-	dir, err := resolveExisting(dir)
+	given, err := filepath.Abs(dir)
 	if err != nil {
 		return "", nil, err
 	}
-	if filepath.IsAbs(defaultDB) { // the real install's place, where this is Windows
-		real, err := resolveExisting(filepath.Dir(defaultDB))
-		if err == nil && (within(dir, real) || within(real, dir)) {
-			return "", nil, fmt.Errorf("%s is, or holds, the real Chaperone install's folder. The quickstart never touches it", dir)
-		}
+	dir, err = resolveExisting(given)
+	if err != nil {
+		return "", nil, err
+	}
+	if overlapsRealInstall(given, dir) {
+		return "", nil, fmt.Errorf("%s is, or holds, the real Chaperone install's folder. The quickstart never touches it", dir)
 	}
 	st, err := os.Stat(dir)
 	switch {
@@ -329,8 +388,10 @@ func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(dir, 0o700); err != nil { // a no-op in effect on Windows, where the profile's ACL applies
-		return nil, err
+	// Private to this user whatever the parent allows: mode 0700, or on Windows a protected ACL with one inherited
+	// entry for this user, read back. A folder that cannot be made private is refused.
+	if err := restrictDirToCurrentUser(dir); err != nil {
+		return nil, fmt.Errorf("cannot make %s private to this user: %w", dir, err)
 	}
 	if state == nil {
 		b, _ := json.MarshalIndent(quickstartState{Kind: quickstartKind, Version: 1, Addr: f.Addr, Playground: true, Created: now.UTC().Format(time.RFC3339)}, "", "  ")
@@ -449,11 +510,12 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 		addr = net.JoinHostPort(quickstartHost, strconv.Itoa(quickstartPort))
 	}
 	// Listen first: a second quickstart on the same folder stops here, before it touches the database.
-	ln, err := net.Listen("tcp", addr)
+	// Both loopback addresses, because the browser is sent to "localhost" (see quickstart_listen.go).
+	lns, err := bindQuickstart(addr, net.Listen)
 	if err != nil {
-		return fmt.Errorf("cannot listen on %s: %w\nIs chapd quickstart already running in another terminal? Stop it first, or use --addr with another port", addr, err)
+		return err
 	}
-	defer ln.Close()
+	defer closeAll(lns)
 
 	f, err := prepareQuickstartFolder(dir, state, o.Addr, time.Now())
 	if err != nil {
@@ -465,14 +527,7 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	}
 	defer closeLog()
 
-	// A different run, a different commit: operations of an earlier run never match this one.
-	skip, err := rand.Int(rand.Reader, big.NewInt(1<<31))
-	if err != nil {
-		return err
-	}
-	fake, err := newFakeGitHub(fakeGitHubOptions{
-		Owner: playgroundOwner, Repo: playgroundRepo, Base: playgroundBase, PRs: playgroundPRs, SkipIDs: skip.Int64(),
-	})
+	fake, err := newPlaygroundFake()
 	if err != nil {
 		return err
 	}
@@ -503,5 +558,5 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	}
 	info.Chap, info.ChapOnPath = findChap(runtime.GOOS)
 	fmt.Fprint(stdout, renderQuickstart(info))
-	return app.serve(ctx, ln)
+	return serveQuickstart(ctx, app, lns)
 }

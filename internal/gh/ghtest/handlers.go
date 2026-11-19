@@ -54,7 +54,7 @@ func (s *Server) wrap(next http.HandlerFunc) http.HandlerFunc {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 
 		s.mu.Lock()
-		s.log = append(s.log, Request{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Body: string(body)})
+		s.record(Request{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Body: string(body)})
 		var run []func()
 		keep := s.before[:0]
 		for _, hk := range s.before {

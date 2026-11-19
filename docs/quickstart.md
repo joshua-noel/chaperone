@@ -19,6 +19,8 @@ Read this first. This page is only as good as these tests.
 | A pull request with failing checks is refused | Yes | Windows 11 |
 | `claude mcp add` with the printed line, then `claude mcp list` shows `Connected` | Yes, in a scratch user profile | Windows 11, Claude Code 2.1.302 |
 | Starting again reuses the folder and prints a new first-passkey address, or the sign-in address once you have a passkey | Yes (automated tests) | Windows 11 |
+| The quickstart holds both `127.0.0.1` and `[::1]` and refuses to start when another program already listens on `[::1]` at its port | Yes (automated tests) | Windows 11 |
+| The scratch folder gets a protected ACL with one entry for your user, and what is made in it inherits it (so `--dir` outside your profile is private) | Yes (automated test, ACL read back) | Windows 11 |
 | **Creating the passkey, signing in, approving the card, and seeing the pull request merged** | **No.** It needs a person to tap. | Nowhere yet |
 | **A real model calling a tool through `chap mcp`** | **No** | Nowhere yet |
 | **Everything on macOS** | **No.** It compiles for macOS. It has never run there. | Nowhere yet |
@@ -78,9 +80,15 @@ Leave this window open. Press Ctrl+C in it to stop.
    Press "Create passkey" and approve with your system's passkey prompt. Then sign in at http://localhost:55421/login.
 
 2. Connect Claude Code (optional)
-   Run this in another terminal. It adds the PLAYGROUND tools. Undo it with: claude mcp remove chaperone-playground --scope user
+   Run this in another terminal. It adds the PLAYGROUND tools:
 
    claude mcp add --scope user chaperone-playground -e CHAP_URL=http://127.0.0.1:55421 -e CHAP_PROJECT=playground -e CHAP_ORCHESTRATOR_TOKEN_FILE=C:\Profiles\you\AppData\Local\chaperone-quickstart\orchestrator.token -- C:\Profiles\you\dev\chaperone\dist\chap.exe mcp
+
+   When you stop using the quickstart, remove it:
+
+   claude mcp remove chaperone-playground --scope user
+
+   Why: the entry stays in Claude Code's user settings and keeps pointing at port 55421 and the token file. Once the quickstart is stopped, another program could listen on that port and receive the token on the next tool call.
 
 3. Three commands to try (PLAYGROUND repository playground/storefront)
    Open another terminal. Tell chap where this chapd is:
@@ -125,7 +133,7 @@ The address works once and for 15 minutes. If it has expired, or you lost it, st
 
 ### The passkey
 
-Chaperone asks for a passkey that checks it is you (a PIN, a fingerprint or a face). **In this version it accepts only a passkey that lives on this computer: the built-in authenticator.** Windows Hello is that on Windows. Touch ID or your password is that on a Mac. A security key or a phone passkey is refused by the console today (the code rejects an authenticator that is not a platform authenticator). On Linux, whether your browser offers a built-in passkey depends on your setup.
+Chaperone asks for a passkey that checks it is you (a PIN, a fingerprint or a face). **This version is built for a passkey that lives on this computer: the built-in authenticator.** Windows Hello is that on Windows. Touch ID or your password is that on a Mac. The console rejects a passkey when the browser says it is not a built-in one (a security key or a phone passkey usually says so). Some browsers say nothing, and then it is accepted. Which security keys and phones work has not been tested. On Linux, whether your browser offers a built-in passkey depends on your setup.
 
 None of these was tried by a person on a Mac or a Linux computer. Passkeys on all three systems are an open item (see [Open items](#open-items)). The console page may still say "Windows Hello" on other systems. It means the passkey your system offers.
 
@@ -187,7 +195,7 @@ It should show `chaperone-playground: ... Connected`. In Claude Code, ask it to 
 
 Tested: the printed line, then `claude mcp list` showing `Connected`, in a scratch user profile on Windows with Claude Code 2.1.302. **Not tested:** a real model calling a tool. More on `chap mcp`: [runbooks/mcp.md](runbooks/mcp.md).
 
-Undo it any time: `claude mcp remove chaperone-playground --scope user`.
+Remove it when you are done: `claude mcp remove chaperone-playground --scope user`. The entry is in your user settings, so it outlives the quickstart. While the quickstart is stopped it still points at port 55421 and the token file, and another program that listens on that port would receive the token on the next tool call. The token works only against the quickstart's own scratch database, and for at most 7 days.
 
 ## Stop, start again, start over
 
@@ -200,8 +208,8 @@ Undo it any time: `claude mcp remove chaperone-playground --scope user`.
 
 The moment before the first passkey exists is the risky one: whoever opens the address first becomes the approver. So:
 
-- **This computer only.** `chapd quickstart` listens on `127.0.0.1` and refuses any other address. The console also refuses a request whose `Host` is not `localhost:PORT` or `127.0.0.1:PORT`, so a web page cannot reach it through your browser by a DNS trick.
-- **The secret is in the part after `#`.** A browser never sends that part to a server. It is not in the log, not in a request line, and not on the enrolment page.
+- **This computer only.** `chapd quickstart` listens on `127.0.0.1` and on `[::1]` (the IPv6 loopback), because a browser may send `localhost` to either. If another program already listens on `[::1]` at that port, it refuses to start, so nothing else can receive the address. On a machine without IPv6 only `127.0.0.1` is used. It refuses any other address. The console answers only a request whose `Host` is `localhost:PORT`, so a web page cannot reach it through your browser by a DNS trick.
+- **The secret is in the part after `#`.** A browser does not send that part to a server when it opens the address, so it is not in a request line or the log, and not on the enrolment page. The page's script then sends the token in the body of one request to the console to start the passkey step. The address, with the part after `#`, may stay in your browser history (and in history sync). That is why the token works once and only for 15 minutes.
 - **Random and stored as a hash.** 128 random bits. Chaperone keeps only the SHA-256.
 - **Once.** The first passkey spends it. Two browsers racing with one address: only one wins.
 - **15 minutes.** Long enough to open a browser and answer one prompt on a first run, including setting up a screen lock. The cost of a longer life is small and bounded: the address is shown only in your terminal, and starting again spends it. The passkey step itself must finish within 5 minutes of pressing the button.
@@ -212,9 +220,9 @@ The moment before the first passkey exists is the risky one: whoever opens the a
 
 ## What the quickstart does not do
 
-- **It does not keep an agent away from the token.** The orchestrator token is a file in the scratch folder that only you can read (mode 0600 on macOS and Linux; one entry for your user on Windows). An agent that runs as you can read it and ask Chaperone for the same things you can. It cannot approve: only your passkey does. In real use the agent runs somewhere else, in a virtual machine or another account. See the [README](../README.md).
+- **It does not keep an agent away from the token or the folder.** The orchestrator token is a file in the scratch folder that your user can read (mode 0600 on macOS and Linux; one entry for your user on Windows). Administrators (root, or a Windows administrator) can read it too. A program that runs as you can read it and ask Chaperone for the same things you can. It can also change the scratch folder: it can edit the database and make itself an approver, replace the key set, or edit the policy. So the passkey protects you from an agent that runs somewhere else or as another user, not from one that runs as you. In real use the agent runs somewhere else, in a virtual machine or another account. See the [README](../README.md).
 - **It has no vault.** The playground needs no secret of its own. Nothing here stores a real credential. Do not paste one into the folder.
-- **It is not the real service.** It uses its own port, folder and database. It refuses port 55398, the real install's folder, and any folder that holds files but was not made by `chapd quickstart`. It cannot be started from `chapd run` or the Windows service: the fake GitHub is wired in only by `chapd quickstart`.
+- **It is not the real service.** It uses its own port, folder and database. It refuses port 55398. It refuses any folder that holds files but was not made by `chapd quickstart` (it has no `quickstart.json`). That marker rule is what protects a real install wherever it is, on any system. As a second check, on Windows it also refuses the default real install folder, and a folder above it, below it or reached through a link or junction. It cannot be started from `chapd run` or the Windows service: the fake GitHub is wired in only by `chapd quickstart`. The scratch folder is private to your user: mode 0700, or on Windows a protected ACL with one entry for you, set whatever the parent folder allows (so `--dir` may be outside your profile).
 
 ## Real GitHub
 
@@ -224,20 +232,20 @@ A real GitHub App is not in this version of the quickstart. `chapd quickstart --
 
 | You see | Cause and fix |
 | --- | --- |
-| `cannot listen on 127.0.0.1:55421` | Another program, or another `chapd quickstart`, uses the port. Stop it, or use `--addr 127.0.0.1:55422`. A folder that already has a port keeps it. |
+| `cannot listen on 127.0.0.1:55421` or `cannot listen on [::1]:55421` | Another program, or another `chapd quickstart`, uses the port. For `[::1]` it may be an unknown program: a browser could send `localhost` to it. Stop it, or use `--addr 127.0.0.1:55422`. A folder that already has a port keeps it. |
 | `... is not empty and was not made by chapd quickstart` | `--dir` names a folder that holds other files. It might be a real install, so it is left alone. Use an empty folder. |
 | `... is, or holds, the real Chaperone install's folder` | `--dir` points at, above or below the real install. Use another folder. |
 | `port 55398 is the real Chaperone service's` | Use another port. |
 | `this folder was set up for 127.0.0.1:55421 ...` | The passkey is tied to that address. Use that `--addr`, or a new `--dir`. |
 | The passkey address answers "not found" or is refused | It expired, was used, or a newer start replaced it. Stop and start again. |
-| The browser refuses the passkey | The console accepts only a built-in passkey in this version. See [The passkey](#the-passkey). |
+| The browser refuses the passkey | The console rejects a passkey that the browser reports as not built in. See [The passkey](#the-passkey). |
 | `chap: no token` or `chapd is not reachable` | The three setup lines were not run in this terminal. Run them again. |
 | `chap: unknown command` or `chap` is not found | Run the `PATH` line from the output, or use the full path of `chap`. |
 | `chap` says the token is invalid after a long break | The token lasts 7 days. Start `chapd quickstart` again: a token with less than a day left is replaced. |
 
 ## Open items
 
-- **Passkeys on macOS and Linux.** Not tried. The console accepts only a built-in passkey today.
+- **Passkeys on macOS and Linux, and security keys and phones.** Not tried. The console is built for a built-in passkey.
 - **Wording.** The console pages still say "Windows Hello" and the Windows demo script says "Edge". This page does not.
 - **Release binaries.** Until they exist you build from source.
 - **A real model call through `chap mcp`.** Not yet recorded.

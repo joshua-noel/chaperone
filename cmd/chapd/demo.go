@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/joshua-noel/chaperone/internal/console"
@@ -57,6 +58,9 @@ func demoFlags(fs *flag.FlagSet, cfg *Config) {
 // printEnrollAddress is what `chapd enroll` does, for a chapd that is already
 // running on a scratch database: one address, good once.
 func printEnrollAddress(ctx context.Context, a *App) error {
+	if err := checkDemoEnroll(a.cfg); err != nil {
+		return err
+	}
 	origin, _ := localEndpoints(a.cfg.Addr, a.cfg.Hosts)
 	token, err := console.IssueFirstEnrollment(ctx, a.DB, 30*time.Minute, time.Now())
 	if err != nil {
@@ -109,4 +113,25 @@ func startDemoGitHub(cfg *Config, seedPath string) error {
 
 	b, _ := json.MarshalIndent(seed, "", "  ")
 	return os.WriteFile(seedPath, b, 0o600)
+}
+
+// checkDemoEnroll refuses -dev-enroll unless this is a scratch demo: the fake
+// GitHub is on (-dev-fake-github) and the database is not the real install's.
+// Otherwise the flag would spend the pending first-passkey addresses of, and
+// print a new one for, whatever database -db names.
+func checkDemoEnroll(cfg Config) error {
+	if cfg.github == nil {
+		return errors.New("-dev-enroll needs -dev-fake-github: it is for a scratch database, never a real one")
+	}
+	if cfg.DBPath == "" {
+		return errors.New("-dev-enroll needs an explicit -db of a scratch folder")
+	}
+	abs, err := filepath.Abs(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	if overlapsRealInstall(filepath.Dir(abs)) || samePath(abs, defaultDB) {
+		return errors.New("-dev-enroll refuses the real install's database")
+	}
+	return nil
 }

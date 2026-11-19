@@ -61,6 +61,9 @@ type fakeGitHubOptions struct {
 	LocalCI bool
 	// SkipIDs makes commit SHAs differ from run to run (ghtest.Server.SkipIDs).
 	SkipIDs int64
+	// BoundLog keeps only the last 500 requests, 4 KiB of each, for a fake that runs for a long time
+	// on a port any local process can call (ghtest.Server.CapLog).
+	BoundLog bool
 }
 
 // fakeGitHub is a running fake: a loopback server, a repository with pull
@@ -78,6 +81,9 @@ type fakeGitHub struct {
 func newFakeGitHub(o fakeGitHubOptions) (*fakeGitHub, error) {
 	s := ghtest.New(&fakeTB{})
 	s.SkipIDs(o.SkipIDs)
+	if o.BoundLog {
+		s.CapLog(500, 4<<10)
+	}
 	in := s.AddInstallation(7, o.Owner, map[string]string{
 		"contents": "write", "pull_requests": "write", "checks": "read", "deployments": "write", "metadata": "read",
 	})

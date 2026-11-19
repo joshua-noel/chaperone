@@ -681,6 +681,11 @@ func TestRenderQuickstart(t *testing.T) {
 		if !strings.Contains(out, "for 15 minutes") {
 			t.Errorf("%s: the address lifetime is not stated", goos)
 		}
+		// The Claude Code entry outlives the quickstart, so the matching remove line and the reason are printed.
+		rm, why := strings.Index(out, "\n   claude mcp remove chaperone-playground --scope user\n"), strings.Index(out, "Why: the entry stays")
+		if !(b < rm && rm < why && why < c) || !strings.Contains(out, "port 55421") {
+			t.Errorf("%s: remove line and reason missing or misplaced (%d %d %d)", goos, b, rm, why)
+		}
 		for _, banned := range []string{"Edge", "Windows Hello", "Touch ID"} {
 			if strings.Contains(out, banned) {
 				t.Errorf("%s: output names %q", goos, banned)
