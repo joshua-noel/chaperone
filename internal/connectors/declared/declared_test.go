@@ -11,6 +11,7 @@ import (
 	"github.com/joshua-noel/chaperone/api"
 	"github.com/joshua-noel/chaperone/internal/connectors/kit"
 	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
+	"github.com/joshua-noel/chaperone/internal/connectors/pintable"
 	"github.com/joshua-noel/chaperone/internal/policy"
 )
 
@@ -39,32 +40,13 @@ func TestDeclarationsAreValidAndNamedOnce(t *testing.T) {
 	}
 }
 
-// pins is the class and reversibility of every declared operation, written out
-// here by hand and nowhere else. It is the one table for all connectors: a
-// connector that is added to Connectors() without pins fails the test below, and
-// a change of class needs this second, deliberate edit beside the declaration
-// and the generated manual entry. Add a new operation here with its class.
-var pins = map[string]kit.Pin{
-	"intake.list":    {Class: kit.Routine, Reversibility: kit.Reversible},
-	"intake.comment": {Class: kit.Routine, Reversibility: kit.Compensable},
-	"intake.move":    {Class: kit.Routine, Reversibility: kit.Reversible},
-	"intake.states":  {Class: kit.Routine, Reversibility: kit.Reversible},
-
-	// GitHub. pr.merge is the one gated operation: it merges on its own when
-	// verify is green on the exact head, and a merge is undone only by a revert
-	// commit, hence compensable. Do not loosen it to routine.
-	"pr.open":       {Class: kit.Routine, Reversibility: kit.Reversible},
-	"pr.update":     {Class: kit.Routine, Reversibility: kit.Reversible},
-	"pr.merge":      {Class: kit.Gated, Reversibility: kit.Compensable},
-	"pr.view":       {Class: kit.Routine, Reversibility: kit.Reversible},
-	"pr.diff":       {Class: kit.Routine, Reversibility: kit.Reversible},
-	"pr.checks":     {Class: kit.Routine, Reversibility: kit.Reversible},
-	"pr.files":      {Class: kit.Routine, Reversibility: kit.Reversible},
-	"issue.open":    {Class: kit.Routine, Reversibility: kit.Reversible},
-	"issue.comment": {Class: kit.Routine, Reversibility: kit.Compensable},
-	"issue.reopen":  {Class: kit.Routine, Reversibility: kit.Reversible},
-	"ci.report":     {Class: kit.Routine, Reversibility: kit.Reversible},
-}
+// pins is the class and reversibility of every declared operation. The table is
+// written out by hand in internal/connectors/pintable, where the conformance
+// suite reads it too. It is the one table for all connectors: a connector that
+// is added to Connectors() without pins fails the test below, and a change of
+// class needs this second, deliberate edit beside the declaration and the
+// generated manual entry.
+var pins = pintable.Pins
 
 func TestEveryDeclaredOpIsPinned(t *testing.T) {
 	declaredNames := map[string]bool{}

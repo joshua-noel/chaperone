@@ -108,12 +108,14 @@ type Server struct {
 	remain   string
 	commentN int
 	drop     map[string]bool // operation names whose answer is cut after the work was done
+	secret   string          // the client secret the token endpoint accepts
+	echo     bool            // error answers repeat the credential they received
 }
 
 // New starts a fake with two teams: SHOP (Operations) and ENG (Engineering).
 func New(t testing.TB) *Server {
 	t.Helper()
-	s := &Server{Now: time.Now, TokenTTL: 30 * 24 * time.Hour, teams: map[string]*Team{}, tokens: map[string]time.Time{}}
+	s := &Server{Now: time.Now, TokenTTL: 30 * 24 * time.Hour, teams: map[string]*Team{}, tokens: map[string]time.Time{}, secret: ClientSecret}
 	s.teams["SHOP"] = &Team{Key: "SHOP", Name: "Operations", States: []State{
 		{"st-ops-backlog", "Backlog", "backlog"}, {"st-ops-todo", "Todo", "unstarted"},
 		{"st-ops-handed", "Handed to engineering", "started"}, {"st-ops-progress", "In Progress", "started"},
@@ -284,8 +286,15 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(v)
 	}
-	if id != ClientID || secret != ClientSecret {
-		reply(http.StatusUnauthorized, map[string]string{"error": "invalid_client", "error_description": "Client authentication failed"})
+	s.mu.Lock()
+	want, echo := s.secret, s.echo
+	s.mu.Unlock()
+	if id != ClientID || secret != want {
+		desc := "Client authentication failed"
+		if echo {
+			desc += " for the secret " + secret
+		}
+		reply(http.StatusUnauthorized, map[string]string{"error": "invalid_client", "error_description": desc})
 		return
 	}
 	if form["grant_type"] != "client_credentials" {
@@ -361,9 +370,13 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 	if exp, ok := s.tokens[bearer]; !ok || !s.Now().Before(exp) {
 		rec.Errors = true
 		s.reqs = append(s.reqs, rec)
+		msg := "Authentication required, not authenticated"
+		if s.echo {
+			msg += " (token " + bearer + ")"
+		}
 		s.mu.Unlock()
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"errors": []gqlError{{
-			Message: "Authentication required, not authenticated", Extensions: map[string]any{"type": "authentication error", "code": "AUTHENTICATION_ERROR"}}}})
+			Message: msg, Extensions: map[string]any{"type": "authentication error", "code": "AUTHENTICATION_ERROR"}}}})
 		return
 	}
 	if s.rate429 > 0 {
@@ -655,4 +668,54 @@ func (s *Server) setState(v map[string]any) (any, []gqlError) {
 // token endpoint (for tests that call it directly).
 func BasicHeader() string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(ClientID+":"+ClientSecret))
+}
+
+// SetClientSecret changes the client secret the token endpoint accepts (the
+// default is [ClientSecret]). The conformance suite uses it to make its canary
+// the credential.
+func (s *Server) SetClientSecret(v string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secret = v
+}
+
+// Hostile makes the fake behave like a careless service: it stops accepting the
+// client secret it had (newSecret is the one it accepts now) and every
+// authentication error repeats the credential it received, in the text of the
+// error.
+func (s *Server) Hostile(newSecret string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secret, s.echo = newSecret, true
+}
+
+// Tokens returns every access token the token endpoint has issued.
+func (s *Server) Tokens() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.tokens))
+	for t := range s.tokens {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Edit changes the issue with the identifier under the fake's lock. It does
+// nothing when there is no such issue.
+func (s *Server) Edit(ident string, f func(i *Issue)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, i := range s.issues {
+		if i.Identifier == ident {
+			f(i)
+		}
+	}
+}
+
+// AddState adds a workflow state to a team.
+func (s *Server) AddState(team string, st State) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.teams[team].States = append(s.teams[team].States, st)
 }

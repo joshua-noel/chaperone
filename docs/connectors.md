@@ -2,7 +2,7 @@
 
 A connector lets Chaperone act on one service for an agent, so the agent never holds a credential for it. This page says how a connector is put together, what rules it must follow, and how to add one operation.
 
-Status: the connector kit covers the Linear connector and the GitHub operations. Google still uses the older layout. See [What is covered](#github-what-is-covered-and-what-stays-custom) and [What is not covered yet](#what-is-not-covered-yet).
+Status: the connector kit covers the Linear connector and the GitHub operations. Google still uses the older layout. See [What is covered](#github-what-is-covered-and-what-stays-custom) and [What is not covered yet](#what-is-not-covered-yet). To add a connector, follow [Write a connector](write-a-connector.md). That page starts from a scaffold and ends at a passing conformance suite.
 
 ## The seam
 
@@ -92,7 +92,7 @@ What is NOT derived, on purpose, and stays hand-written in the connector:
 ### Why a declaration cannot loosen a class
 
 - The class is also written in the generated manual entry, so a change of class is a visible change in the same pull request.
-- Every declared operation is pinned in one table written by hand, `pins` in `internal/connectors/declared/declared_test.go`. `TestEveryDeclaredOpIsPinned` fails for an operation with no pin, so a new connector cannot skip it. Loosening a class means changing the declaration, the manual entry and the pin together.
+- Every declared operation is pinned in one table written by hand, `Pins` in `internal/connectors/pintable/pintable.go`. `TestEveryDeclaredOpIsPinned` (`internal/connectors/declared`) and the conformance suite fail for an operation with no pin, so a new connector cannot skip it. Loosening a class means changing the declaration, the manual entry and the pin together.
 - This was tried for `pr.merge`, the one gated GitHub operation. With the class lowered to routine in the declaration, `TestEveryDeclaredOpIsPinned`, `TestGeneratedRegionsAreUpToDate` and `TestCatalogAgreesWithTheDeclarations` fail. With the manual entry regenerated as well, `TestEveryDeclaredOpIsPinned` still fails. So do `TestClassesAndCriticalOps` in `internal/policy`, `TestCatalogNarrowsToToken` in `internal/ops`, the `manual-code` golden of `cmd/chap`, `TestManualIsCurrent` in `docs/manualgen`, and the `cmd/chapd` tests that merge under an approval (`TestE2EApprovedMergeRunsExactlyOnce`, `TestE2EDenyIsSticky`, `TestE2EExpirySweepMovesTheOp`, `TestE2ERetitledPRIsNotMergedUnderTheApprovedCard`, `TestE2EWakeUpGoesToNtfyOverTheVaultTopic`, `TestQuickstartServesLoopbackOnlyAndRefusesThenMakesACard`).
 - The adapter's allow-list is the declaration, so adding a param to a declaration widens what the adapter accepts. The params of every operation that is not routine are pinned in `paramPins` of `declared_test.go` (`TestNonRoutineOpsPinTheirParams`), next to the class pins: widening `pr.merge` takes that second edit.
 - `kit.Op.Validate` refuses an irreversible operation that is routine or gated. *Decided for now:* this rule stays. The owner has not answered yet.
@@ -128,16 +128,16 @@ The params schema is written from these kinds: bool; string (a length, or a patt
 8. **A write is sent at most once.** A definite refusal by the service is `failed`. An answer that does not show whether the service acted leaves the op `unconfirmed`, with what to look up in the result. Never retry a write by yourself.
 9. **Do not widen the class.** An operation that changes something outside Chaperone and cannot be undone is `high`, and needs the operator's approval every time.
 
-Rules 1, 2, 3, 5 and 6 have no shared test yet; each connector tests them for itself. See below.
+The conformance suite (`internal/connectors/conformance`) tests rules 1, 2, 3, 5, 6 and 7 for every operation of a connector, and the pin side of rule 9, against the real adapter and a fake service: see [The conformance suite](#the-conformance-suite). Rules 4 and 8 stay with each connector's own tests. The suite shows only that a second `Execute` does not act again.
 
 ## Walkthrough: add a read-only operation
 
 Goal: `intake.show`, which reads one labelled item. The same steps work for any simple operation of a declared connector. `TestAFifthOperationNeedsOnlyItsDeclarationAndAnAdapter` (`internal/connectors/declared`) and `TestAFifthOperationGetsItsCommandFromItsDeclaration` (`cmd/chap`) run this walkthrough with a test-only operation. It is not in the shipped catalog.
 
-1. **Declare it** in `linearspec/spec.go`: a `kit.Op` with the name, class, reversibility, summary, usage, rate, doc, target and params. Add it to `Connector.Ops`. Add its class and reversibility to `pins` in `internal/connectors/declared/declared_test.go`.
+1. **Declare it** in `linearspec/spec.go`: a `kit.Op` with the name, class, reversibility, summary, usage, rate, doc, target and params. Add it to `Connector.Ops`. Add its class and reversibility to `Pins` in `internal/connectors/pintable/pintable.go`.
 2. **Write the adapter** in `internal/connectors/linear` (a new file, or `intake.go`). Parse the request, apply the policy through `base.policy` and the target checks, then write `Check` and `Execute`. Use `linearspec.Show.ParamNames()` for the allowed params.
 3. **Bind it**: one line in the map of `Adapters` in `adapter.go`. Without it, `chapd` refuses to start.
-4. **Write the tests** next to the adapter: the allowed request, each refusal and its cause code, the idempotent write, no secret in the result.
+4. **Write the tests** next to the adapter: the allowed request, each refusal and its cause code, the idempotent write, no secret in the result. Add the operation's samples to the conformance test (`conformance_test.go`), which runs the seven shared checks against the real adapter and the fake.
 5. **Generate**: `go generate ./internal/connectors/...` writes the manual entry and the params schema. Then `go run ./docs/manualgen` rewrites `docs/manual.md`, and `go test ./cmd/chap -update` records the new help line. Read the diff of each.
 6. **Add the policy rule**: one line in `internal/policy/data/baseline.yaml`, `intake.show: { enabled: false, rate_per_minute: 12 }`. The rate must equal the declared one. It stays off until a policy change turns it on; that change also adds the name to `shippedEnabled` in `internal/policy/policy_test.go`.
 7. **Run** `go test ./internal/connectors/... ./cmd/chap ./internal/policy ./internal/mcpfront ./docs/manualgen`.
@@ -157,7 +157,7 @@ Adding a whole new connector adds one line to `internal/connectors/declared/decl
 
 ## GitHub: what is covered and what stays custom
 
-The GitHub operations are declared in `internal/connectors/github/githubspec/spec.go`. The adapters stay in `internal/ops`, where `cmd/chapd/adapters.go` builds them and `kit.Bind` pairs them with the declarations. The class of every one is pinned in `internal/connectors/declared/declared_test.go`.
+The GitHub operations are declared in `internal/connectors/github/githubspec/spec.go`. The adapters stay in `internal/ops`, where `cmd/chapd/adapters.go` builds them and `kit.Bind` pairs them with the declarations. The class of every one is pinned in `internal/connectors/pintable/pintable.go`. The conformance test of the connector is `internal/connectors/github/conformance_test.go`.
 
 | Operation | Class | Catalog entry, params schema, adapter binding | `chap` command |
 | --- | --- | --- | --- |
@@ -188,7 +188,7 @@ Take a new read operation, `pr.commits`, that lists the commits of a PR for the 
 | `cmd/chap/ops.go` | by hand: the table entry | not touched |
 | `api/manual.yaml`, `api/openapi.yaml` | by hand | generated |
 | `githubspec/spec.go` | not there | by hand: the declaration and one name in `Connector.Ops` |
-| `declared_test.go` | not there | by hand: the pin |
+| `internal/connectors/pintable/pintable.go` | not there | by hand: the pin |
 | `internal/policy/data/baseline.yaml` | by hand | by hand (the rate must equal the declared one) |
 | `internal/policy/policy_test.go` | by hand, when the op is turned on | the same |
 | `cmd/chap/golden_test.go`, the canned reply | by hand | by hand (optional: the generic command is tested once) |
@@ -197,6 +197,36 @@ Take a new read operation, `pr.commits`, that lists the commits of a PR for the 
 **Before: 12 files by hand, 3 by command. With the kit: 11 by hand, 5 by command** (the two `api/` files move from "by hand" to "by command"; the declaration and the pin are new). The count hardly moves, because most of the files are logic: the GitHub call, the adapter, the printing and their tests. What moved is the number of places where the same facts are typed: name, class, summary, usage line, rate, params and their bounds were typed in `ops.go`, `manual.yaml`, `openapi.yaml`, the command in `prread.go` and the key list in `pr_read.go` (five places). They are typed once now, in the declaration, with the pin as the deliberate second copy of the class.
 
 Without a declaration the new adapter is refused as well: `kit.Bind` stops `chapd` at start-up when a declared operation has no adapter, or an adapter has no declaration.
+
+## The conformance suite
+
+`internal/connectors/conformance` is a test that a connector's own test calls with `conformance.Run`. It drives the real adapters against a fake service and runs seven checks for every declared operation:
+
+1. `Check` sends no write, however often it runs, and answers the same each time.
+2. `Execute` twice with one execution id changes the fake once, or the operation declares itself `NotRepeatable` and the suite checks that the declaration is true.
+3. No credential is in any `CheckResult`, `Outcome`, error, refusal or log line.
+4. Every refusal is a `*ops.Refusal` with a cause code that chapd knows.
+5. An undeclared param, a missing required param, a value of the wrong kind and a value past a declared limit are refused by the adapter, in `Check` and in `Execute`.
+6. Text from the service is marked `untrusted_text`, cleaned, capped and withheld when it looks like a secret, or the operation declares that it returns none and the suite checks that it echoes none.
+7. The declared class and reversibility equal the pin.
+
+The tests that call it are `internal/connectors/linear/conformance_test.go` and `internal/connectors/github/conformance_test.go`. `internal/connectors/conformance/conformance_test.go` tests the suite itself: a small connector passes, and each of 17 defects, switched on one at a time, fails the check that is meant to catch it. [Write a connector](write-a-connector.md) says how to use it, and what it does not prove.
+
+### What the conformance suite found
+
+These are findings against the connectors as shipped. Nothing in an adapter was changed. Each one is a visible skip (`Known`) or a `NotRepeatable` declaration in the connector's conformance test, with the reason, and the suite fails when the gap closes.
+
+1. **Execute is not idempotent per execution id for three GitHub operations.** `issue.open` and `issue.comment` post again when `Execute` is called a second time with the same execution id. GitHub has no idempotency key for them, and the adapters do not look for the earlier write. `ci.report` posts a second check run, which `pr.merge` reads as a replacement of the first. Rule 3 and the comment of `ops.Adapter` say `Execute` is idempotent per execution id and that chapd retries after a crash. In the code, `Service.Recover` marks an op that was executing as `unconfirmed`, and `Recover` does not run an adapter. I found no code outside the tests that calls `Service.Reconcile`, and `Recover` does not run an adapter. So no shipped path that I found repeats a write today. Open question: make the adapters repeat-safe, or change rule 3 and the comment to say what is true.
+2. **`intake.list` and `intake.states` put the token endpoint's error text in `result.error`.** `intake.comment` and `intake.move` send the OAuth error code only (`credentialRefusal`). Linear sends a fixed description, so nothing leaks today. A service that repeats the credential it received would put the client secret in the result. chapd's redaction is the only guard then.
+3. **Rule 5 is followed in full by `intake.list` only, and the code has no single convention for untrusted text.** What exists:
+   - `intake.list` sets `untrusted_text`, cleans, caps and withholds text that looks like a secret.
+   - `intake.states` and `intake.move` return state names, cleaned and capped, with no flag and no withholding.
+   - `pr.view`, `pr.diff`, `pr.checks` and `pr.files` cap the text. They set no flag, keep control and format characters, and do not withhold. chapd redacts the whole result, and `chap` and the MCP front say it is data.
+   - `pr.merge` puts the paths of the changed files (the author's text) in the `risk_tier` check and in `result.checks`, with format characters unchanged and no flag.
+   - The MCP front puts every result in `untrusted_result` behind a notice, whatever the adapter did.
+
+   The suite tests rule 5 as written and lists these gaps. It does not choose another convention. Open question: say that the front ends mark all results and that adapters only clean and cap, or bring the GitHub adapters in line with the rule.
+4. **The suite could not plant its canary in GitHub, and could not make GitHub hostile.** The fake GitHub mints its own tokens, so the suite looks for the App JWT and the installation tokens that went over the wire. The fake cannot repeat a credential in an error, so the hostile-service pass of check 3 runs for Linear only.
 
 ## What is not covered yet
 
@@ -210,8 +240,6 @@ Without a declaration the new adapter is refused as well: `kit.Bind` stops `chap
 - **Order of two simultaneous usage errors.** The generic command checks the params in the order they are declared, which is the order of the schema. For `pr files` that means `--page` and `--per-page` are checked before `--expected-head`; the hand-written command checked `--expected-head` first. It matters only when two flags are wrong at once.
 - **An unknown param is refused with the declared names in declaration order.** The refusal of `pr.files` lists `page, per_page, expected_head_sha`; it listed `expected_head_sha, page, per_page`.
 - **Description quoting.** The generator writes a params description plain when it is short and plain, and in double quotes otherwise (over 160 characters, or a character that YAML reads specially). This is the rule that gives the bytes the hand-written text had.
-- **No scaffold command.** `chap connector new <name>` does not exist. A new connector is copied from `linear` and `linearspec` by hand.
-- **No conformance suite.** The rules above are tested by each connector for itself. A shared suite (`Check` changes nothing, `Execute` twice acts once, no secret in any output, untrusted marking, every refusal has a known cause code) is milestone 2.3.
 - **Shared helpers are not shared.** The HTTP client that never logs a credential, the rate limit and retry code, and the text cleaning (`clean`, `checkText`) live in `linear`. Other connectors have their own copies.
 - **The baseline is still edited by hand.** A new operation needs its one baseline line. This is deliberate for the switch that turns an operation on, but the line for a new, disabled operation could be added by the generator. *Decided for now:* no generation of the baseline, and the rate stays written in both the declaration and the baseline, with a test that they agree. The owner has not answered yet.
 - **Approval card text.** An adapter adds evidence to a card in `Check`. The declaration does not describe it.

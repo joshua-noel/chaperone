@@ -1,0 +1,127 @@
+package @{.Name}@
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"@{.Module}@/internal/connectors/conformance"
+	"@{.Module}@/internal/connectors/@{.Name}@/@{.Name}@spec"
+	"@{.Module}@/internal/connectors/@{.Name}@/@{.Name}@test"
+	"@{.Module}@/internal/connectors/kit"
+	"@{.Module}@/internal/ops"
+	"@{.Module}@/internal/redact"
+	"@{.Module}@/internal/spec"
+)
+
+// This test runs the shared connector suite (internal/connectors/conformance)
+// against the real adapters and the fake service. See docs/write-a-connector.md.
+
+// pins is the class and reversibility of each operation, written out by hand
+// and apart from the declaration: the suite compares the two. The repository
+// keeps one table for all connectors, internal/connectors/pintable. This copy
+// stands in until the connector is registered; then add the pins there and
+// pass pintable.Pins below.
+var pins = map[string]kit.Pin{
+	@{.Name}@spec.NameShow: {Class: kit.Routine, Reversibility: kit.Reversible},
+}
+
+// newRig builds a fake service and the real adapters against it. canary is the
+// credential: the fake accepts it, and the suite looks for it, and for every
+// credential the fake saw, in everything the adapters say.
+func newRig(t testing.TB, canary string) *conformance.Rig {
+	t.Helper()
+	fake := @{.Name}@test.New(t)
+	fake.SetToken(canary)
+	fake.AddItem(@{.Name}@test.Item{ID: "item-1", Title: "First item", Body: "A short body."})
+	reg := redact.NewRegistry()
+	client, err := NewClient(ClientConfig{
+		BaseURL:    fake.URL,
+		Credential: func(context.Context) (string, error) { return canary, nil },
+		Registry:   reg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ads, err := Adapters(Config{Client: client, Redactor: reg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &conformance.Rig{
+		Adapters:      ads,
+		WriteCalls:    fake.WriteCalls,
+		WritesApplied: fake.WritesApplied,
+		Secrets:       func() []string { return append([]string{canary}, fake.Credentials()...) },
+		Hostile:       func() { fake.Hostile("rotated-" + canary) },
+		World:         fake,
+	}
+}
+
+func orchestrator() *ops.Caller {
+	return &ops.Caller{Kind: ops.KindOrchestrator, OrchID: "main", Projects: []string{"demo"}}
+}
+
+// request builds a request as chapd hands it to an adapter. change adjusts it.
+func request(ref string, params map[string]any, change func(*ops.Request)) func(*conformance.Rig) *ops.Request {
+	return func(*conformance.Rig) *ops.Request {
+		q := &ops.Request{
+			ID: "q-abc123", Op: OpShow, Project: "demo",
+			Target: spec.Target{Adapter: @{.Name}@spec.Adapter, Ref: ref},
+			Params: params, Caller: orchestrator(),
+		}
+		if change != nil {
+			change(q)
+		}
+		return q
+	}
+}
+
+func valid(name, ref string, params map[string]any) conformance.Sample {
+	return conformance.Sample{Name: name, Req: request(ref, params, nil)}
+}
+
+func refused(name, code, ref string, params map[string]any, change func(*ops.Request)) conformance.Sample {
+	return conformance.Sample{Name: name, Code: code, Req: request(ref, params, change)}
+}
+
+func asRun(q *ops.Request) { q.Caller = &ops.Caller{Kind: ops.KindRun, RunID: "r-1", Project: "demo"} }
+func otherAdapter(q *ops.Request) { q.Target.Adapter = "other" }
+
+// plant puts the hostile text where the first valid sample reads it.
+func plant(r *conformance.Rig, p conformance.Planted) {
+	title := p.Control
+	if title == "" {
+		title = "Plain title"
+	}
+	r.World.(*@{.Name}@test.Server).Edit("item-1", func(it *@{.Name}@test.Item) {
+		it.Title = title
+		it.Body = strings.TrimSpace(p.Long + " " + p.Secret)
+	})
+}
+
+func TestConformance(t *testing.T) {
+	conformance.Run(t, conformance.Connector{
+		Declared: @{.Name}@spec.Connector,
+		Pins:     pins,
+		NewRig:   newRig,
+		Ops: map[string]conformance.Op{
+			OpShow: {
+				// The first valid sample is the base of the generated requests that
+				// break each declared limit, so it carries the params.
+				Valid: []conformance.Sample{
+					valid("with detail", "item-1", map[string]any{"detail": true}),
+					valid("without detail", "item-1", nil),
+				},
+				Invalid: []conformance.Sample{
+					refused("a run asks", ops.CodePolicyRefused, "item-1", nil, asRun),
+					refused("not an item id", ops.CodeParamsInvalid, "Not An Id", nil, nil),
+					refused("another adapter", ops.CodeParamsInvalid, "item-1", nil, otherAdapter),
+					refused("detail is not a bool", ops.CodeParamsInvalid, "item-1", map[string]any{"detail": "yes"}, nil),
+				},
+				ReadOnly: true,
+				Text:     conformance.ServiceText,
+				Plant:    plant,
+			},
+		},
+	})
+}

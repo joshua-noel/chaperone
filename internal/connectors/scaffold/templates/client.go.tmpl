@@ -1,0 +1,132 @@
+package @{.Name}@
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"@{.Module}@/internal/redact"
+)
+
+// maxResponse is the most bytes of one answer the client reads.
+const maxResponse = 1 << 20
+
+// ErrNotFound is the service's "no such thing".
+var ErrNotFound = errors.New("@{.Name}@: the service has no such item")
+
+// ServiceError is an answer that is not a success. It holds the status and
+// nothing the service wrote: an error text from outside could hold anything,
+// including what the client sent.
+type ServiceError struct{ Status int }
+
+func (e *ServiceError) Error() string {
+	return fmt.Sprintf("@{.Name}@: the service answered HTTP %d", e.Status)
+}
+
+// Item is what the service returns for one item.
+type Item struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+// ClientConfig builds a [Client].
+type ClientConfig struct {
+	// BaseURL is the service's root. It must be https, except for a loopback
+	// address (the fake of the tests): a credential sent in clear to another
+	// host would be readable on the wire.
+	BaseURL string
+	// Credential returns the credential. It is called on every request, so a
+	// rotated secret is picked up, and the client keeps no copy.
+	Credential func(ctx context.Context) (string, error)
+	// Registry, when set, learns each credential the client uses, so the
+	// redaction check masks it wherever it would appear.
+	Registry *redact.Registry
+	// HTTP defaults to a client with a 15 s timeout that follows no redirect.
+	HTTP *http.Client
+}
+
+// Client talks to the service.
+type Client struct {
+	cfg  ClientConfig
+	base string
+	hc   *http.Client
+}
+
+// NewClient validates cfg and returns a Client.
+func NewClient(cfg ClientConfig) (*Client, error) {
+	u, err := url.Parse(cfg.BaseURL)
+	if err != nil || u.Host == "" {
+		return nil, errors.New("@{.Name}@: BaseURL is not a URL")
+	}
+	switch u.Scheme {
+	case "https":
+	case "http":
+		if ip := net.ParseIP(u.Hostname()); ip == nil || !ip.IsLoopback() {
+			return nil, errors.New("@{.Name}@: BaseURL is plain http to a host that is not a loopback address")
+		}
+	default:
+		return nil, fmt.Errorf("@{.Name}@: BaseURL has scheme %q", u.Scheme)
+	}
+	if cfg.Credential == nil {
+		return nil, errors.New("@{.Name}@: the client needs a Credential")
+	}
+	hc := cfg.HTTP
+	if hc == nil {
+		hc = &http.Client{
+			Timeout:       15 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}
+	}
+	return &Client{cfg: cfg, base: strings.TrimRight(cfg.BaseURL, "/"), hc: hc}, nil
+}
+
+// get reads one JSON document. The credential goes in the Authorization header
+// and nowhere else. Every error is a fixed sentence: none holds the credential,
+// the URL or text the service wrote.
+func (c *Client) get(ctx context.Context, path string, out any) error {
+	tok, err := c.cfg.Credential(ctx)
+	if err != nil || strings.TrimSpace(tok) == "" {
+		return errors.New("@{.Name}@: there is no credential for the service")
+	}
+	if c.cfg.Registry != nil {
+		if err := c.cfg.Registry.Set("@{.Name}@-credential", []byte(tok)); err != nil {
+			return errors.New("@{.Name}@: the credential cannot be registered with the redaction check")
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return errors.New("@{.Name}@: the request could not be built")
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return errors.New("@{.Name}@: the service could not be reached")
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return ErrNotFound
+	case resp.StatusCode < 200 || resp.StatusCode > 299:
+		return &ServiceError{Status: resp.StatusCode}
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponse)).Decode(out); err != nil {
+		return errors.New("@{.Name}@: the service sent an answer that is not the expected JSON")
+	}
+	return nil
+}
+
+// Item reads one item.
+func (c *Client) Item(ctx context.Context, id string) (Item, error) {
+	var it Item
+	err := c.get(ctx, "/items/"+url.PathEscape(id), &it)
+	return it, err
+}

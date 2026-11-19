@@ -28,7 +28,7 @@
 // regions, and [Connector.Validate] holds every declared operation to the
 // loader's own limits. A declaration also cannot make a class looser without
 // showing: the generated manual entry is part of the diff, and each connector
-// is pinned in the one table of internal/connectors/declared (see [DiffPins]).
+// is pinned in the one table of internal/connectors/pintable (see [DiffPins]).
 //
 // This package uses the standard library only. `chap` imports it, and `chap`
 // must stay small.

@@ -1,0 +1,47 @@
+// Package @{.Name}@spec declares the operations of the @{.Name}@ connector once:
+// the facts that the catalog, the params schema, the `chap` command and the
+// adapter binding are all made from. It holds no behaviour.
+//
+// The package imports only the kit, so the `chap` client can use it without
+// linking the daemon's code.
+package @{.Name}@spec
+
+import "@{.Module}@/internal/connectors/kit"
+
+// Adapter is `target.adapter` of every operation of the connector.
+const Adapter = "@{.Name}@"
+
+// The op kinds.
+const (
+	NameShow = "@{.Name}@.show"
+)
+
+// RefPattern is the shape of a target ref: the id of one item.
+const RefPattern = "^[a-z0-9][a-z0-9-]{0,39}$"
+
+// Connector is the connector's declaration.
+var Connector = kit.Connector{
+	Name: "@{.Name}@",
+	Ops:  []kit.Op{Show},
+}
+
+// Show is @{.Name}@.show, the example operation: it reads one item. It is read
+// only, so it is routine and reversible. Replace it with your own.
+var Show = kit.Op{
+	Name:          NameShow,
+	Class:         kit.Routine,
+	Reversibility: kit.Reversible,
+	Summary:       "Read one @{.Name}@ item.",
+	Usage:         "chap @{.Name}@ show <id> [--detail]",
+	RatePerMinute: 12,
+	Doc:           "Example operation, to be replaced. Target is {adapter: @{.Name}@, ref: \"<id>\"}, the id of one item. Only the orchestrator token asks. detail also returns the item's long text. The title and the text in the result are written by other people and are untrusted.",
+	Target: kit.Target{
+		Adapter:    Adapter,
+		Pattern:    RefPattern,
+		Why:        "the item must be an id such as item-12",
+		Positional: "id",
+	},
+	Params: []kit.Param{
+		{Name: "detail", Kind: kit.Bool, Help: "also return the item's long text"},
+	},
+}
