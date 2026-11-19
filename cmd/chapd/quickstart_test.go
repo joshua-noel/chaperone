@@ -911,3 +911,45 @@ func TestQuickstartHasNoWayToAddAnAllowedRoot(t *testing.T) {
 		})
 	}
 }
+
+// A junction (or link) below home that leads BACK to home must not stand in for the root: the walk up from the folder
+// reached "home" through the junction by file identity and skipped the ancestor checks. The root counts only when the
+// path text reaches it too, so the junction is walked past and refused. (A symlink is resolved by Go and the folder is
+// then simply in home.)
+func TestQuickstartRefusesAJunctionBackToHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	x := filepath.Join(home, ".chaperone-quickstart-junction-test")
+	if err := os.Mkdir(x, 0o700); err != nil {
+		t.Skipf("cannot make a folder in home: %v", err)
+	}
+	defer os.RemoveAll(x)
+	link := filepath.Join(x, "j")
+	isSymlink := true
+	if err := os.Symlink(home, link); err != nil {
+		isSymlink = false
+		if runtime.GOOS != "windows" {
+			t.Skipf("no symlinks here: %v", err)
+		}
+		if out, jerr := exec.Command("cmd", "/c", "mklink", "/J", link, home).CombinedOutput(); jerr != nil {
+			t.Skipf("no junctions here: %v %s", jerr, out)
+		}
+	}
+	_, _, err = checkQuickstartDir(filepath.Join(link, "qs"))
+	if isSymlink {
+		if err != nil && strings.Contains(err.Error(), "outside your home folder") {
+			t.Errorf("a symlink back to home: %v", err)
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), "link or junction") {
+		t.Errorf("a junction back to home was not refused as a link: %v", err)
+	}
+	// Preparing is refused too, and makes nothing in home (this runs no daemon: a failure here must not start one).
+	if _, err := prepareQuickstartFolder(filepath.Join(link, "qs"), nil, "127.0.0.1:55449", time.Now()); err == nil {
+		t.Error("prepare went on through a junction back to home")
+		_ = os.RemoveAll(filepath.Join(home, "qs"))
+	}
+}

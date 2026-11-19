@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -114,12 +113,29 @@ func verifyPrivateDir(path string) error {
 // delete children, delete the folder, change its permissions or owner, or any generic write or all.
 const riskyFolderRights = 0x2 | 0x4 | 0x40 | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER | windows.GENERIC_WRITE | windows.GENERIC_ALL
 
-// trustedPrincipal reports whether sid is the current user, SYSTEM, the Administrators group, the
-// service installer, or CREATOR OWNER: the principals an ordinary profile folder lists.
+// trustedInstallerSID is NT SERVICETrustedInstaller, the one service principal that owns system folders. Other
+// service SIDs (S-1-5-80-*) are per-service and are not trusted on a folder above ours.
+const trustedInstallerSID = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+
+// trustedPrincipal reports whether sid is the current user, SYSTEM, the Administrators group, TrustedInstaller, or
+// CREATOR OWNER: exactly the principals an ordinary profile folder lists.
 func trustedPrincipal(sid *windows.SID, user *windows.SID) bool {
 	return windows.EqualSid(sid, user) || sid.IsWellKnown(windows.WinLocalSystemSid) ||
 		sid.IsWellKnown(windows.WinBuiltinAdministratorsSid) || sid.IsWellKnown(windows.WinCreatorOwnerSid) ||
-		strings.HasPrefix(sid.String(), "S-1-5-80-")
+		sid.String() == trustedInstallerSID
+}
+
+// ancestorACEKind classifies an access entry of a folder above ours: an allow entry is judged, a deny entry only
+// narrows what others may do and is skipped, and any other type (audit, object, callback and so on) is not
+// understood here and is refused.
+func ancestorACEKind(aceType byte) string {
+	switch aceType {
+	case windows.ACCESS_ALLOWED_ACE_TYPE:
+		return "allow"
+	case windows.ACCESS_DENIED_ACE_TYPE:
+		return "deny"
+	}
+	return "other"
 }
 
 // ancestorSafe decides whether a folder ABOVE the quickstart folder may stay as it is: nobody but the
@@ -148,7 +164,13 @@ func ancestorSafe(path string) error {
 		if err := windows.GetAce(acl, i, &ace); err != nil {
 			return err
 		}
-		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || uint32(ace.Header.AceFlags)&windows.INHERIT_ONLY_ACE != 0 {
+		switch ancestorACEKind(ace.Header.AceType) {
+		case "deny":
+			continue
+		case "other":
+			return fmt.Errorf("%s has an access entry of type %d, which the quickstart does not understand", path, ace.Header.AceType)
+		}
+		if uint32(ace.Header.AceFlags)&windows.INHERIT_ONLY_ACE != 0 {
 			continue
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))

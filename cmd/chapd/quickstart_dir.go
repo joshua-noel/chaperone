@@ -28,6 +28,9 @@ import (
 // What none of this defends against: another program running as the same user, an administrator, or someone
 // you gave rights inside your own profile.
 
+// prepareGapHook runs in prepareQuickstartFolder between the ancestor check and the folder being made. Only tests set it.
+var prepareGapHook func()
+
 // quickstartTestRoots are extra folders that count as "inside home". Only tests set it (a test asserts that no
 // non-test file does, and that there is no flag or environment variable for it).
 var quickstartTestRoots []string
@@ -127,11 +130,15 @@ func checkAncestors(dir string) error {
 		found := false
 		for cur := filepath.Dir(dir); ; cur = filepath.Dir(cur) {
 			chain = append(chain, cur)
-			if st, err := os.Stat(cur); err == nil && os.SameFile(st, rootSt) {
-				found = true
+			// The root counts as found only when the TEXT reaches it and the folder there IS the root. A junction below
+			// the root that leads back to it must not stand in for it: it is walked past and refused as a link.
+			if samePath(cur, res) {
+				if st, err := os.Stat(cur); err == nil && os.SameFile(st, rootSt) {
+					found = true
+				}
 				break
 			}
-			if samePath(cur, res) || filepath.Dir(cur) == cur {
+			if filepath.Dir(cur) == cur {
 				break
 			}
 		}
@@ -285,10 +292,22 @@ type quickstartFolder struct {
 	identity                                    os.FileInfo // the folder as it was when it was prepared
 }
 
+// folderIdentity is the folder's identity read from an OPEN HANDLE. On Windows os.Stat keeps only the path and reads
+// the file ID lazily, when os.SameFile is called, so two Stat results would both describe whatever is at the path
+// at that moment; a handle fixes the ID at the time it is read.
+func folderIdentity(dir string) (os.FileInfo, error) {
+	h, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer h.Close()
+	return h.Stat()
+}
+
 // stillTheSameFolder fails unless the path still leads to the folder that was prepared. Run after chapd has
 // opened its files and before anything is served: a folder renamed away and replaced in between is refused.
 func (f *quickstartFolder) stillTheSameFolder() error {
-	st, err := os.Stat(f.Dir)
+	st, err := folderIdentity(f.Dir)
 	if err != nil {
 		return err
 	}
@@ -339,8 +358,17 @@ func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string
 	if err := checkAncestors(dir); err != nil {
 		return nil, err
 	}
+	if prepareGapHook != nil {
+		prepareGapHook()
+	}
 	if state == nil {
 		if err := makePrivateTree(dir); err != nil {
+			return nil, err
+		}
+		// A parent that did not exist at the check may have been made by somebody else before we made ours.
+		// The ancestors are checked again now that every one of them exists, before anything is written.
+		if err := checkAncestors(dir); err != nil {
+			_ = os.Remove(dir)
 			return nil, err
 		}
 		if err := firstRunFiles(f, now); err != nil {
@@ -354,7 +382,7 @@ func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string
 			return nil, err
 		}
 	}
-	st, err := os.Stat(dir)
+	st, err := folderIdentity(dir)
 	if err != nil {
 		return nil, err
 	}

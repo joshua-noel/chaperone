@@ -227,22 +227,64 @@ func TestQuickstartRefusesAFolderSwappedAfterBuild(t *testing.T) {
 }
 
 // The identity check passes for the folder itself.
-func TestQuickstartFolderIdentity(t *testing.T) {
-	dir := newPath(t)
-	f, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55446", time.Now())
+func TestQuickstartFolderIdentityHolds(t *testing.T) {
+	f, err := prepareQuickstartFolder(newPath(t), nil, "127.0.0.1:55446", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := f.stillTheSameFolder(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// A folder renamed away and replaced is found. The check is called ONCE, after the swap: on Windows os.Stat reads the file ID
+// lazily, so a Stat-based check that had been called before would have cached nothing and compared the replacement with
+// itself. The identity is taken from an open handle at record time and at check time. No file of the folder is open here,
+// so the rename works on Windows too.
+func TestQuickstartFolderIdentityFindsASwap(t *testing.T) {
+	dir := newPath(t)
+	f, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55447", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Rename(dir, dir+".away"); err != nil {
-		t.Skipf("cannot rename here: %v", err)
+		t.Fatalf("cannot rename the prepared folder: %v", err)
 	}
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.stillTheSameFolder(); err == nil {
-		t.Error("a replaced folder passed the identity check")
+	if err := f.stillTheSameFolder(); err == nil || !strings.Contains(err.Error(), "no longer the folder") {
+		t.Errorf("a replaced folder passed the identity check: %v", err)
+	}
+}
+
+// A parent that did not exist at the ancestor check, and that another user makes before ours is made, is caught: the
+// ancestors are checked again once every one of them exists, and before anything is written.
+func TestQuickstartChecksAParentMadeInTheGap(t *testing.T) {
+	base := qsTemp(t)
+	parent := filepath.Join(base, "newparent")
+	dir := filepath.Join(parent, "qs")
+	prepareGapHook = func() {
+		if err := os.Mkdir(parent, 0o755); err != nil {
+			t.Error(err)
+			return
+		}
+		makeWorldWritable(t, parent) // a folder somebody else made, open to others
+	}
+	defer func() { prepareGapHook = nil }()
+	if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55448", time.Now()); err == nil {
+		t.Fatal("a parent made by somebody else in the gap was accepted")
+	}
+	if _, err := os.Stat(dir); err == nil {
+		t.Error("the quickstart folder was left in the foreign parent")
+	}
+	// The same, with a parent that is fine: no refusal.
+	prepareGapHook = func() {
+		if err := os.Mkdir(filepath.Join(base, "okparent"), 0o700); err != nil {
+			t.Error(err)
+		}
+	}
+	if _, err := prepareQuickstartFolder(filepath.Join(base, "okparent", "qs"), nil, "127.0.0.1:55448", time.Now()); err != nil {
+		t.Errorf("a harmless parent made in the gap: %v", err)
 	}
 }

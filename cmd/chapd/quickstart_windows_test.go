@@ -282,3 +282,55 @@ func makeWorldWritable(t *testing.T, path string) {
 		t.Fatalf("icacls: %v %s", err, out)
 	}
 }
+
+// Only the principals an ordinary profile folder lists are trusted on a folder above ours: the user, SYSTEM, Administrators,
+// CREATOR OWNER and TrustedInstaller itself. Other service SIDs (S-1-5-80-*) are per-service and are not.
+func TestOnlyTheNamedPrincipalsAreTrustedOnAnAncestor(t *testing.T) {
+	user, err := currentUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for sid, want := range map[string]bool{
+		"S-1-5-18": true, "S-1-5-32-544": true, "S-1-3-0": true, trustedInstallerSID: true,
+		"S-1-5-80-0": false, "S-1-5-80-1": false, "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478465": false,
+		"S-1-1-0": false, "S-1-5-11": false, "S-1-5-32-545": false,
+	} {
+		s, err := windows.StringToSid(sid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := trustedPrincipal(s, user); got != want {
+			t.Errorf("trustedPrincipal(%s) = %v, want %v", sid, got, want)
+		}
+	}
+	if !trustedPrincipal(user, user) {
+		t.Error("the current user is not trusted")
+	}
+	// On a real folder: an entry for another service SID that lets it change things is refused.
+	parent := filepath.Join(qsTemp(t), "svc")
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("icacls", parent, "/grant", "*S-1-5-80-0:(M)").CombinedOutput(); err != nil {
+		t.Skipf("icacls cannot grant to S-1-5-80-0 here: %v %s", err, out)
+	}
+	if err := ancestorSafe(parent); err == nil || !strings.Contains(err.Error(), "S-1-5-80-0") {
+		t.Errorf("a folder that lets S-1-5-80-0 modify it was accepted as an ancestor: %v", err)
+	}
+}
+
+// Deny entries only narrow access and are skipped; an entry of any other type is not understood and is refused.
+func TestAncestorEntryTypes(t *testing.T) {
+	for typ, want := range map[byte]string{
+		windows.ACCESS_ALLOWED_ACE_TYPE: "allow", windows.ACCESS_DENIED_ACE_TYPE: "deny",
+		2:    "other",                // system audit
+		5:    "other",                // access allowed, object
+		6:    "other",                // access denied, object
+		9:    "other",                // access allowed, callback
+		0x11: "other", 0x12: "other", // mandatory label, resource attribute
+	} {
+		if got := ancestorACEKind(typ); got != want {
+			t.Errorf("ancestorACEKind(%d) = %q, want %q", typ, got, want)
+		}
+	}
+}
