@@ -119,6 +119,8 @@ func startDemoGitHub(cfg *Config, seedPath string) error {
 		n := repo.OpenPR(ghtest.PROptions{Title: p.title, Head: p.branch, Base: demoBase})
 		repo.SetFiles(n, ghtest.File{Filename: p.file})
 		repo.SetCheck(head, verify(p.conclusion))
+		// policy/storefront.yaml has pr.local_ci mode `also`: the App's own local-ci check is needed besides verify.
+		repo.SetCheck(head, ghtest.Check{Name: "local-ci", AppID: ghtest.OwnAppID, Status: "completed", Conclusion: p.conclusion})
 		seed.PRs = append(seed.PRs, demoPR{Number: n, Kind: p.kind, Title: p.title, Head: head})
 	}
 
