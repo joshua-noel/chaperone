@@ -3,25 +3,8 @@ package linearspec
 import (
 	"testing"
 
-	"github.com/joshua-noel/chaperone/internal/connectors/kit"
 	"github.com/joshua-noel/chaperone/internal/policy"
 )
-
-// The classes of the four operations, written out here and nowhere else in
-// the connector. Making an operation looser than this means editing the
-// declaration, the generated manual entry and this table in one reviewed
-// change; none of the three can be changed by a regeneration alone.
-func TestClassesAreThePinnedOnes(t *testing.T) {
-	pins := map[string]kit.Pin{
-		"intake.list":    {Class: kit.Routine, Reversibility: kit.Reversible},
-		"intake.comment": {Class: kit.Routine, Reversibility: kit.Compensable},
-		"intake.move":    {Class: kit.Routine, Reversibility: kit.Reversible},
-		"intake.states":  {Class: kit.Routine, Reversibility: kit.Reversible},
-	}
-	for _, d := range kit.DiffPins(Connector, pins) {
-		t.Error(d)
-	}
-}
 
 func TestConnectorIsValid(t *testing.T) {
 	if err := Connector.Validate(); err != nil {

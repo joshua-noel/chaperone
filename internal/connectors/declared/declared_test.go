@@ -38,6 +38,70 @@ func TestDeclarationsAreValidAndNamedOnce(t *testing.T) {
 	}
 }
 
+// pins is the class and reversibility of every declared operation, written out
+// here by hand and nowhere else. It is the one table for all connectors: a
+// connector that is added to Connectors() without pins fails the test below, and
+// a change of class needs this second, deliberate edit beside the declaration
+// and the generated manual entry. Add a new operation here with its class.
+var pins = map[string]kit.Pin{
+	"intake.list":    {Class: kit.Routine, Reversibility: kit.Reversible},
+	"intake.comment": {Class: kit.Routine, Reversibility: kit.Compensable},
+	"intake.move":    {Class: kit.Routine, Reversibility: kit.Reversible},
+	"intake.states":  {Class: kit.Routine, Reversibility: kit.Reversible},
+}
+
+func TestEveryDeclaredOpIsPinned(t *testing.T) {
+	declaredNames := map[string]bool{}
+	for _, c := range Connectors() {
+		mine := map[string]kit.Pin{}
+		for _, o := range c.Ops {
+			declaredNames[o.Name] = true
+			if p, ok := pins[o.Name]; ok {
+				mine[o.Name] = p
+			}
+		}
+		for _, d := range kit.DiffPins(c, mine) {
+			t.Errorf("%s: %s", c.Name, d)
+		}
+	}
+	for name := range pins {
+		if !declaredNames[name] {
+			t.Errorf("pins lists %s, which no connector declares", name)
+		}
+	}
+}
+
+// The four classes of the kit are the four classes of the policy package, with
+// the same spelling, and the same three values of reversibility.
+func TestKitClassesAgreeWithPolicy(t *testing.T) {
+	for kitClass, policyClass := range map[kit.Class]policy.Class{
+		kit.Routine: policy.ClassRoutine, kit.Gated: policy.ClassGated, kit.High: policy.ClassHigh, kit.Critical: policy.ClassCritical,
+	} {
+		if string(kitClass) != string(policyClass) || !kitClass.Valid() || !policyClass.Valid() {
+			t.Errorf("kit class %q and policy class %q disagree", kitClass, policyClass)
+		}
+	}
+	// Nothing the policy package accepts is missing from the kit.
+	for _, c := range []policy.Class{"routine", "gated", "high", "critical"} {
+		if !kit.Class(c).Valid() {
+			t.Errorf("policy class %q is not a kit class", c)
+		}
+	}
+	if kit.Class("low").Valid() || policy.Class("low").Valid() {
+		t.Error("an unknown class is valid")
+	}
+	// Reversibility: the catalog loader accepts exactly these three.
+	for _, r := range []kit.Reversibility{kit.Reversible, kit.Compensable, kit.Irreversible} {
+		src := "version: 1\nops:\n  x.y:\n    class: routine\n    reversibility: " + string(r) + "\n    surface: op\n    summary: s\n    usage: u\n"
+		if r == kit.Irreversible {
+			src = strings.Replace(src, "routine", "high", 1)
+		}
+		if _, err := policy.LoadCatalog([]byte(src)); err != nil || !r.Valid() {
+			t.Errorf("reversibility %q: the catalog loader says %v", r, err)
+		}
+	}
+}
+
 // The generated regions of api/manual.yaml and api/openapi.yaml are the
 // declarations, byte for byte. A changed declaration with no regeneration, and
 // a hand edit inside a region, both fail here.

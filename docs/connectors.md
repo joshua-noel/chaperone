@@ -92,14 +92,20 @@ What is NOT derived, on purpose, and stays hand-written in the connector:
 ### Why a declaration cannot loosen a class
 
 - The class is also written in the generated manual entry, so a change of class is a visible change in the same pull request.
-- Each connector pins its classes in a test written by hand (`TestClassesAreThePinnedOnes`). Loosening a class means changing the declaration, the manual entry and the pin together.
-- `kit.Op.Validate` refuses an irreversible operation that is routine or gated.
+- Every declared operation is pinned in one table written by hand, `pins` in `internal/connectors/declared/declared_test.go`. `TestEveryDeclaredOpIsPinned` fails for an operation with no pin, so a new connector cannot skip it. Loosening a class means changing the declaration, the manual entry and the pin together.
+- `kit.Op.Validate` refuses an irreversible operation that is routine or gated. *Decided for now:* this rule stays. The owner has not answered yet.
 - The catalog loader still refuses a duplicate key and a `secrets.*` operation that is not critical. A declared operation cannot replace a hand-written entry: the generator only rewrites its own marked regions, and a test counts the entries.
 - The baseline loader still refuses a catalog operation with no baseline rule, so a declared operation is off until a policy change turns it on.
 
 ### When a generated command is not enough
 
 Set `CLI: kit.CLI{Custom: true}` in the declaration and write the command in `cmd/chap/ops.go` as before. `TestEveryDeclaredOpHasExactlyOneCommand` fails when an operation has both or neither. The generic command handles: one ref (positional, or a flag with a default), bool flags, string flags, and the `--body` / `--body-file` pair. Anything else (a ref taken from git, a flag that depends on another flag) needs a custom command.
+
+For a custom command, `kit` checks only what the catalog and the params schema need: the adapter name, and each param's name, kind and bounds. It does not check the ref's shape (`Target.Pattern`, `Positional`, `Flag`, `Default`, `Why`), the flag names, or the `body` name of a text param, because the hand-written command owns those. Set `Target: kit.Target{Adapter: "github"}` for a ref that is read from git.
+
+The params schema is limited by what `kit` can write. Every param that is not a bool is written as a string with `minLength` and `maxLength`. An integer, a list or a pattern param needs a new `Kind` in `kit` first (and in `writeParams`); until then it cannot be declared, even for a custom command.
+
+`TestGeneratedCommandsHaveNoFlagClash` builds the flag set of every generated command, so a declared flag that has the name of a common flag (`--json`, `--project`, `--reason`, `--approval`, `--request`, `--wait`) fails a test. `TestKitKnowsTheCommonFlags` checks that `kit.CommonFlags` is the list `chap` registers.
 
 ## Rules a connector must follow
 
@@ -119,7 +125,7 @@ Rules 1, 2, 3, 5 and 6 have no shared test yet; each connector tests them for it
 
 Goal: `intake.show`, which reads one labelled item. The same steps work for any simple operation of a declared connector. `TestAFifthOperationNeedsOnlyItsDeclarationAndAnAdapter` (`internal/connectors/declared`) and `TestAFifthOperationGetsItsCommandFromItsDeclaration` (`cmd/chap`) run this walkthrough with a test-only operation. It is not in the shipped catalog.
 
-1. **Declare it** in `linearspec/spec.go`: a `kit.Op` with the name, class, reversibility, summary, usage, rate, doc, target and params. Add it to `Connector.Ops`. Add its class and reversibility to the table in `spec_test.go`.
+1. **Declare it** in `linearspec/spec.go`: a `kit.Op` with the name, class, reversibility, summary, usage, rate, doc, target and params. Add it to `Connector.Ops`. Add its class and reversibility to `pins` in `internal/connectors/declared/declared_test.go`.
 2. **Write the adapter** in `internal/connectors/linear` (a new file, or `intake.go`). Parse the request, apply the policy through `base.policy` and the target checks, then write `Check` and `Execute`. Use `linearspec.Show.ParamNames()` for the allowed params.
 3. **Bind it**: one line in the map of `Adapters` in `adapter.go`. Without it, `chapd` refuses to start.
 4. **Write the tests** next to the adapter: the allowed request, each refusal and its cause code, the idempotent write, no secret in the result.
@@ -142,10 +148,10 @@ Adding a whole new connector adds one line to `internal/connectors/declared/decl
 
 ## What is not covered yet
 
-- **GitHub and Google are not migrated.** Their operations are declared by hand in the old places. `kit` has no support yet for the operations that need a custom command, or for a surface other than `op` (the git proxy).
+- **GitHub and Google are not migrated.** Their operations are declared by hand in the old places. `kit` supports a custom command only in part (see above: it does not yet write integer, list or pattern params), and has no support for a surface other than `op` (the git proxy).
 - **No scaffold command.** `chap connector new <name>` does not exist. A new connector is copied from `linear` and `linearspec` by hand.
 - **No conformance suite.** The rules above are tested by each connector for itself. A shared suite (`Check` changes nothing, `Execute` twice acts once, no secret in any output, untrusted marking, every refusal has a known cause code) is milestone 2.3.
 - **Shared helpers are not shared.** The HTTP client that never logs a credential, the rate limit and retry code, and the text cleaning (`clean`, `checkText`) live in `linear`. Other connectors have their own copies.
-- **The baseline is still edited by hand.** A new operation needs its one baseline line. This is deliberate for the switch that turns an operation on, but the line for a new, disabled operation could be added by the generator.
+- **The baseline is still edited by hand.** A new operation needs its one baseline line. This is deliberate for the switch that turns an operation on, but the line for a new, disabled operation could be added by the generator. *Decided for now:* no generation of the baseline, and the rate stays written in both the declaration and the baseline, with a test that they agree. The owner has not answered yet.
 - **Approval card text.** An adapter adds evidence to a card in `Check`. The declaration does not describe it.
 - **`api/openapi.yaml` and `api/manual.yaml` need a regeneration step.** Go does not run `go generate` during `go build`; the tests catch a missed run.

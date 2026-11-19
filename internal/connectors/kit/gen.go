@@ -184,6 +184,9 @@ func (f File) spliceOne(lines []string, c Connector) ([]string, error) {
 			}
 			begin = i
 		case t == strings.TrimSpace(endLine(indent, c.Name)):
+			if end >= 0 {
+				return nil, fmt.Errorf("%s has two end markers for connector %s; entries between them would be deleted by a regeneration", f.name(), c.Name)
+			}
 			end = i
 		}
 	}

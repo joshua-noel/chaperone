@@ -44,29 +44,45 @@ func kitCommands(ops []kit.Op) []*command {
 	return out
 }
 
-func runDeclared(o kit.Op, a *app, c *command, args []string) int {
-	var co common
-	var tf textFlags
-	var teamFlag string
-	bools := map[string]*bool{}
-	strs := map[string]*string{}
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
+// declaredFlags holds the values of the flags of one generated command.
+type declaredFlags struct {
+	co       common
+	tf       textFlags
+	teamFlag string
+	bools    map[string]*bool
+	strs     map[string]*string
+}
+
+// registerDeclared defines every flag of the generated command of o: the
+// common ones, the params' and the ref's. The flag package panics when a flag
+// is defined twice, so a clash between a declared flag and a common one fails
+// TestGeneratedCommandsHaveNoFlagClash instead of surprising a user.
+func registerDeclared(o kit.Op, fs *flag.FlagSet, a *app) *declaredFlags {
+	d := &declaredFlags{bools: map[string]*bool{}, strs: map[string]*string{}}
+	d.co.register(fs, a)
 	for _, p := range o.Params {
 		switch p.Kind {
 		case kit.Bool:
-			bools[p.Name] = fs.Bool(p.FlagName(), false, p.Help)
+			d.bools[p.Name] = fs.Bool(p.FlagName(), false, p.Help)
 		case kit.String:
-			strs[p.Name] = fs.String(p.FlagName(), "", p.Help)
+			d.strs[p.Name] = fs.String(p.FlagName(), "", p.Help)
 		case kit.Text:
-			tf.register(fs)
+			d.tf.register(fs)
 		}
 	}
+	if o.Target.Positional == "" {
+		fs.StringVar(&d.teamFlag, o.Target.Flag, "", o.Target.Help)
+	}
+	return d
+}
+
+func runDeclared(o kit.Op, a *app, c *command, args []string) int {
+	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
+	d := registerDeclared(o, fs, a)
+	co, tf, bools, strs := &d.co, &d.tf, d.bools, d.strs
 	positionals := 0
 	if o.Target.Positional != "" {
 		positionals = 1
-	} else {
-		fs.StringVar(&teamFlag, o.Target.Flag, "", o.Target.Help)
 	}
 	pos, code, done := a.parse(c, fs, args, positionals, positionals)
 	if done {
@@ -82,8 +98,8 @@ func runDeclared(o kit.Op, a *app, c *command, args []string) int {
 	ref, given := o.Target.Default, false
 	if positionals == 1 {
 		ref, given = pos[0], true
-	} else if teamFlag != "" {
-		ref, given = teamFlag, true
+	} else if d.teamFlag != "" {
+		ref, given = d.teamFlag, true
 	}
 	if given && !regexp.MustCompile(o.Target.Pattern).MatchString(ref) {
 		return a.usageErr(c, "%s", o.Target.Why)
@@ -117,5 +133,5 @@ func runDeclared(o kit.Op, a *app, c *command, args []string) int {
 			}
 		}
 	}
-	return a.ask(&co, opReq{op: o.Name, target: target{o.Target.Adapter, ref}, params: params})
+	return a.ask(co, opReq{op: o.Name, target: target{o.Target.Adapter, ref}, params: params})
 }

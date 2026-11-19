@@ -1,7 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,4 +103,44 @@ func TestAFifthOperationGetsItsCommandFromItsDeclaration(t *testing.T) {
 			t.Errorf("exit %d, requests %q, stderr %q", code, chapd.reqs, ta.errb)
 		}
 	})
+}
+
+// The flag package panics when a flag is defined twice. Building the flag set of
+// every generated command therefore fails here, in a test, when a declared flag
+// has the name of a common one, and not when a person runs the command.
+func TestGeneratedCommandsHaveNoFlagClash(t *testing.T) {
+	build := func(o kit.Op) (err any) {
+		defer func() { err = recover() }()
+		registerDeclared(o, flag.NewFlagSet(o.Name, flag.ContinueOnError), newTestApp(t, env{}).app)
+		return nil
+	}
+	for _, o := range declared.Ops() {
+		if o.CLI.Custom {
+			continue
+		}
+		if err := build(o); err != nil {
+			t.Errorf("%s: building its flags panics: %v", o.Name, err)
+		}
+	}
+	// The check is not blind: a clash does panic.
+	clash := declared.Ops()[0]
+	clash.Params = append([]kit.Param{{Name: "json", Kind: kit.Bool, Help: "x"}}, clash.Params...)
+	if build(clash) == nil {
+		t.Error("a declared flag named like a common one must make the flag set panic")
+	}
+}
+
+// kit refuses a clash with the common flags without building a flag set, from
+// its own list. That list must be the list chap registers.
+func TestKitKnowsTheCommonFlags(t *testing.T) {
+	fs := flag.NewFlagSet("x", flag.ContinueOnError)
+	var co common
+	co.register(fs, newTestApp(t, env{}).app)
+	var got []string
+	fs.VisitAll(func(f *flag.Flag) { got = append(got, f.Name) })
+	slices.Sort(got)
+	want := slices.Sorted(slices.Values(kit.CommonFlags))
+	if !slices.Equal(got, want) {
+		t.Errorf("common flags registered by chap %v, kit.CommonFlags %v", got, want)
+	}
 }

@@ -28,7 +28,7 @@
 // regions, and [Connector.Validate] holds every declared operation to the
 // loader's own limits. A declaration also cannot make a class looser without
 // showing: the generated manual entry is part of the diff, and each connector
-// pins its classes in a test (see [DiffPins]).
+// is pinned in the one table of internal/connectors/declared (see [DiffPins]).
 //
 // This package uses the standard library only. `chap` imports it, and `chap`
 // must stay small.
@@ -47,7 +47,8 @@ import (
 type Class string
 
 // The four classes. The authority for what each one means is internal/policy;
-// a test in package declared checks that these agree with it.
+// TestKitClassesAgreeWithPolicy in package declared checks that the four values
+// here are the four values there.
 const (
 	Routine  Class = "routine"
 	Gated    Class = "gated"
@@ -222,6 +223,11 @@ var (
 	flagTokenRE = regexp.MustCompile(`--[a-z][a-z0-9-]*`)
 )
 
+// CommonFlags are the flags every op command of chap takes (cmd/chap's
+// common.register). A generated command may not reuse one. A test in cmd/chap
+// checks that this list is the list chap registers.
+var CommonFlags = []string{"json", "project", "reason", "approval", "request", "wait"}
+
 // Limits of the catalog loader (internal/policy), which has the last word.
 const (
 	maxSummary = 60
@@ -259,29 +265,39 @@ func (o Op) Validate() error {
 			return fail("a text has a control character at byte %d", i)
 		}
 	}
-	if err := o.Target.validate(); err != nil {
+	// A custom command is written by hand, so its ref may be computed (read
+	// from git, for instance) and its flags are its own. What the catalog and
+	// the params schema need is still checked: the adapter name, and each
+	// param's name, kind and bounds.
+	if err := o.Target.validate(o.CLI.Custom); err != nil {
 		return fail("%v", err)
 	}
 	seen := map[string]bool{}
-	flags := map[string]bool{"json": true, "project": true, "reason": true, "approval": true, "request": true, "wait": true, "help": true, "h": true}
+	flags := map[string]bool{"help": true, "h": true}
+	for _, f := range CommonFlags {
+		flags[f] = true
+	}
 	if o.Target.Flag != "" {
 		flags[o.Target.Flag] = true
 	}
 	for _, p := range o.Params {
-		if err := p.validate(); err != nil {
+		if err := p.validate(o.CLI.Custom); err != nil {
 			return fail("param %q: %v", p.Name, err)
 		}
 		if seen[p.Name] {
 			return fail("param %q is declared twice", p.Name)
 		}
 		seen[p.Name] = true
+		if o.CLI.Custom {
+			continue
+		}
 		names := []string{p.FlagName()}
 		if p.Kind == Text {
 			names = []string{"body", "body-file"}
 		}
 		for _, f := range names {
 			if flags[f] {
-				return fail("flag --%s is used twice (the common flags are --json --project --reason --approval --request --wait)", f)
+				return fail("flag --%s is used twice (the common flags are --%s)", f, strings.Join(CommonFlags, " --"))
 			}
 			flags[f] = true
 		}
@@ -306,10 +322,14 @@ func (o Op) Validate() error {
 	return nil
 }
 
-func (t Target) validate() error {
-	switch {
-	case !adapterRE.MatchString(t.Adapter):
+func (t Target) validate(custom bool) error {
+	if !adapterRE.MatchString(t.Adapter) {
 		return fmt.Errorf("target adapter %q is not a short lower-case name", t.Adapter)
+	}
+	if custom {
+		return nil
+	}
+	switch {
 	case (t.Positional == "") == (t.Flag == ""):
 		return errors.New("target needs exactly one of Positional and Flag")
 	case t.Why == "":
@@ -328,31 +348,39 @@ func (t Target) validate() error {
 	return nil
 }
 
-func (p Param) validate() error {
+// validate checks a param. The name, the kind and the bounds go into the
+// params schema, so they are checked for every op. The flag rules are for the
+// generated command only: a custom command has its own flags.
+func (p Param) validate(custom bool) error {
 	if !paramNameRE.MatchString(p.Name) {
 		return errors.New("name must be lower case letters, digits and _")
 	}
-	if p.Flag != "" && !flagNameRE.MatchString(p.Flag) {
-		return errors.New("flag must be lower case letters, digits and -")
-	}
 	switch p.Kind {
-	case Bool:
-		if p.Required {
-			return errors.New("a bool flag cannot be required")
-		}
-		if p.Help == "" {
-			return errors.New("a bool flag needs Help")
-		}
-	case String:
-		if p.Placeholder == "" || p.Help == "" {
-			return errors.New("a string flag needs Placeholder and Help")
-		}
-	case Text:
-		if p.Name != "body" {
-			return errors.New("a text param is named body (--body, --body-file); write a custom command for another name")
-		}
+	case Bool, String, Text:
 	default:
 		return errors.New("unknown kind")
+	}
+	if !custom {
+		if p.Flag != "" && !flagNameRE.MatchString(p.Flag) {
+			return errors.New("flag must be lower case letters, digits and -")
+		}
+		switch p.Kind {
+		case Bool:
+			if p.Required {
+				return errors.New("a bool flag cannot be required")
+			}
+			if p.Help == "" {
+				return errors.New("a bool flag needs Help")
+			}
+		case String:
+			if p.Placeholder == "" || p.Help == "" {
+				return errors.New("a string flag needs Placeholder and Help")
+			}
+		case Text:
+			if p.Name != "body" {
+				return errors.New("a text param is named body (--body, --body-file); write a custom command for another name")
+			}
+		}
 	}
 	if p.Kind != Bool && (p.MaxLength < 1 || p.MinLength < 0 || p.MinLength > p.MaxLength) {
 		return errors.New("MaxLength must be set, and MinLength must not exceed it")

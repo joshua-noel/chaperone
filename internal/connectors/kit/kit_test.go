@@ -74,12 +74,35 @@ func TestValidAndInvalidDeclarations(t *testing.T) {
 			t.Errorf("%s: want an error", name)
 		}
 	}
-	// A custom command is not held to the generic command's usage rule.
+	// A custom command is not held to the generic command's usage, target or
+	// flag rules: its ref may be computed, and its flags are its own.
 	o := good()
 	o.CLI.Custom = true
 	o.Usage = "chap notes display <id> --colour"
+	o.Target = Target{Adapter: "notes"} // the ref comes from git, say
+	o.Params = []Param{
+		{Name: "note", Kind: Text, MaxLength: 10},  // not named body
+		{Name: "json", Kind: String, MaxLength: 5}, // no placeholder, and a common flag's name
+		{Name: "all", Kind: Bool, Required: true},  // no help
+	}
 	if err := o.Validate(); err != nil {
 		t.Errorf("custom command: %v", err)
+	}
+	// What the params schema needs is still checked.
+	for name, mutate := range map[string]func(o *Op){
+		"bad adapter":                        func(o *Op) { o.Target.Adapter = "Notes" },
+		"unknown kind":                       func(o *Op) { o.Params[0].Kind = 9 },
+		"no bound":                           func(o *Op) { o.Params[0].MaxLength = 0 },
+		"bad param name":                     func(o *Op) { o.Params[0].Name = "No-Good" },
+		"duplicate param":                    func(o *Op) { o.Params[1].Name = "note" },
+		"still not irreversible and routine": func(o *Op) { o.Reversibility = Irreversible },
+	} {
+		c := o
+		c.Params = append([]Param(nil), o.Params...)
+		mutate(&c)
+		if err := c.Validate(); err == nil {
+			t.Errorf("custom, %s: want an error", name)
+		}
 	}
 }
 
@@ -303,6 +326,7 @@ func TestSpliceRefusesBadRegions(t *testing.T) {
 		"begin without end":   strings.Replace(text, "  # END generated: connector notes", "", 1),
 		"end without begin":   strings.Replace(text, "# BEGIN generated: connector notes", "# something", 1),
 		"two regions":         text + "\n  # BEGIN generated: connector notes (x)\n  # END generated: connector notes\n",
+		"two end markers":     text + "  hand_written:\n    class: routine\n  # END generated: connector notes\n",
 		"a removed connector": text,
 	} {
 		conns := []Connector{c}
