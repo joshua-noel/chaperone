@@ -64,6 +64,14 @@ var (
 		"**/*.exe", "**/*.dll", "**/*.so", "**/*.dylib", "**/*.bin", "**/*.jar", "**/*.msi",
 		"**/*.com", "**/*.scr", "**/*.vbs", "**/*.wsf", "**/*.lnk",
 		"**/uv.lock",
+		// Files and folders that instruct or configure a coding agent, an editor agent or an MCP client: a PR that
+		// edits one changes what the agents of the project are told or may run. Matched at any depth, because
+		// these tools read them in subfolders too.
+		"**/gemini.md", "**/agent.md", "**/claude.local.md", "**/skill.md", "**/copilot-instructions.md", "**/*.instructions.md",
+		"**/.cursorrules", "**/.windsurfrules", "**/.clinerules", "**/.aider*", "**/.mcp.json", "**/mcp.json",
+		"**/.claude/**", "**/.cursor/**", "**/.clinerules/**", "**/.codex/**", "**/.gemini/**", "**/.omp/**",
+		// A documentation build runs these.
+		"**/.readthedocs.yaml", "**/.readthedocs.yml",
 	}
 	// baselineMedium raises paths that would otherwise be low (every *.txt is
 	// docs) or that tell the build what to install: a Python requirements file
@@ -73,6 +81,10 @@ var (
 	// the floor does not depend on the extension list.
 	baselineMedium = []string{
 		"**/requirements*.txt", "**/constraints*.txt", "**/pyproject.toml",
+		// A build script that the *.txt rule would call low.
+		"**/cmakelists.txt",
+		// An SVG can carry script; the other documentation types below are inert.
+		"docs/**/*.svg",
 	}
 	// baselineTests are the paths a PR weakens the checks through. Tests are
 	// low on their own (CI runs them), but deleting or skipping them is medium.
@@ -84,12 +96,17 @@ var (
 	// Jest, Vitest and Mocha skip, xit, xdescribe, xtest, .only (runs one test
 	// and skips the rest), pytest skip and xfail, unittest skip, JUnit
 	// @Disabled and @Ignore, Rust #[ignore].
-	skipMarker  = regexp.MustCompile(`(?i)(\.skip(now|f)?\s*\(|\b(skip|skipif|skipunless|xfail)\b\s*[(,)]|\bx(it|test|describe|context)\s*\(|\.only\s*\(|\bf(it|describe)\s*\(|pytest\.mark\.(skip|xfail)|unittest\.skip|@disabled\b|@ignore\b|#\[ignore\b)`)
+	skipMarker = regexp.MustCompile(`(?i)(\.skip(now|f)?\s*\(|\b(skip|skipif|skipunless|xfail)\b\s*[(,)]|\bx(it|test|describe|context)\s*\(|\.only\s*\(|\bf(it|describe)\s*\(|pytest\.mark\.(skip|xfail)|unittest\.skip|@disabled\b|@ignore\b|#\[ignore\b)`)
+	// Under docs/ only documentation file types are low. Anything else there falls through to the code rules, because
+	// a documentation build runs it (docs/conf.py for Sphinx, docs/hooks.py, a Makefile).
 	baselineLow = []string{
-		"docs/**", "**/*.md", "**/*.mdx", "**/*.txt", "license", "license.*",
-		"test/**", "tests/**", "e2e/**", "**/__tests__/**", "**/testdata/**",
+		"**/*.md", "**/*.mdx", "**/*.txt", "license", "license.*",
+		"docs/**/*.rst", "docs/**/*.adoc", "docs/**/*.png", "docs/**/*.jpg", "docs/**/*.jpeg", "docs/**/*.gif", "docs/**/*.webp",
+		"**/__tests__/**", "**/testdata/**",
 		"**/*_test.go", "**/*.test.*", "**/*.spec.*",
 	}
+	// testDirs are low on their own (CI runs the tests), except the build and shell files in them: see lowByBaseline.
+	testDirs = []string{"test/**", "tests/**", "e2e/**"}
 	// Code and asset extensions that count as "any other code path". A path with
 	// none of these, and no glob above, cannot be classified and is high.
 	codeExt = map[string]bool{
@@ -118,6 +135,13 @@ func (g PRTierGlobs) Validate() error {
 func validGlob(p string) error {
 	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, `\`) {
 		return fmt.Errorf("ops: bad tier glob %q", p)
+	}
+	// A path is low only when its form is plain (see cleanPath), and every other path is high. A glob that holds a
+	// character no plain name can hold could never match anything: refuse it, so it does not silently do nothing.
+	for _, r := range p {
+		if r > 0x7e || (!plainRune(r) && !strings.ContainsRune("*?^/", r)) {
+			return fmt.Errorf("ops: tier glob %q holds %q, which no plain path name can hold, so it would never match: a path with an accent, another script, ~ or other punctuation in its name is always high (docs/running-chapd.md)", p, r)
+		}
 	}
 	for _, seg := range strings.Split(p, "/") {
 		if seg == "**" {
@@ -200,6 +224,11 @@ func cleanPath(p string) (string, bool) {
 	return strings.ToLower(p), true
 }
 
+// plainRune reports whether r may be in a component of a plain path.
+func plainRune(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-+@()[],= ", r)
+}
+
 // plainSegment reports whether one component of a path is in the form cleanPath allows.
 func plainSegment(seg string) bool {
 	if seg == "" || seg == "." || seg == ".." || seg[0] == ' ' || seg[len(seg)-1] == ' ' || seg[len(seg)-1] == '.' {
@@ -236,7 +265,7 @@ func (g PRTierGlobs) classify(p string) (PRTier, bool) {
 	if anyGlob(g.Medium, name) || anyGlob(baselineMedium, name) {
 		return TierMedium, true
 	}
-	if anyGlob(baselineLow, name) || anyGlob(g.Low, name) {
+	if lowByBaseline(name) || anyGlob(g.Low, name) {
 		return TierLow, true
 	}
 	if codeExt[path.Ext(name)] {
@@ -341,4 +370,28 @@ func (g PRTierGlobs) Classify(files []PRFile) PRTierResult {
 		res.Paths = setters
 	}
 	return res
+}
+
+// lowByBaseline reports whether the baseline calls a (plain, lower-case) path low. Anything under test/, tests/ and
+// e2e/ is low, as tests are, except a build or shell file there (a Makefile, a Dockerfile, a script, a workflow or
+// compose file): that is run by a build or by a person, and is not a test.
+func lowByBaseline(name string) bool {
+	if anyGlob(testDirs, name) && buildFile(name) {
+		return false
+	}
+	return anyGlob(baselineLow, name) || anyGlob(testDirs, name)
+}
+
+// buildFile reports whether a lower-case path names a build, shell or pipeline file.
+func buildFile(name string) bool {
+	base := path.Base(name)
+	switch {
+	case base == "makefile", base == "gnumakefile", base == "justfile", strings.HasPrefix(base, "dockerfile"):
+		return true
+	}
+	switch path.Ext(base) {
+	case ".sh", ".bash", ".ps1", ".psm1", ".bat", ".cmd", ".mk", ".yml", ".yaml":
+		return true
+	}
+	return false
 }

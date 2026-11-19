@@ -99,7 +99,8 @@ func TestLowIsAStrictAllowListOnTheFormOfAPath(t *testing.T) {
 			add("sub/" + p)
 		}
 	}
-	for _, p := range []string{"agents.md", "claude.md", "requirements.txt", "constraints.txt", "pyproject.toml", ".github/copilot-instructions.md", "CODEOWNERS", ".gitattributes", "internal/app/app.go"} {
+	for _, p := range []string{"agents.md", "claude.md", "requirements.txt", "constraints.txt", "pyproject.toml", ".github/copilot-instructions.md", "CODEOWNERS", ".gitattributes", "internal/app/app.go",
+		"docs/conf.py", "docs/hooks.py", "docs/Makefile", "docs/.readthedocs.yaml", "docs/diagram.svg", "tests/Makefile", "tests/ci.yml", "tests/run.sh", "CMakeLists.txt", "GEMINI.md", ".claude/settings.json"} {
 		add(p)
 	}
 	if len(protected) < 100 {
