@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // A descriptor number the process owns, other than 0: only a pipe or FIFO is
@@ -99,5 +101,47 @@ func TestTerminalPassphraseSignalsRestoreEcho(t *testing.T) {
 		}
 		ft.feed.Close()
 		openTerminal = old
+	}
+}
+
+// The descriptor the operator gave must not be inherited by child processes.
+func TestFDPassphraseMakesTheOriginalCloseOnExec(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	fd := int(r.Fd())
+	if fd < 3 {
+		t.Skipf("pipe got descriptor %d", fd)
+	}
+	// As a shell leaves it for `3<` or `3<&0`: inheritable.
+	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFD, 0); err != nil {
+		t.Fatal(err)
+	}
+	flags := func() int { n, _ := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0); return n }
+	if flags()&unix.FD_CLOEXEC != 0 {
+		t.Fatal("could not clear close-on-exec")
+	}
+	if _, err := FDPassphrase(fd); err != nil {
+		t.Fatal(err)
+	}
+	if flags()&unix.FD_CLOEXEC == 0 {
+		t.Error("the passphrase descriptor can still be inherited by a child process")
+	}
+	// A refused descriptor is not touched.
+	f, err := os.CreateTemp(t.TempDir(), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	ffd := int(f.Fd())
+	unix.FcntlInt(uintptr(ffd), unix.F_SETFD, 0)
+	if _, err := FDPassphrase(ffd); err == nil {
+		t.Fatal("a regular file was accepted")
+	}
+	if n, _ := unix.FcntlInt(uintptr(ffd), unix.F_GETFD, 0); n&unix.FD_CLOEXEC != 0 {
+		t.Error("a refused descriptor was changed")
 	}
 }

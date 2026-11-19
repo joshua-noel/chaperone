@@ -3,7 +3,9 @@
 package vault
 
 import (
+	"encoding/binary"
 	"os"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -26,8 +28,14 @@ func init() {
 		return consoleTerminal{in, out}, nil
 	}
 	isTerminal = func(f *os.File) bool {
+		h := windows.Handle(f.Fd())
 		var mode uint32
-		return windows.GetConsoleMode(windows.Handle(f.Fd()), &mode) == nil
+		if windows.GetConsoleMode(h, &mode) == nil {
+			return true
+		}
+		// mintty, MSYS2 and Cygwin without the Windows pseudo-console give a
+		// program a named pipe in place of a console. It is a terminal too.
+		return isPtyPipeName(handleFileName(h))
 	}
 }
 
@@ -48,4 +56,20 @@ func (t consoleTerminal) disableEcho() (func(), error) {
 		return nil, err
 	}
 	return func() { _ = windows.SetConsoleMode(h, mode) }, nil
+}
+
+// handleFileName returns the name Windows gives the object behind h (for a
+// pipe, "\msys-...-pty0-to-master"), or "" if it cannot be read. It is the
+// call go-isatty makes.
+func handleFileName(h windows.Handle) string {
+	// FILE_NAME_INFO: a uint32 length in bytes, then the UTF-16 name.
+	buf := make([]byte, 4+2*windows.MAX_PATH)
+	if err := windows.GetFileInformationByHandleEx(h, windows.FileNameInfo, &buf[0], uint32(len(buf))); err != nil {
+		return ""
+	}
+	n := int(binary.LittleEndian.Uint32(buf)) / 2
+	if n == 0 || 4+2*n > len(buf) {
+		return ""
+	}
+	return windows.UTF16ToString(unsafe.Slice((*uint16)(unsafe.Pointer(&buf[4])), n))
 }

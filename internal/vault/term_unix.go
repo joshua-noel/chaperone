@@ -25,6 +25,7 @@ func init() {
 		_, err := unix.IoctlGetTermios(int(f.Fd()), ioctlGetTermios)
 		return err == nil
 	}
+	markCloseOnExec = unix.CloseOnExec
 	dupDescriptor = func(fd int) (*os.File, error) {
 		n, err := unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, 3)
 		if err != nil {

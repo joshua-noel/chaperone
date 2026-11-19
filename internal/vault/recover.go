@@ -72,9 +72,15 @@ func Recover(ctx context.Context, cfg Config, recoveryIdentity string) (n int, e
 	if recID.Recipient().String() != recRecipient {
 		return 0, ErrWrongRecoveryIdentity
 	}
-	if v, oerr := open(ctx, cfg); oerr == nil {
-		v.Close()
+	opened, oerr := open(ctx, cfg)
+	if oerr == nil {
+		opened.Close()
 		return 0, ErrRecoveryNotNeeded
+	}
+	// Any other failure to open is the reason recovery is wanted, but a signal
+	// that ended the passphrase prompt is the operator saying stop.
+	if errors.Is(oerr, errInterrupted) {
+		return 0, oerr
 	}
 
 	rows, err := db.QueryContext(ctx, `SELECT id FROM vault_secrets ORDER BY id`)

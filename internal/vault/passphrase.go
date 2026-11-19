@@ -246,6 +246,10 @@ func FDPassphrase(fd int) (PassphraseSource, error) {
 // system replace it.
 var isTerminal = func(*os.File) bool { return false }
 
+// markCloseOnExec sets close-on-exec on descriptor fd, so child processes do
+// not inherit it. The files for each operating system replace it.
+var markCloseOnExec = func(int) {}
+
 // dupDescriptor returns a new file over a duplicate of descriptor fd, so that
 // refusing the descriptor, or closing it after the read, cannot close the
 // original (which may belong to something else in this process). The files for
@@ -289,6 +293,13 @@ func openPassphraseFD(fd int) (*os.File, error) {
 		return refuse("is not a pipe or a file; give the passphrase through a pipe or with < file")
 	default:
 		return refuse("is not a pipe or FIFO; give the passphrase through a pipe")
+	}
+	if fd != 0 {
+		// The original stays open: only its number is known, and closing a
+		// descriptor that this code did not open is not its place. It must not
+		// leak into child processes (a second line of the pipe, or the write
+		// side of a service's credential), so it is made close-on-exec.
+		markCloseOnExec(fd)
 	}
 	return f, nil
 }

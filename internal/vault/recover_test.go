@@ -251,3 +251,35 @@ func TestRecoverWithTheKeyFolderGone(t *testing.T) {
 	}
 	v2.Close()
 }
+
+// A signal at the first (old-passphrase) prompt of `vault recover` stops
+// recovery; it is not read as "the vault does not open, carry on".
+func TestRecoverStopsWhenThePromptIsInterrupted(t *testing.T) {
+	ctx := context.Background()
+	w, _ := newTestPassphraseWrapper(testPassphrase)
+	e, v := newEnv(t, w)
+	if _, err := v.Import(ctx, Meta{ID: "k", Kind: "test", Owner: "t"}, []byte("a secret value of some length")); err != nil {
+		t.Fatal(err)
+	}
+	v.Close()
+
+	src := &staticPassphrase{err: errInterrupted}
+	cfg := e.cfg
+	cfg.Wrapper = newPassphraseWrapper(src, testWorkFactor)
+	if _, err := Recover(ctx, cfg, e.recovery); !errors.Is(err, errInterrupted) {
+		t.Fatalf("got %v", err)
+	}
+	if src.asked != 1 {
+		t.Errorf("asked %d times; an interrupt must not lead to a second prompt", src.asked)
+	}
+	if m, _ := filepath.Glob(filepath.Join(cfg.KeyDir, "retired-*")); len(m) != 0 {
+		t.Errorf("key files were retired: %v", m)
+	}
+	// Nothing changed: the old passphrase still opens the vault.
+	cfg.Wrapper, _ = newTestPassphraseWrapper(testPassphrase)
+	v2, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("the vault no longer opens: %v", err)
+	}
+	v2.Close()
+}
