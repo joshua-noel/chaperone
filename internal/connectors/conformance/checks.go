@@ -112,7 +112,8 @@ func (h *harness) checkActsOnce() []string {
 // ---- 3. No secret in any output ---------------------------------------------
 
 func (h *harness) checkNoSecret() []string {
-	logs := captureLogs(h.t)
+	logs, release := captureLogs()
+	defer release()
 	var tr transcript
 	var secrets, rigLogs []string
 	canBeHostile := false
@@ -152,17 +153,20 @@ func (h *harness) checkNoSecret() []string {
 	}
 	sweep("", false)
 	if len(secrets) == 0 {
-		return []string{"Rig.Secrets returned no credential after the samples ran: the suite has nothing to look for"}
+		return []string{"Rig.Secrets returned no credential after the samples ran: the fake was sent none, so the suite has nothing to look for. An adapter that is not implemented yet makes no call; a rig that ignores the canary or reports none is wrong"}
 	}
 	if canBeHostile {
 		sweep("hostile service, ", true)
+	} else {
+		h.t.Logf("%s: Rig.Hostile is nil, so the hostile-service pass (a service that rejects the credential and repeats it in its error text) did not run", h.op)
 	}
 	secrets = unique(append(secrets, Canary))
+	det := newDetector(secrets)
 
 	var out []string
 	seen := map[string]bool{}
 	report := func(where, text string) {
-		for _, l := range leaks(text, secrets) {
+		for _, l := range det.find(text) {
 			key := where + "|" + l
 			if !seen[key] {
 				seen[key] = true
@@ -351,14 +355,25 @@ func (h *harness) checkServiceText() []string {
 		if !strict {
 			break
 		}
-		b := h.plantAndRun(Planted{Control: "plain words", Secret: full.Secret})
+		// The secret is in the main text as well as in Secret, so a Plant that
+		// drops Secret still puts it where the adapter reads it. The result
+		// must show that the text reached the adapter: the word, or a mark that
+		// the item was withheld.
+		b := h.plantAndRun(Planted{Control: ControlWord + " " + full.Secret, Secret: full.Secret})
 		checkLines(b)
 		if ran(b) {
+			traced := false
 			for _, t := range b.strs {
 				if strings.Contains(t, full.Secret) {
 					out = append(out, problem(who, "service text shaped like a secret is not withheld: the result carries it"))
 					break
 				}
+			}
+			for _, t := range b.strs {
+				traced = traced || strings.Contains(t, ControlWord) || strings.Contains(strings.ToLower(t), "withheld")
+			}
+			if !traced {
+				out = append(out, problem(who, "the planted secret-shaped text left no trace in the result (neither the word nor a withheld mark), so the check proved nothing: Plant must put it where the first valid sample reads it"))
 			}
 		}
 	}

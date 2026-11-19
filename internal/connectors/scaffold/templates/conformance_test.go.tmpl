@@ -51,7 +51,9 @@ func newRig(t testing.TB, canary string) *conformance.Rig {
 		Adapters:      ads,
 		WriteCalls:    fake.WriteCalls,
 		WritesApplied: fake.WritesApplied,
-		Secrets:       func() []string { return append([]string{canary}, fake.Credentials()...) },
+		// Only what the fake was sent: a rig that listed the canary itself would
+		// hide an adapter that ignores it.
+		Secrets: fake.Credentials,
 		Hostile:       func() { fake.Hostile("rotated-" + canary) },
 		World:         fake,
 	}

@@ -3,6 +3,7 @@ package conformance
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -15,6 +16,7 @@ import (
 	"github.com/joshua-noel/chaperone/internal/connectors/kit"
 	"github.com/joshua-noel/chaperone/internal/denialtext"
 	"github.com/joshua-noel/chaperone/internal/ops"
+	"github.com/joshua-noel/chaperone/internal/redact"
 )
 
 // harness is the state of one evaluation: one connector, one operation.
@@ -252,20 +254,27 @@ func (l *logCapture) String() string {
 	return l.buf.String()
 }
 
+// logMu is held while the default loggers are redirected: they are process
+// wide, so two evaluations that capture at once would see each other's lines
+// and restore each other's loggers in the wrong order. A second caller waits.
+var logMu sync.Mutex
+
 // captureLogs sends the default slog logger and the log package to a buffer
-// until the test ends. A connector that logs through either is seen; one that
-// logs to its own logger reports it in Rig.Logs.
-func captureLogs(t testing.TB) *logCapture {
-	t.Helper()
-	l := &logCapture{}
-	prevSlog, prevOut := slog.Default(), log.Writer()
+// until release is called. A connector that logs through either is seen; one
+// that logs to its own logger reports it in Rig.Logs. release restores the
+// loggers and the flags of the log package.
+func captureLogs() (l *logCapture, release func()) {
+	logMu.Lock()
+	l = &logCapture{}
+	prevSlog, prevOut, prevFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewTextHandler(l, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	log.SetOutput(l)
-	t.Cleanup(func() {
+	return l, func() {
 		slog.SetDefault(prevSlog)
 		log.SetOutput(prevOut)
-	})
-	return l
+		log.SetFlags(prevFlags)
+		logMu.Unlock()
+	}
 }
 
 // secretLabel names a credential for a message without printing it.
@@ -276,15 +285,59 @@ func secretLabel(s string) string {
 	return fmt.Sprintf("a credential the fake saw (%d bytes)", len(s))
 }
 
-// leaks returns the labels of the credentials found in text. A long value is
-// also looked for by its last 24 bytes, so a clipped copy is seen.
-func leaks(text string, secrets []string) []string {
-	var found []string
-	for _, s := range secrets {
+// detector finds credentials in text. It looks for the value as it is, in
+// lower and upper case, and in the forms the redaction registry knows (base64,
+// hex, JSON-escaped), and, for a value of 32 bytes or more, for its first 24
+// bytes in any case, so a clipped copy is seen. A value split across two
+// fields is not found.
+type detector struct {
+	secrets []string
+	reg     *redact.Registry
+	byID    map[string]string
+}
+
+func newDetector(secrets []string) *detector {
+	d := &detector{reg: redact.NewRegistry(), byID: map[string]string{}}
+	for _, s := range unique(secrets) {
 		if len(s) < 8 {
 			continue
 		}
-		if strings.Contains(text, s) || (len(s) >= 48 && strings.Contains(text, s[len(s)-24:])) {
+		d.secrets = append(d.secrets, s)
+		for i, v := range []string{s, strings.ToLower(s), strings.ToUpper(s)} {
+			id := fmt.Sprintf("s%d-%d", len(d.secrets), i)
+			if d.reg.Set(id, []byte(v)) == nil {
+				d.byID[id] = s
+			}
+		}
+	}
+	return d
+}
+
+// find returns the labels of the credentials found in text.
+func (d *detector) find(text string) []string {
+	hit := map[string]bool{}
+	if _, res := d.reg.Redact(text); res.Blocked() {
+		for _, h := range res.Hits {
+			if s, ok := d.byID[h.SecretID]; ok {
+				hit[s] = true
+			}
+		}
+	}
+	low := strings.ToLower(text)
+	for _, s := range d.secrets {
+		ls := strings.ToLower(s)
+		if strings.Contains(low, ls) || (len(s) >= 32 && strings.Contains(low, ls[:24])) {
+			hit[s] = true
+		}
+		for _, n := range base64Needles(s) {
+			if strings.Contains(text, n) {
+				hit[s] = true
+			}
+		}
+	}
+	var found []string
+	for _, s := range d.secrets {
+		if hit[s] {
 			found = append(found, secretLabel(s))
 		}
 	}
@@ -298,6 +351,24 @@ func unique(in []string) []string {
 		if s != "" && !seen[s] {
 			seen[s] = true
 			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// base64Needles are the pieces of the base64 form of s that stay the same
+// whatever bytes come before s in the encoded text: the encoding of s at each of
+// the three alignments, less the characters that the neighbours change. This
+// finds a credential inside "user:" + credential, encoded.
+func base64Needles(s string) []string {
+	var out []string
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding} {
+		for shift := range 3 {
+			full := enc.EncodeToString(append(make([]byte, shift), s...))
+			lead := []int{0, 2, 3}[shift]
+			if len(full) > lead+10 {
+				out = append(out, full[lead:len(full)-4])
+			}
 		}
 	}
 	return out

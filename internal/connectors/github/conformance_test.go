@@ -1,7 +1,10 @@
 package github_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,10 +44,19 @@ type recorder struct {
 	writes  int
 	applied int
 	creds   map[string]bool
+	message func() string // the text to put in the answer to update-branch
 }
 
 func (r *recorder) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := r.next.RoundTrip(req)
+	if err == nil && r.message != nil && req.Method == http.MethodPut && strings.HasSuffix(req.URL.Path, "/update-branch") && resp.StatusCode == http.StatusAccepted {
+		if msg := r.message(); msg != "" {
+			body, _ := json.Marshal(map[string]string{"message": msg, "url": "https://github.test/update"})
+			resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+			resp.ContentLength = int64(len(body))
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, cred, ok := strings.Cut(req.Header.Get("Authorization"), " "); ok {
@@ -91,6 +103,7 @@ type world struct {
 	issue, closedIssue int    // labelled source:error-watcher
 	plainIssue, pullNo int    // no label; a pull request seen as an issue
 	runHead            string
+	updateMessage      string // the text GitHub's answer to update-branch carries; empty leaves the fake's own
 }
 
 func verify(conclusion string) ghtest.Check {
@@ -178,6 +191,7 @@ func newRig(connector kit.Connector) func(t testing.TB, canary string) *conforma
 		})
 		w := newWorld(t, in)
 		w.s = s
+		rec.message = func() string { return w.updateMessage }
 		minter := &ops.InstallationMinter{Client: c}
 		projectOf := func(name string) (ops.PRProject, bool) {
 			if name == projectName {
@@ -404,8 +418,13 @@ func TestConformanceGitHub(t *testing.T) {
 					return w.pr(w.stalePR), map[string]any{"expected_head_sha": w.staleSHA()}
 				}, otherProject),
 			},
-			Text:  conformance.NoServiceText,
-			Plant: func(*conformance.Rig, conformance.Planted) {}, // the result holds shas and a message of the fake's own
+			// The result carries GitHub's own `message` of the update (clipped and
+			// cleaned by the adapter). Plant puts the hostile text there: the fake
+			// has no such field to set, so the transport rewrites the answer.
+			Text: conformance.CleanedText,
+			Plant: func(r *conformance.Rig, p conformance.Planted) {
+				r.World.(*world).updateMessage = strings.TrimSpace(p.Control + " " + p.Long + " " + p.Secret)
+			},
 		},
 		githubspec.NamePRMerge: {
 			Valid: []conformance.Sample{sample("a green PR", githubspec.NamePRMerge, githubspec.Adapter, mergeBuild, nil)},
@@ -526,9 +545,8 @@ func TestConformanceCI(t *testing.T) {
 					}, nil),
 					refused("a project with no pr block", ops.CodePolicyRefused, githubspec.NameCIReport, githubspec.CIAdapter, report(ciRun), otherProject),
 				},
-				NotRepeatable: "a second report posts a second check run, because the adapter does not look for its earlier one by external_id (gh.CheckRun has no ExternalID yet); pr.merge reads the latest check run of that name on the head, so the repeat replaces the first and the effect is the same (ADR-002, amendment 10). chapd calls Execute once for each execution id",
-				Text:          conformance.NoServiceText,
-				Plant:         func(*conformance.Rig, conformance.Planted) {}, // the result is chapd's own record of the run
+				Text:  conformance.NoServiceText,
+				Plant: func(*conformance.Rig, conformance.Planted) {}, // the result is chapd's own record of the run
 			},
 		},
 	})

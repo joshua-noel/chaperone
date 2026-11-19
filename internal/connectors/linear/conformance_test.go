@@ -2,7 +2,9 @@ package linear
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -52,11 +54,13 @@ func conformanceRig(t testing.TB, canary string) *conformance.Rig {
 	vault.set(SecretClientSecret, canary+"\n")
 	reg := redact.NewRegistry()
 	ep := Endpoints{API: fake.URL + "/graphql", Token: fake.URL + "/oauth/token"}
-	toks, err := NewTokenSource(TokenConfig{Secrets: vault, Registry: reg, Endpoints: ep, Now: clk.Now})
+	wire := &wireRecorder{next: http.DefaultTransport}
+	hc := &http.Client{Transport: wire, Timeout: 30 * time.Second}
+	toks, err := NewTokenSource(TokenConfig{Secrets: vault, Registry: reg, Endpoints: ep, HTTP: hc, Now: clk.Now})
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := NewClient(ClientConfig{Endpoints: ep, Tokens: toks, Now: clk.Now})
+	client, err := NewClient(ClientConfig{Endpoints: ep, Tokens: toks, HTTP: hc, Now: clk.Now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,11 +105,10 @@ func conformanceRig(t testing.TB, canary string) *conformance.Rig {
 			return n
 		},
 		Secrets: func() []string {
-			out := append([]string{canary, lineartest.ClientID}, fake.Tokens()...)
-			for _, r := range fake.Requests() {
-				out = append(out, r.Token)
-			}
-			return out
+			// What the service was sent: the client secret in the token request, and
+			// each access token. A rig that listed the canary itself would hide a
+			// connector that ignores it.
+			return append(wire.credentials(), fake.Tokens()...)
 		},
 		Logs:    logs.String,
 		Hostile: func() { fake.Hostile("rotated-" + canary) },
@@ -219,4 +222,42 @@ func TestConformance(t *testing.T) {
 			},
 		},
 	})
+}
+
+// wireRecorder is the HTTP transport of the client. It remembers every
+// credential sent: the user and password of Basic authentication, a client
+// secret in a form body, and a bearer token.
+type wireRecorder struct {
+	mu    sync.Mutex
+	next  http.RoundTripper
+	creds []string
+}
+
+func (w *wireRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	var seen []string
+	if u, p, ok := req.BasicAuth(); ok {
+		seen = append(seen, u, p)
+	}
+	if _, tok, ok := strings.Cut(req.Header.Get("Authorization"), "Bearer "); ok {
+		seen = append(seen, tok)
+	}
+	if req.Body != nil && req.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
+		raw, _ := io.ReadAll(req.Body)
+		req.Body = io.NopCloser(strings.NewReader(string(raw)))
+		for _, kv := range strings.Split(string(raw), "&") {
+			if v, ok := strings.CutPrefix(kv, "client_secret="); ok {
+				seen = append(seen, v)
+			}
+		}
+	}
+	w.mu.Lock()
+	w.creds = append(w.creds, seen...)
+	w.mu.Unlock()
+	return w.next.RoundTrip(req)
+}
+
+func (w *wireRecorder) credentials() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.creds...)
 }

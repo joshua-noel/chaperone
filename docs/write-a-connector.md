@@ -39,11 +39,12 @@ The tool is a `go run` command and not a `chap` command. `chap` is the client th
 go test ./internal/connectors/notes/...
 ```
 
-The test fails. Every failure says `is not implemented yet`. That is the skeleton working: the adapter of the example operation refuses every valid request until you write it. Three checks already pass, because they test what the skeleton does already:
+The test fails. Every failure says `is not implemented yet`. That is the skeleton working: the adapter of the example operation refuses every valid request until you write it. Two checks already pass, because they test what the skeleton does already:
 
-- `no_secret_in_output`
 - `refusals_have_a_known_code`
 - `class_matches_pin`
+
+`no_secret_in_output` fails too: the fake was sent no credential, because the adapter makes no call yet, and the suite will not pass a check that has nothing to look for.
 
 To see each check by name, add `-v`.
 
@@ -130,7 +131,7 @@ The suite drives your real adapter against the fake service. A check fails with 
 | --- | --- |
 | `check_has_no_side_effects` | `Check` sends no write to the fake in three calls, answers the same each time, and does not change the request. |
 | `execute_acts_once` | `Execute` twice with one execution id changes the fake once. For a read-only operation it also proves that `Execute` sends no write. |
-| `no_secret_in_output` | The credential is in no `CheckResult`, no `Outcome`, no error, no refusal and no log line. The suite makes its own value the credential. It also looks for every credential the fake saw. It runs the samples again against a service that rejects the credential and repeats it in its error text. |
+| `no_secret_in_output` | The credential is in no `CheckResult`, no `Outcome`, no error, no refusal and no log line. The suite makes its own value the credential. It looks for every credential the fake was sent (`Rig.Secrets`), as it is, in other case and in encoded forms. It runs the samples again against a service that rejects the credential and repeats it in its error text. |
 | `refusals_have_a_known_code` | Every refusal your invalid samples cause is a `*ops.Refusal` with a cause code that chapd knows. `Execute` does not act on the same requests. |
 | `params_and_limits_are_enforced` | A param that is not declared, a missing required param, a value of the wrong kind and a value past a declared limit are refused. The suite makes these requests from your declaration. It checks `Check` and `Execute`. |
 | `service_text_is_untrusted` | Text from the service is cleaned of control and format characters and capped, in the result, in the check lines and in refusals. An operation of the strict kind (`ServiceText`) also marks the result `untrusted_text` and withholds an item that looks like a secret. An operation that says it returns no service text does not echo any. |
@@ -154,7 +155,7 @@ An operation that writes needs more. See [A write operation](#a-write-operation)
 
 The tool does not do these. Each one is a decision.
 
-1. **Pin the class.** Add the operation to `internal/connectors/pintable/pintable.go`. Write its class and reversibility out again. Then, in `conformance_test.go`, delete the local `pins` and pass `pintable.Pins`. This table is the second copy of a class. A change of class needs an edit to the declaration, to the generated manual entry and to this table, all in one reviewed change.
+1. **Pin the class.** Add the operation to `internal/connectors/pintable/pintable.go`. Write its class and reversibility out again. Then, in `conformance_test.go`, delete the local `pins` map, replace the `kit` import with `internal/connectors/pintable`, and pass `pintable.Pins`. This table is the second copy of a class. Only tests may import it, and a test enforces that. A change of class needs an edit to the declaration, to the generated manual entry and to this table, all in one reviewed change.
 2. **Register the declaration.** In `internal/connectors/declared/declared.go`, add the import of `notesspec` and add `notesspec.Connector` to the list that `Connectors()` returns. Then run:
 
    ```
@@ -194,15 +195,20 @@ A write needs these changes to the example:
 
 ## When a check cannot pass yet
 
-Put the check in `Known` of the operation, with the reason:
+Put the check in `Known` of the operation, with the reason and the text that the known problem contains:
 
 ```go
-Known: map[conformance.CheckID]string{
-	conformance.CheckServiceText: "the result has no untrusted_text flag yet",
+Known: map[conformance.CheckID]conformance.Gap{
+	conformance.CheckServiceText: {
+		Reason: "the result has no untrusted_text flag yet",
+		Match:  "is not marked untrusted_text",
+	},
 },
 ```
 
-The suite still runs the check. It reports the gap as a skip, with what the check found. When the gap closes, the suite fails and tells you to remove the entry. Use this for a gap that you can name and that a reviewer can read. Do not use it to hide a defect.
+The suite still runs the check. It reports the gap as a skip, with what the check found, only when every problem it found contains `Match`. Any other problem is an error, so a new defect cannot hide behind an old entry. When the gap closes, the suite fails and tells you to remove the entry. Use this for a gap that you can name and that a reviewer can read. Do not use it to hide a defect.
+
+An operation declared `NotRepeatable` shows its `execute_acts_once` check as a skip with the declared reason. If the operation turns out to be safe to repeat, the check fails and tells you to remove the declaration.
 
 ## What the suite does not prove
 
@@ -210,12 +216,15 @@ The suite tests your adapter against a fake that you wrote. It does not prove:
 
 - **That the class is right.** It proves that the declaration equals the pin. It does not look at what the operation does. A write declared routine passes, if both say routine.
 - **That the real service behaves like the fake.** A fake is your reading of the service. Check the real service by hand once, with a token that can do no harm.
-- **That the credential is safe in every place.** It looks in what the adapter returns, in the log output of the default loggers, and in `Rig.Logs`. It does not look in a log that goes elsewhere, in the memory of the process, or in the ledger.
-- **That a hostile service cannot trick the adapter.** It tries one: a service that rejects the credential and repeats it. Other tricks are for your own tests.
+- **That the credential is safe in every place.** It looks in what the adapter returns, in the log output of the default loggers (it holds a process-wide lock while it captures them, so do not call `t.Parallel` in a test that runs the suite), and in `Rig.Logs`. It finds the value as it is, in upper and lower case, base64, hex and JSON-escaped, and, for a value of 32 bytes or more, its first 24 bytes. It does not find a value split across two fields, a value that is encoded in another way, or a credential in a log that goes elsewhere, in the memory of the process, or in the ledger.
+- **That a hostile service cannot trick the adapter.** It tries one: a service that rejects the credential and repeats it. It runs only when the rig sets `Hostile`; when it does not, the suite logs that the pass did not run. Other tricks are for your own tests.
 - **That text is safe to show.** It checks control and format characters, length, and (for the strict kind) text shaped like a secret. It does not judge what the words say. A hostile instruction in a title is still an instruction. The front ends put results behind a notice, and chapd and the operator decide what runs next.
 - **That `Check` leaves nothing behind.** It counts writes. A token that the adapter mints and does not revoke is not a write, and the suite does not see it.
 - **That the adapter is idempotent against the real service.** It proves it against the fake. The fake only refuses a repeat if you wrote it to.
 - **Limits that the declaration cannot express.** A `Pattern`, a string with `Unbounded`, a ref with a shape of its own, a policy that depends on the project: write `Invalid` samples for these.
 - **That the operation is on, or allowed.** The baseline and the policy decide that.
+- **That the fake counts honestly.** Checks 1, 2, 4 and 5 read the counters of your fake (`WriteCalls`, `WritesApplied`). A fake that counts no writes passes all four. The suite only fails an operation that is not `ReadOnly` when no valid sample changes the fake. It cannot tell that a `ReadOnly` operation really writes nothing, because the kit has no read-only fact to compare with. Count every write route, and review the `ReadOnly` flag.
+- **That `Plant` plants.** A `Plant` that does nothing proves nothing for an operation declared `NoServiceText`: the suite has no way to see it. For the other two kinds the suite checks that the planted words reach the result, and that the planted secret-shaped text leaves a trace. Read your `Plant`.
+- **That a rig is honest about the credential.** `Rig.Secrets` must return only what the fake was sent. The suite fails when it returns nothing. It cannot tell that a rig also hides a credential it chose not to list.
 
-The suite also made findings against Linear and GitHub. They are fixed, except three repeat-safety gaps that are declared `NotRepeatable` in `internal/connectors/github/conformance_test.go`: see [What the conformance suite found](connectors.md#what-the-conformance-suite-found). The `Known` lists of both connectors are empty.
+The suite also made findings against Linear and GitHub. They are fixed, except two repeat-safety gaps (`issue.open` and `issue.comment`) that are declared `NotRepeatable` in `internal/connectors/github/conformance_test.go`: see [What the conformance suite found](connectors.md#what-the-conformance-suite-found). The `Known` lists of both connectors are empty.

@@ -3,6 +3,7 @@ package conformance_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -139,6 +140,13 @@ type defects struct {
 	noWithhold       bool // show passes text that looks like a secret
 	echoBoard        bool // add puts the service's board title in its result
 	execWritesInShow bool // show Execute posts a note (a read that writes)
+	leakBase64       bool // the credential goes into a result, base64-encoded
+	leakUpper        bool // ... in upper case
+	leakClipped      bool // ... cut to its first 30 bytes
+	leakSplit        bool // ... split across two fields (the suite does not find this)
+	ownCredential    bool // the rig ignores the canary and uses a credential of its own
+	noHostile        bool // the rig has no hostile mode
+	blindCounters    bool // the fake counts no writes
 }
 
 type toyAdapter struct {
@@ -289,6 +297,16 @@ func (a *toyAdapter) show(r *ops.Request) (ops.Outcome, error) {
 	if a.d.leakResult {
 		res["debug"] = "auth " + a.cred
 	}
+	switch {
+	case a.d.leakBase64:
+		res["debug"] = base64.StdEncoding.EncodeToString([]byte("user:" + a.cred))
+	case a.d.leakUpper:
+		res["debug"] = strings.ToUpper(a.cred)
+	case a.d.leakClipped:
+		res["debug"] = a.cred[:30]
+	case a.d.leakSplit:
+		res["debug"], res["debug2"] = a.cred[:20], a.cred[20:]
+	}
 	return ops.Outcome{Result: res, ExternalRef: r.Target.Ref}, nil
 }
 
@@ -345,20 +363,34 @@ func toyConnector(d defects) conformance.Connector {
 		Pins:     toyPins,
 		NewRig: func(t testing.TB, canary string) *conformance.Rig {
 			svc := newToySvc(t, canary)
+			cred := canary
+			if d.ownCredential {
+				cred = "own-credential-9f8e7d6c5b4a39281706"
+				svc.set(func() { svc.secret = cred })
+			}
 			reg := redact.NewRegistry()
 			counter := &atomic.Int64{}
 			ads := map[string]ops.Adapter{}
 			for _, o := range toyDecl.Ops {
-				ads[o.Name] = &toyAdapter{op: o, base: svc.URL, cred: canary, d: d, reg: reg, n: counter}
+				ads[o.Name] = &toyAdapter{op: o, base: svc.URL, cred: cred, d: d, reg: reg, n: counter}
 			}
-			return &conformance.Rig{
+			rig := &conformance.Rig{
 				Adapters:      ads,
 				WriteCalls:    func() int { svc.mu.Lock(); defer svc.mu.Unlock(); return svc.writeCalls },
 				WritesApplied: func() int { svc.mu.Lock(); defer svc.mu.Unlock(); return svc.applied },
-				Secrets:       func() []string { svc.mu.Lock(); defer svc.mu.Unlock(); return append([]string{canary}, svc.seen...) },
-				Hostile:       func() { svc.set(func() { svc.secret, svc.echo = "rotated-"+canary, true }) },
-				World:         svc,
+				// Only what the service saw: a rig that reported the canary itself
+				// would hide a connector that ignores it.
+				Secrets: func() []string { svc.mu.Lock(); defer svc.mu.Unlock(); return append([]string(nil), svc.seen...) },
+				Hostile: func() { svc.set(func() { svc.secret, svc.echo = "rotated-"+canary, true }) },
+				World:   svc,
 			}
+			if d.blindCounters {
+				rig.WriteCalls, rig.WritesApplied = func() int { return 0 }, func() int { return 0 }
+			}
+			if d.noHostile {
+				rig.Hostile = nil
+			}
+			return rig
 		},
 		Ops: map[string]conformance.Op{
 			"note.show": {
@@ -408,6 +440,11 @@ func TestEachCheckBites(t *testing.T) {
 		{"3 credential in a result", defects{leakResult: true}, "note.show", conformance.CheckNoSecretInOutput, "canary"},
 		{"3 credential in the log", defects{leakLog: true}, "note.add", conformance.CheckNoSecretInOutput, "log"},
 		{"3 service error body relayed", defects{relayBody: true}, "note.show", conformance.CheckNoSecretInOutput, "canary"},
+		{"3 credential base64-encoded in a result", defects{leakBase64: true}, "note.show", conformance.CheckNoSecretInOutput, "canary"},
+		{"3 credential in upper case in a result", defects{leakUpper: true}, "note.show", conformance.CheckNoSecretInOutput, "canary"},
+		{"3 credential clipped in a result", defects{leakClipped: true}, "note.show", conformance.CheckNoSecretInOutput, "canary"},
+		{"3 a rig that ignores the canary and leaks its own credential", defects{ownCredential: true, leakResult: true}, "note.show", conformance.CheckNoSecretInOutput, "credential the fake saw"},
+		{"2 a fake that counts no writes", defects{blindCounters: true}, "note.add", conformance.CheckExecuteActsOnce, "proves nothing"},
 		{"4 plain error", defects{plainError: true}, "note.add", conformance.CheckRefusalCodes, "not a *ops.Refusal"},
 		{"4 invented code", defects{badCode: true}, "note.show", conformance.CheckRefusalCodes, "NOPE"},
 		{"5 undeclared param accepted", defects{noParamCheck: true}, "note.show", conformance.CheckParamsAndLimits, "undeclared param"},
@@ -505,10 +542,10 @@ func TestRunRefusesAnIncompleteInput(t *testing.T) {
 	show := c.Ops["note.show"]
 	show.Text = 0
 	show.Plant = nil
-	show.Known = map[conformance.CheckID]string{conformance.CheckNoSideEffects: " "}
+	show.Known = map[conformance.CheckID]conformance.Gap{conformance.CheckNoSideEffects: {Reason: " ", Match: ""}}
 	c.Ops["note.show"] = show
 	joined := strings.Join(conformance.Problems(c), "\n")
-	for _, want := range []string{"Text is not set", "Known["} {
+	for _, want := range []string{"Text is not set", "Known[", "no Match"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("want %q in %s", want, joined)
 		}
@@ -540,5 +577,69 @@ func TestCleanedTextAsksForCleanAndCapOnly(t *testing.T) {
 		if ps := conformance.Evaluate(t, cleaned(d), "note.show", conformance.CheckServiceText); len(ps) == 0 {
 			t.Errorf("%s: CleanedText did not fail", name)
 		}
+	}
+}
+
+// A value split across two fields is not found. The guide says so; this test
+// keeps the statement true.
+func TestASplitCredentialIsNotFound(t *testing.T) {
+	if ps := conformance.Evaluate(t, toyConnector(defects{leakSplit: true}), "note.show", conformance.CheckNoSecretInOutput); len(ps) != 0 {
+		t.Fatalf("the suite found a split credential, so the guide's list of what is not found is out of date: %v", ps)
+	}
+}
+
+// recorder is a testing.TB that keeps what is logged.
+type recorder struct {
+	testing.TB
+	logs []string
+}
+
+func (r *recorder) Logf(format string, args ...any) {
+	r.logs = append(r.logs, fmt.Sprintf(format, args...))
+}
+
+// A rig with no hostile mode is allowed, but the suite says that the pass did
+// not run.
+func TestAMissingHostileModeIsLogged(t *testing.T) {
+	rec := &recorder{TB: t}
+	if ps := conformance.Evaluate(rec, toyConnector(defects{noHostile: true}), "note.show", conformance.CheckNoSecretInOutput); len(ps) != 0 {
+		t.Fatal(ps)
+	}
+	if len(rec.logs) == 0 || !strings.Contains(rec.logs[0], "Rig.Hostile is nil") {
+		t.Fatalf("no note that the hostile pass did not run: %v", rec.logs)
+	}
+	// And the defect the hostile pass exists for goes unseen without it.
+	if ps := conformance.Evaluate(rec, toyConnector(defects{noHostile: true, relayBody: true}), "note.show", conformance.CheckNoSecretInOutput); len(ps) != 0 {
+		t.Fatalf("expected the relay defect to pass without a hostile mode: %v", ps)
+	}
+}
+
+// A Plant that plants nothing cannot make the strict text check pass: phase A
+// sees that the words did not arrive, and phase B that the secret left no trace.
+func TestANoOpPlantFailsAServiceTextOperation(t *testing.T) {
+	c := toyConnector(defects{})
+	show := c.Ops["note.show"]
+	show.Plant = func(*conformance.Rig, conformance.Planted) {}
+	c.Ops["note.show"] = show
+	ps := strings.Join(conformance.Evaluate(t, c, "note.show", conformance.CheckServiceText), "\n")
+	for _, want := range []string{"did not reach the result", "left no trace"} {
+		if !strings.Contains(ps, want) {
+			t.Errorf("want %q in %s", want, ps)
+		}
+	}
+}
+
+// A Plant that drops Secret but keeps Control still lets the secret reach the
+// adapter in phase B, so a missing withhold is found.
+func TestAPlantThatDropsSecretStillFindsAMissingWithhold(t *testing.T) {
+	c := toyConnector(defects{noWithhold: true})
+	show := c.Ops["note.show"]
+	show.Plant = func(r *conformance.Rig, p conformance.Planted) {
+		svc := r.World.(*toySvc)
+		svc.set(func() { svc.notes["n1"] = p.Control + " " + p.Long })
+	}
+	c.Ops["note.show"] = show
+	if ps := conformance.Evaluate(t, c, "note.show", conformance.CheckServiceText); !strings.Contains(strings.Join(ps, "\n"), "not withheld") {
+		t.Fatalf("a missing withhold was not found: %v", ps)
 	}
 }

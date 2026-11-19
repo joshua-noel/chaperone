@@ -33,9 +33,11 @@
 // What the suite does not prove is listed in docs/write-a-connector.md.
 //
 // A connector that cannot yet pass a check for an operation lists the check in
-// [Op].Known with the reason. The suite still runs the check: it reports the
-// gap as a skip, and fails when the gap has closed, so the list cannot go
-// stale.
+// [Op].Known with a [Gap]: the reason, and the text that the known problem
+// contains. The suite still runs the check. It reports the gap as a skip only
+// when every problem the check found contains Match; any other problem is an
+// error. It fails when the gap has closed, so the list cannot go stale.
+// A [Op].NotRepeatable declaration is shown as a skip with its reason.
 package conformance
 
 import (
@@ -183,7 +185,16 @@ type Op struct {
 	Plant func(r *Rig, p Planted)
 	// Known lists checks this operation does not pass yet, with the reason. See
 	// the package comment.
-	Known map[CheckID]string
+	Known map[CheckID]Gap
+}
+
+// Gap is a known failure of one check of one operation.
+type Gap struct {
+	// Reason says why the operation does not pass yet.
+	Reason string
+	// Match is text that every problem of the known failure contains. A problem
+	// that does not contain it is a new failure and is reported as an error.
+	Match string
 }
 
 // Planted is the hostile service text the suite asks a connector to plant.
@@ -225,22 +236,45 @@ func Run(t *testing.T, c Connector) {
 		t.Run(o.Name, func(t *testing.T) {
 			for _, id := range Checks {
 				t.Run(string(id), func(t *testing.T) {
-					problems := Evaluate(t, c, o.Name, id)
-					reason := c.Ops[o.Name].Known[id]
-					switch {
-					case reason != "" && len(problems) == 0:
-						t.Errorf("this check is listed as a known gap (%q) and now passes: remove it from Known", reason)
-					case reason != "":
-						t.Skipf("known gap: %s\n    the check says: %s", reason, strings.Join(problems, "\n    "))
-					default:
-						for _, p := range problems {
-							t.Error(p)
-						}
+					errs, skip := classify(c.Ops[o.Name], id, Evaluate(t, c, o.Name, id))
+					for _, e := range errs {
+						t.Error(e)
+					}
+					if len(errs) == 0 && skip != "" {
+						t.Skip(skip)
 					}
 				})
 			}
 		})
 	}
+}
+
+// classify turns what a check found into the errors to report and, when there
+// are none, the reason to show the check as skipped. A known gap is skipped
+// only when every problem contains its Match; any other problem is an error,
+// and a known gap that no longer shows is an error too. A NotRepeatable
+// declaration is skipped with its reason when the check finds nothing.
+func classify(op Op, id CheckID, problems []string) (errs []string, skip string) {
+	gap, known := op.Known[id]
+	var matched []string
+	for _, p := range problems {
+		if known && strings.Contains(p, gap.Match) {
+			matched = append(matched, p)
+		} else {
+			errs = append(errs, p)
+		}
+	}
+	switch {
+	case known && len(problems) == 0:
+		errs = append(errs, fmt.Sprintf("this check is listed as a known gap (%q) and now passes: remove it from Known", gap.Reason))
+	case known && len(errs) > 0:
+		errs = append(errs, fmt.Sprintf("this check has problems besides the known gap (%q); the known one is: %s", gap.Reason, strings.Join(matched, "; ")))
+	case known:
+		skip = fmt.Sprintf("known gap: %s\n    the check says: %s", gap.Reason, strings.Join(matched, "\n    "))
+	case id == CheckExecuteActsOnce && op.NotRepeatable != "" && len(problems) == 0:
+		skip = "declared not repeatable: " + op.NotRepeatable
+	}
+	return errs, skip
 }
 
 // Evaluate runs one check of one operation and returns what it found wrong. It
@@ -305,9 +339,12 @@ func (c Connector) validate() []string {
 				errs = append(errs, fmt.Sprintf("%s: a sample needs a Name and a Req", o.Name))
 			}
 		}
-		for id, reason := range spec.Known {
-			if strings.TrimSpace(reason) == "" {
-				errs = append(errs, fmt.Sprintf("%s: Known[%s] has no reason", o.Name, id))
+		for id, gap := range spec.Known {
+			if strings.TrimSpace(gap.Reason) == "" {
+				errs = append(errs, fmt.Sprintf("%s: Known[%s] has no Reason", o.Name, id))
+			}
+			if strings.TrimSpace(gap.Match) == "" {
+				errs = append(errs, fmt.Sprintf("%s: Known[%s] has no Match: say which problem is the known one", o.Name, id))
 			}
 			if !knownCheck(id) {
 				errs = append(errs, fmt.Sprintf("%s: Known lists %q, which is not a check", o.Name, id))

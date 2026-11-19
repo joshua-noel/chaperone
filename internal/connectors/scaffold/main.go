@@ -68,6 +68,8 @@ func checkName(root, name string) error {
 	switch {
 	case !nameRE.MatchString(name):
 		return fmt.Errorf("%q is not a connector name: use 2 to 20 lower-case letters and digits, starting with a letter (the packages are named from it)", name)
+	case name == "main":
+		return fmt.Errorf("%q cannot name a package of a connector (it is the name of a program, and a connector is a library package)", name)
 	case token.IsKeyword(name):
 		return fmt.Errorf("%q is a Go keyword", name)
 	}
