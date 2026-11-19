@@ -72,10 +72,17 @@ func (w aesWrapper) Unwrap(b []byte) ([]byte, error) {
 	return w.aead.Open(nil, b[:w.aead.NonceSize()], b[w.aead.NonceSize():], nil)
 }
 
-// wrappers lists what the suite runs against: the fake always, and the real
-// DPAPI wrapper on Windows.
+// wrappers lists what the suite runs against: the AES fake, the macOS and
+// Linux wrappers over fake tools, the passphrase wrapper at a cheap scrypt cost
+// (all always), and the real DPAPI wrapper on Windows.
 func wrappers(t *testing.T) map[string]KeyWrapper {
-	m := map[string]KeyWrapper{"aesgcm": newAESWrapper(t)}
+	pass, _ := newTestPassphraseWrapper(testPassphrase)
+	m := map[string]KeyWrapper{
+		"aesgcm":              newAESWrapper(t),
+		"keychain-fake":       newKeychainWrapper(newFakeSecurity()),
+		"secret-service-fake": newSecretServiceWrapper(newFakeSecretTool()),
+		"passphrase":          pass,
+	}
 	if runtime.GOOS == "windows" {
 		m["dpapi"] = NewDPAPI()
 	}

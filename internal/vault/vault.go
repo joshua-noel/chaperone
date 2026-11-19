@@ -1,9 +1,10 @@
 // Package vault keeps Chaperone's credentials (ADR-003, ticket L1-03).
 //
 // One age file holds each secret, encrypted to two recipients: the service
-// recipient, whose identity [KeyWrapper] (DPAPI under svc-chaperone) protects
-// on disk, and an offline recovery recipient whose identity [Init] shows once
-// and never stores. An index table in the state database records metadata and
+// recipient, whose identity a [KeyWrapper] (Windows DPAPI, the macOS login
+// keychain, a Linux Secret Service keyring, or a passphrase) protects on disk,
+// and an offline recovery recipient whose identity [Init] shows once and never
+// stores. An index table in the state database records metadata and
 // a keyed fingerprint, never a value.
 //
 // # Use, never read
@@ -104,7 +105,7 @@ type Config struct {
 	Dir      string           // ciphertext files, <id>.age
 	KeyDir   string           // wrapped identity and fingerprint key
 	DB       *store.DB        // the state database (index tables)
-	Wrapper  KeyWrapper       // normally [NewDPAPI]
+	Wrapper  KeyWrapper       // from [NewWrapper]
 	Registry *redact.Registry // masks values elsewhere; nil makes a private one
 	Now      func() time.Time // nil means time.Now
 }
@@ -241,6 +242,7 @@ func Init(ctx context.Context, cfg Config, reveal func(recoveryIdentity string) 
 	if err := cfg.check(); err != nil {
 		return err
 	}
+	defer forgetSecrets(cfg.Wrapper)
 	if reveal == nil {
 		return fmt.Errorf("%w: reveal is required", ErrInvalid)
 	}
@@ -401,10 +403,19 @@ type Vault struct {
 }
 
 // Open loads the service identity (through cfg.Wrapper) and the fingerprint
-// key. It fails with [ErrNotInitialized] before [Init], and when the wrapper
-// is not the one the vault was created with, the identity file does not match
-// the recorded recipient, or the wrapper cannot unwrap (wrong account).
+// key, then makes the wrapper forget any passphrase it was holding. It fails
+// with [ErrNotInitialized] before [Init], and when the wrapper is not the one
+// the vault was created with (the index records its name), the identity file
+// does not match the recorded recipient, or the wrapper cannot unwrap (wrong
+// account, wrong passphrase, another machine's keychain).
 func Open(ctx context.Context, cfg Config) (*Vault, error) {
+	defer forgetSecrets(cfg.Wrapper)
+	return open(ctx, cfg)
+}
+
+// open is [Open] without the step that makes the wrapper forget what it holds,
+// for [Recover], which uses the wrapper again afterwards.
+func open(ctx context.Context, cfg Config) (*Vault, error) {
 	if err := cfg.check(); err != nil {
 		return nil, err
 	}

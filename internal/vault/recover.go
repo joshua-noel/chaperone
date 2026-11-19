@@ -51,6 +51,7 @@ func Recover(ctx context.Context, cfg Config, recoveryIdentity string) (n int, e
 	if err := cfg.check(); err != nil {
 		return 0, err
 	}
+	defer forgetSecrets(cfg.Wrapper)
 	if err := ensureSchema(ctx, cfg.DB); err != nil {
 		return 0, err
 	}
@@ -71,7 +72,7 @@ func Recover(ctx context.Context, cfg Config, recoveryIdentity string) (n int, e
 	if recID.Recipient().String() != recRecipient {
 		return 0, ErrWrongRecoveryIdentity
 	}
-	if v, oerr := Open(ctx, cfg); oerr == nil {
+	if v, oerr := open(ctx, cfg); oerr == nil {
 		v.Close()
 		return 0, ErrRecoveryNotNeeded
 	}

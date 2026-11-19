@@ -51,6 +51,7 @@ func parseRunFlags(name string, args []string, stderr io.Writer, demo bool) (Con
 	fs.StringVar(&cfg.ExportDir, "export-dir", "", "daily ledger JSONL export root")
 	fs.StringVar(&cfg.VaultDir, "vault-dir", "", "vault ciphertext folder (enables redaction of secrets and the interim issuer)")
 	fs.StringVar(&cfg.VaultKeyDir, "vault-key-dir", "", "vault wrapped-key folder")
+	cfg.VaultWrap.register(fs)
 	fs.StringVar(&cfg.InterimSecretID, "interim-secret", "", "vault secret id of the interim issuer's Ed25519 seed")
 	fs.StringVar(&cfg.InterimKID, "interim-kid", "", "kid of the interim issuer in the key set")
 	fs.StringVar(&cfg.GitHubAppID, "github-app-id", "", "GitHub App id or client id; turns on pr.merge and pr.update (needs -vault-dir and `chapd vault import`)")

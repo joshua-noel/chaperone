@@ -48,7 +48,8 @@ type Config struct {
 	// interim issuer can sign. Without it neither exists.
 	VaultDir        string
 	VaultKeyDir     string
-	InterimSecretID string // vault secret holding the interim issuer's Ed25519 seed
+	VaultWrap       wrapperChoice // -vault-wrapper, -vault-passphrase-fd
+	InterimSecretID string        // vault secret holding the interim issuer's Ed25519 seed
 	InterimKID      string
 
 	// GitHubAppID turns on the GitHub ops (pr.merge, pr.update): chapd signs the
@@ -179,7 +180,11 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	case cfg.testVault != nil:
 		a.vault = cfg.testVault
 	case cfg.VaultDir != "":
-		v, err := vault.Open(ctx, vault.Config{Dir: cfg.VaultDir, KeyDir: cfg.VaultKeyDir, DB: db, Wrapper: vault.NewDPAPI(), Registry: a.Reg})
+		wrapper, err := cfg.VaultWrap.build()
+		if err != nil {
+			return nil, fmt.Errorf("chapd: the vault key wrapper: %w", err)
+		}
+		v, err := vault.Open(ctx, vault.Config{Dir: cfg.VaultDir, KeyDir: cfg.VaultKeyDir, DB: db, Wrapper: wrapper, Registry: a.Reg})
 		if err != nil {
 			return nil, fmt.Errorf("chapd: open the vault: %w", err)
 		}

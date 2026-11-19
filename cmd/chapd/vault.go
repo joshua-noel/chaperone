@@ -16,13 +16,24 @@ import (
 	"github.com/joshua-noel/chaperone/internal/vault"
 )
 
-const vaultUsage = `usage: chapd vault init   [-db PATH] [-vault-dir D] [-vault-key-dir D]
-       chapd vault import --name ID --file PATH [--kind K] [--project P] [--delete] [-db PATH] [-vault-dir D] [-vault-key-dir D]
-       chapd vault list   [-db PATH] [-vault-dir D] [-vault-key-dir D]
-       chapd vault recover [-db PATH] [-vault-dir D] [-vault-key-dir D]   (recovery identity on standard input)
+const vaultUsage = `usage: chapd vault init   [-db PATH] [-vault-dir D] [-vault-key-dir D] [KEY WRAPPER]
+       chapd vault import --name ID --file PATH [--kind K] [--project P] [--delete] [-db PATH] [-vault-dir D] [-vault-key-dir D] [KEY WRAPPER]
+       chapd vault list   [-db PATH] [-vault-dir D] [-vault-key-dir D] [KEY WRAPPER]
+       chapd vault recover [-db PATH] [-vault-dir D] [-vault-key-dir D] [KEY WRAPPER]   (recovery identity on standard input)
 
-Run as the account that runs chapd (ADR-003): the vault's keys are bound to that
-account's DPAPI scope. -vault-dir and -vault-key-dir default to "vault" and
+KEY WRAPPER is [-vault-wrapper NAME] [-vault-passphrase-fd N]. It says what
+protects the vault's own keys. NAME is dpapi-user (Windows, the default there),
+keychain-macos (the macOS login keychain, the default there), secret-service (a
+Linux keyring through secret-tool, the default there) or age-passphrase (a
+passphrase, on any system; the choice for a server with no keyring). Nothing is
+chosen for you if the default cannot work, and a vault opens only with the wrapper
+that made it. age-passphrase asks on the terminal without echo; for a service,
+-vault-passphrase-fd N reads the first line of descriptor N (0 is standard input;
+not available for recover, which reads standard input itself) and the passphrase is
+never taken from a flag or an environment variable. See docs/running-chapd.md.
+
+Run as the account that runs chapd (ADR-003): the keys are bound to that account
+(DPAPI scope, or that user's keychain). -vault-dir and -vault-key-dir default to "vault" and
 "vault-keys" next to the database; pass the same values to chapd run.
 
 import reads the secret from --file, stores it, and prints only its fingerprint.
@@ -36,10 +47,6 @@ standard input, decrypts every secret with it, then writes a new service identit
 re-encrypts each secret to it and to the same recovery recipient, and records the
 new recipient. Stop chapd first. It refuses a vault that opens normally.`
 
-// newWrapper is the vault's key wrapper. Tests replace it; DPAPI does not
-// exist off Windows.
-var newWrapper = vault.NewDPAPI
-
 func vaultCmd(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, vaultUsage)
@@ -52,6 +59,8 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 	db := fs.String("db", defaultDB, "path of state.db")
 	vaultDir := fs.String("vault-dir", "", "vault ciphertext folder (default: vault next to the database)")
 	keyDir := fs.String("vault-key-dir", "", "vault wrapped-key folder (default: vault-keys next to the database)")
+	var wc wrapperChoice
+	wc.register(fs)
 	var name, file, kind, project string
 	var del bool
 	switch sub {
@@ -102,7 +111,12 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "chapd: %v\n", err)
 		return 1
 	}
-	cfg := vault.Config{Dir: *vaultDir, KeyDir: *keyDir, DB: d, Wrapper: newWrapper()}
+	wrapper, err := wc.build()
+	if err != nil {
+		fmt.Fprintf(stderr, "chapd: %v\n", err)
+		return 1
+	}
+	cfg := vault.Config{Dir: *vaultDir, KeyDir: *keyDir, DB: d, Wrapper: wrapper}
 	base := filepath.Dir(*db)
 	if cfg.Dir == "" {
 		cfg.Dir = filepath.Join(base, "vault")

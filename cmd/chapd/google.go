@@ -108,7 +108,8 @@ const connectUsage = `usage: chapd connect google [-client-file F [-delete]] [-d
        chapd connect google -client-file F -out T.json [-drive]                    sign in, write the token set to T.json
        chapd connect google status                                                 what is saved, no network
        chapd connect google revoke                                                 tell Google to forget the sign-in
-       (all take [-db PATH] [-vault-dir D] [-vault-key-dir D])
+       (all take [-db PATH] [-vault-dir D] [-vault-key-dir D] [-vault-wrapper NAME] [-vault-passphrase-fd N];
+        see chapd vault for the key wrappers)
 
 Run as the account that runs chapd, like 'chapd vault import' (ADR-003): the vault
 keys are bound to that account. Sign-in opens nothing by itself: it prints an
@@ -140,6 +141,8 @@ func connectCmd(args []string, stdout, stderr io.Writer) int {
 	db := fs.String("db", defaultDB, "path of state.db")
 	vaultDir := fs.String("vault-dir", "", "vault ciphertext folder (default: vault next to the database)")
 	keyDir := fs.String("vault-key-dir", "", "vault wrapped-key folder (default: vault-keys next to the database)")
+	var wc wrapperChoice
+	wc.register(fs)
 	clientFile := fs.String("client-file", "", "OAuth client JSON downloaded from Google Cloud")
 	del := fs.Bool("delete", false, "overwrite and delete -client-file after it is stored")
 	drive := fs.Bool("drive", false, "also ask for the Drive scope")
@@ -176,7 +179,12 @@ func connectCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "chapd: %v\n", err)
 		return 1
 	}
-	cfg := vault.Config{Dir: *vaultDir, KeyDir: *keyDir, DB: d, Wrapper: newWrapper()}
+	wrapper, err := wc.build()
+	if err != nil {
+		fmt.Fprintf(stderr, "chapd: %v\n", err)
+		return 1
+	}
+	cfg := vault.Config{Dir: *vaultDir, KeyDir: *keyDir, DB: d, Wrapper: wrapper}
 	base := filepath.Dir(*db)
 	if cfg.Dir == "" {
 		cfg.Dir = filepath.Join(base, "vault")

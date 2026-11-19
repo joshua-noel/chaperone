@@ -1,6 +1,6 @@
 # ADR-003: Vault: where Chaperone keeps credentials, and how agents never see them
 
-- **Status:** **Accepted** (operator sign-off). Amended 2026-10-24 for the separate agent account, one-device approval, the phone passkey, the orchestrator token and the critical class for secrets: see "Amendments" at the end.
+- **Status:** **Accepted** (operator sign-off). Amended 2026-10-24 for the separate agent account, one-device approval, the phone passkey, the orchestrator token and the critical class for secrets, and 2026-11-18 for key wrappers on macOS and Linux (amendment 6): see "Amendments" at the end.
 - **Credentials in scope for Phase 1:** GitHub App private key; Google OAuth refresh token(s) (mail, Drive); the ntfy topic and any notifier token; Chaperone's own keys (interim run-token issuer key, ledger anchor signing key, execution-grant signing key). Later: Notion, Resend, deploy targets, model providers.
 - **Incidents this answers:** 19 Oct (a secret key printed into an agent log); and today's reality that agents hold the operator's GitHub token.
 
@@ -77,3 +77,67 @@ offline (operator's safe, never on the server)         recovery age identity (pr
 - **Writes are sent once.** A definite refusal by Linear is `failed`; an answer that does not show whether Linear acted leaves the op `unconfirmed` and names the comment id (derived from the execution id) so the comment can be looked up.
 - **A fix found on the way.** The redaction registry now also masks the **trimmed** form of a value that was saved with trailing white space (a console paste or an editor adds a newline; the connector uses the trimmed value, so only the trimmed form shows up in a comment or a log). Before this, such a secret passed the redactor when it appeared without its newline (`internal/redact/registry.go`, `TestExactValueSavedWithTrailingWhitespaceIsMaskedWithoutIt`). Amendment 4's list of derived forms gains this one.
 - **Not decided here.** Whether the orchestrator's pickup comment must be a fixed template (it is free text up to 4 000 bytes today); a webhook instead of polling (needs a public HTTPS endpoint, ADR-004 rejects one for phase 1).
+
+**Amendment 6. The vault off Windows: three more key wrappers (v1).** The vault could not hold a secret on macOS or Linux, because the only `KeyWrapper` was Windows DPAPI. The interface, the age file format and the rule that the index records the wrapper's name are unchanged. Three wrappers are added. All three are pure Go: no cgo, no new module.
+
+| Name (stored in the index) | System | Default there | Where the key lives | Needs |
+| --- | --- | --- | --- | --- |
+| `dpapi-user` | Windows | yes | DPAPI, current-user scope (unchanged) | nothing |
+| `keychain-macos` | macOS | yes | the user's login keychain | `/usr/bin/security`, an unlocked keychain |
+| `secret-service` | Linux | yes | a Secret Service keyring (GNOME Keyring, KWallet) | `secret-tool`, a session bus, an unlocked keyring |
+| `age-passphrase` | any | no | nowhere: derived from a passphrase | a person or a pipe to give the passphrase |
+
+- **Choosing.** `chapd vault ...`, `chapd connect google ...` and `chapd run` take `-vault-wrapper NAME`. Without it the default for the system is used. For another system (FreeBSD, for example) there is no default and the command says so. `-vault-passphrase-fd N` goes with `age-passphrase` only.
+- **No fall back.** If the default cannot work (no `secret-tool`, no `security`), the command stops with a message that names the cause and the `age-passphrase` option. It never tries another wrapper, and no wrapper ever stores a key in a plain file. The wrapper's name is stored in the index at `init`; a vault opened with another name fails with `created with key wrapper "X", opened with "Y"`.
+- **Moving a vault to another wrapper** is `chapd vault recover -vault-wrapper NEW` with the offline recovery identity. It re-keys every secret under the new wrapper and records the new name. Nothing else changes a vault's wrapper.
+- **Key file names.** The files stay `vault-identity.dpapi` and `vault-fpkey.dpapi` on every system, so existing vaults and backups need no rename. The suffix is history, not a statement about the wrapper.
+
+*Evaluation of the ways to reach a keychain without C code.*
+
+| Way | Verdict |
+| --- | --- |
+| macOS `security add-generic-password -w VALUE` | **Rejected.** The value is in the argument list, which any process of the same user can read with `ps`. The tool's own manual calls `-p` and `-w VALUE` insecure. |
+| macOS `security add-generic-password -w` (no value) | **Rejected.** It asks through `getpass()` (checked in Apple's `keychain_add.c`), which reads the terminal. A program has no terminal to give it, and whether it falls back to standard input is not something to depend on. |
+| macOS `security -i`, commands on standard input; read back with `security find-generic-password -w` | **Used.** In `-i` mode the tool reads each command from standard input (4096 bytes a line; quotes, white space and backslashes are the only syntax), so the value is never an argument. `find-generic-password -w` prints only the value on standard output. Checked against Apple's published source of the tool (`SecurityTool/macOS/security.c`). **Not run on a Mac yet.** |
+| Linux `secret-tool store` (secret on standard input), `secret-tool lookup` (secret on standard output) | **Used.** `store` reads the secret from standard input up to 8192 bytes; only the attribute names and a random id are arguments. Checked against libsecret's `secret-tool.c`. **Not run on a Linux desktop yet.** |
+| A pure-Go D-Bus client talking to the Secret Service | **Not used.** It needs a new module on the allow-list (ADR-001) and more code to review than a call to a tool that every Secret Service install ships. Revisit if `secret-tool` proves a poor fit. |
+| age scrypt passphrase | **Used** for machines with neither. `filippo.io/age` and `golang.org/x/crypto/scrypt` are already vendored. |
+
+*How the keychain wrappers hold a key.*
+
+- **The blob holds no key.** `Wrap` makes a random 128-bit id, stores the key in the keychain under that id (lower-case hex, so no store has to cope with binary data or quoting), reads it back, compares, and returns a three-line reference (`chaperone-key-reference v1`, the wrapper's name, the id). There is no encryption layer of our own; the protection is the keychain's. If the read back fails, the item is deleted and `Wrap` returns an error.
+- **`Unwrap` accepts one shape only:** that magic line, this wrapper's own name, and exactly 32 lower-case hex digits. The id reaches a command line, so nothing else is passed on.
+- **The program is a fixed absolute path** (`/usr/bin/security`; `secret-tool` in `/usr/bin`, `/bin`, `/usr/local/bin` or `/run/current-system/sw/bin`), never a PATH lookup, so a program another process put on PATH cannot receive a key.
+- **Output buffers have a fixed size** (16 KiB), so a growing buffer leaves no stale copy of a key. They are zeroed after use. A tool that writes more is an error.
+- **Errors never hold a key.** A tool's standard error is shown, cut to 200 printable characters, unless it contains the key (some tools echo their input), in which case it is withheld.
+- **Both tools are given 2 minutes**, because the keychain may be asking the user to unlock it.
+
+*How the passphrase wrapper works.*
+
+- The blob is an ordinary age file with one scrypt recipient (work factor 2^18, about one second). `age -d` with the same passphrase opens it. On unwrap a blob that asks for more than 2^22 is refused, so a planted file cannot keep `chapd` in scrypt for minutes.
+- **The passphrase is never a flag or an environment variable.** It comes from the terminal (`/dev/tty`, or the console on Windows), read with echo off, with a prompt for the new passphrase and a second prompt to repeat it; or from the first line of an open file descriptor (`-vault-passphrase-fd N`), for a service: `systemd-creds decrypt secret.cred - | chapd run -vault-wrapper age-passphrase -vault-passphrase-fd 0 ...`. If echo cannot be turned off, nothing is asked. Ctrl-C restores the terminal. Descriptors 1 and 2 are refused; on Windows only descriptor 0 works.
+- A new passphrase must have at least 12 characters. This is a floor, not a strength test.
+- The wrapper keeps the passphrase in memory only while one operation (`init`, `open`, `recover`) runs, so `init` asks once, not once per key. The vault makes the wrapper forget it when the operation ends, and a failed passphrase is never kept. `chapd run` therefore does not hold the passphrase while it serves.
+- **Recovery after a forgotten passphrase:** `chapd vault recover` first tries to open the vault, so it asks for the old passphrase once. Press Enter, or type anything: the open fails and recovery goes on, asks for a new passphrase twice, and needs the offline recovery identity.
+
+*What each wrapper protects against, and what it does not.*
+
+| Attacker | `dpapi-user` (as before) | `keychain-macos` | `secret-service` | `age-passphrase` |
+| --- | --- | --- | --- | --- |
+| Someone who copies the vault folders (a backup, a stolen disk) but not the user's keychain or passphrase | Protected | Protected: the key files are references, the keys are in the keychain | Protected, the same | Protected as far as the passphrase resists scrypt guessing |
+| Another user account on the same computer | Protected | Protected: the login keychain is per user | Protected: the keyring is per user | Protected as far as the passphrase resists guessing |
+| **Any program running as the same user, including every agent that runs as that user** | Protected only if `chapd` runs as its own account (amendment 1) | **Not protected.** Any such program can run `security find-generic-password` while the keychain is unlocked. The item's access list cannot tell `chapd` from another program that calls the same tool `[INFERENCE: not checked on a Mac]`. | **Not protected.** Any such program on the session bus can ask the Secret Service for the item while the keyring is unlocked. | Protected while `chapd` is not running: the key is not in memory or on disk. **Not protected** while it runs: a program of the same user may be able to read `chapd`'s memory, depending on the system's rules for debugging other processes `[INFERENCE: not tested on either system]`. |
+| Someone who has the user's login password or an unlocked session | Not protected | Not protected (the keychain unlocks with the login password) | Not protected, the same | Not protected only if they also lack the passphrase |
+| Malware that logs keystrokes or reads the terminal | Not protected | Not protected | Not protected | Not protected: it sees the passphrase |
+| Someone with the disk image and the user's login password, offline | Needs the account's master key | Needs the login password | Needs the login password | Needs the passphrase |
+| A weak passphrase | Not applicable | Not applicable | Not applicable | **Not protected.** Scrypt makes each guess cost about a second of one core, not impossible. |
+
+- **So on macOS and Linux the separation of ADR-003's amendment 1 does not exist by itself.** The key is as safe as the user account. The agent account (a separate low-privilege user for the agents) is what keeps the agents away from the vault, as on Windows. Run `chapd` under an account the agents cannot use, and the keychain wrappers are then the right size. If agents and `chapd` share one user, `age-passphrase` with a descriptor fed at start-up is the stronger choice, and while `chapd` is stopped no key exists anywhere on the disk.
+- **Memory.** Plaintext key buffers that this code owns are zeroed after use. Two things are not zeroed and cannot be with the current libraries: the passphrase as a Go string inside age (`age.NewScryptRecipient` takes a string and keeps its own copy), and the key text inside age's stream buffers. Go's experimental `runtime/secret` is still not relied on (item 7).
+- **Left behind on purpose.** An item that a failed `init` leaves in the keychain stays there, unreferenced, and a `recover` leaves the old items, referenced only by the retired key files in `retired-<time>/`: the `KeyWrapper` interface has no delete. They hold old keys of vaults that were replaced. Delete them in Keychain Access (service `chaperone-vault`) or with `secret-tool clear service chaperone-vault id <id>`.
+- **Not done here.** A TPM or Secure Enclave key; a pure-Go Secret Service client; `chap doctor` checks for the new wrappers.
+
+*Checks that need a real machine.* The wrappers are tested here with fake tools and a fake terminal, and the Linux code was also run on Linux under WSL. These are not run yet:
+
+- macOS: the sequence of `security -i`, `find-generic-password -w` and `delete-generic-password` on a real login keychain; the behaviour when the keychain is locked or the prompt is declined; the passphrase prompt on a real terminal (`VAULT_TEST_REAL_TTY`, see `internal/vault/passphrase_test.go`).
+- Linux with a desktop: `secret-tool store` reading standard input, `lookup` returning no trailing newline, the unlock prompt, a headless session (expected: a clear error), and the real-terminal passphrase test (already run once under `script` in WSL).
