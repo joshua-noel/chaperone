@@ -14,7 +14,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -34,8 +33,9 @@ import (
 // to try. The GitHub it uses is the PLAYGROUND, a fake inside this process.
 //
 // It is built so that it cannot touch a real install: it refuses the real
-// service port, refuses a folder that is not empty and was not made by itself,
-// and refuses the real install's database folder. It has no vault and keeps no
+// service port, keeps its folder inside the user's home folder, makes that folder
+// itself (private from the instant it exists) and refuses one that exists, and
+// refuses the real install's database folder. See quickstart_dir.go. It has no vault and keeps no
 // secret in a plain file except the orchestrator token, which every chap client
 // needs and which only the invoking user can read.
 
@@ -72,6 +72,9 @@ var quickstartOps = []string{"pr.checks", "pr.diff", "pr.files", "pr.merge", "pr
 // quickstartAfterCheck runs between the folder check and the folder preparation. Only tests set it: they
 // plant a file there, the way another user could in that window.
 var quickstartAfterCheck func()
+
+// quickstartAfterBuild runs after chapd has opened its files and before the folder identity is checked. Only tests set it.
+var quickstartAfterBuild func()
 
 //go:embed quickstart_policy/playground.yaml
 var quickstartPolicy []byte
@@ -178,351 +181,6 @@ func checkQuickstartAddr(addr string) error {
 		return fmt.Errorf("listen address %q: port 55398 is the real Chaperone service's. Use another port", addr)
 	}
 	return nil
-}
-
-// defaultQuickstartDir is the folder under the user's own profile. On Windows
-// it is under %LOCALAPPDATA% (not the roaming %APPDATA%: a database must not
-// follow a profile around); elsewhere it is under the user's config folder.
-// Never the real install's folders.
-func defaultQuickstartDir(goos string, cacheDir, configDir, homeDir func() (string, error)) (string, error) {
-	var base string
-	var err error
-	if goos == "windows" {
-		base, err = cacheDir()
-	} else {
-		base, err = configDir()
-	}
-	if err != nil {
-		h, herr := homeDir()
-		if herr != nil {
-			return "", fmt.Errorf("cannot find your user folder (pass --dir): %w", errors.Join(err, herr))
-		}
-		return filepath.Join(h, ".chaperone-quickstart"), nil
-	}
-	return filepath.Join(base, "chaperone-quickstart"), nil
-}
-
-// resolveExisting makes p absolute and resolves links in the part that exists,
-// so a link or junction into a real install is seen for what it is.
-func resolveExisting(p string) (string, error) {
-	p, err := filepath.Abs(p)
-	if err != nil {
-		return "", err
-	}
-	rest := ""
-	for cur := p; ; cur = filepath.Dir(cur) {
-		if real, err := filepath.EvalSymlinks(cur); err == nil {
-			return filepath.Join(real, rest), nil
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return p, nil
-		}
-		rest = filepath.Join(filepath.Base(cur), rest)
-	}
-}
-
-func samePath(a, b string) bool {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		return strings.EqualFold(a, b)
-	}
-	return a == b
-}
-
-// within reports whether p is dir or inside it.
-func within(p, dir string) bool {
-	rel, err := filepath.Rel(dir, p)
-	if err != nil {
-		return false
-	}
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		rel = strings.ToLower(rel)
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
-}
-
-// realInstallDir is the real install's database folder where this system has a
-// known one (the Windows default of ADR-006), else "". A variable so tests can
-// point it at a scratch folder.
-var realInstallDir = func() string {
-	if filepath.IsAbs(defaultDB) {
-		return filepath.Dir(defaultDB)
-	}
-	return ""
-}
-
-// hasAncestorSameFile reports whether p, or a folder above it, is the very same
-// folder as target. It compares file identity (os.SameFile), not path text, so a
-// junction or link that leads into target is found: Go's EvalSymlinks does not
-// follow Windows junctions.
-func hasAncestorSameFile(p string, target os.FileInfo) bool {
-	for cur := p; ; {
-		if st, err := os.Stat(cur); err == nil && os.SameFile(st, target) {
-			return true
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return false
-		}
-		cur = parent
-	}
-}
-
-// overlapsRealInstall reports whether any of the paths is, holds or lies inside the
-// known real install folder, by path text after resolving links and by file identity.
-// It is a second line of defence: for every other place a real install may live the
-// rule that protects it is the marker rule of checkQuickstartDir.
-func overlapsRealInstall(paths ...string) bool {
-	real := realInstallDir()
-	if real == "" {
-		return false
-	}
-	realAbs, err := filepath.Abs(real)
-	if err != nil {
-		return false
-	}
-	realRes, _ := resolveExisting(realAbs)
-	realSt, realErr := os.Stat(realAbs)
-	for _, p := range paths {
-		for _, r := range []string{realAbs, realRes} {
-			if r != "" && (within(p, r) || within(r, p)) {
-				return true
-			}
-		}
-		if realErr == nil && hasAncestorSameFile(p, realSt) {
-			return true
-		}
-		if st, err := os.Stat(p); err == nil && hasAncestorSameFile(realAbs, st) {
-			return true
-		}
-	}
-	return false
-}
-
-// checkQuickstartDir decides whether dir may be used. It returns the folder's
-// marker when it is a quickstart folder, nil when it is new or empty. It
-// refuses a file, any folder that holds something but was not made by
-// `chapd quickstart` (the marker rule: a real install has a state.db and no
-// marker, wherever it is, on any system), and, as a second check, the known real
-// install folder and anything above, below or linked into it.
-func checkQuickstartDir(dir string) (string, *quickstartState, error) {
-	given, err := filepath.Abs(dir)
-	if err != nil {
-		return "", nil, err
-	}
-	dir, err = resolveExisting(given)
-	if err != nil {
-		return "", nil, err
-	}
-	if overlapsRealInstall(given, dir) {
-		return "", nil, fmt.Errorf("%s is, or holds, the real Chaperone install's folder. The quickstart never touches it", dir)
-	}
-	st, err := os.Stat(dir)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return dir, nil, nil
-	case err != nil:
-		return "", nil, err
-	case !st.IsDir():
-		return "", nil, fmt.Errorf("%s is a file, not a folder", dir)
-	}
-	state, err := readQuickstartState(dir)
-	if err == nil {
-		return dir, state, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", nil, fmt.Errorf("%s: %w", dir, err)
-	}
-	entries, rerr := os.ReadDir(dir)
-	if rerr != nil {
-		return "", nil, rerr
-	}
-	if len(entries) != 0 {
-		return "", nil, fmt.Errorf("%s is not empty and was not made by chapd quickstart (it has no %s). "+
-			"It could be a real install, so it is left alone. Use an empty folder, or leave out --dir", dir, quickstartMarker)
-	}
-	return dir, nil, nil
-}
-
-func readQuickstartState(dir string) (*quickstartState, error) {
-	b, err := os.ReadFile(filepath.Join(dir, quickstartMarker))
-	if err != nil {
-		return nil, err
-	}
-	var s quickstartState
-	if err := json.Unmarshal(b, &s); err != nil {
-		return nil, fmt.Errorf("%s is damaged: %w", quickstartMarker, err)
-	}
-	if s.Kind != quickstartKind || s.Version != 1 {
-		return nil, fmt.Errorf("%s is not a quickstart marker this version understands", quickstartMarker)
-	}
-	if err := checkQuickstartAddr(s.Addr); err != nil {
-		return nil, fmt.Errorf("%s names a bad address: %w", quickstartMarker, err)
-	}
-	return &s, nil
-}
-
-// quickstartFolder is a prepared folder.
-type quickstartFolder struct {
-	Dir, DB, Keys, PolicyDir, TokenFile, LogDir string
-	Addr                                        string
-	Fresh                                       bool
-}
-
-// prepareQuickstartFolder makes or re-opens the folder, and never trusts what it did not
-// make itself. Between checkQuickstartDir and here the folder has had only its parent's
-// permissions, so another user may have put files in it. Therefore:
-//
-//   - an existing folder must be owned by the current user before anything is changed;
-//   - the folder is locked (private to the user; on Windows also owned by the user);
-//   - on a first run (no marker) it must still be EMPTY after the lock, and every file
-//     the first run makes is created exclusively (O_EXCL), never "if absent", so a planted
-//     file is a refusal and not an input: a planted run-keys.json would be the key set chapd loads;
-//   - on a reused folder (marker present) each file about to be trusted must be owned by the
-//     user and closed to other users (checkTrusted), and the marker must be what was read.
-//
-// The marker is written first, so an interrupted first run is a quickstart folder too.
-func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string, now time.Time) (*quickstartFolder, error) {
-	f := &quickstartFolder{
-		Dir: dir, DB: filepath.Join(dir, "state.db"), Keys: filepath.Join(dir, "run-keys.json"),
-		PolicyDir: filepath.Join(dir, "policy"), TokenFile: filepath.Join(dir, quickstartTokenFile), LogDir: filepath.Join(dir, "logs"),
-		Fresh: state == nil,
-	}
-	switch {
-	case state == nil:
-		f.Addr = wantAddr
-		if f.Addr == "" {
-			f.Addr = net.JoinHostPort(quickstartHost, strconv.Itoa(quickstartPort))
-		}
-	case wantAddr != "" && wantAddr != state.Addr:
-		return nil, fmt.Errorf("this folder was set up for %s, and its passkey is bound to that address. "+
-			"Use --addr %s, or a new --dir", state.Addr, state.Addr)
-	default:
-		f.Addr = state.Addr
-	}
-	if _, err := os.Lstat(dir); err == nil {
-		if err := ownedByCurrentUser(dir); err != nil {
-			return nil, fmt.Errorf("refusing %s: %w", dir, err)
-		}
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	// Private to this user whatever the parent allows: mode 0700, or on Windows a protected ACL with entries for
-	// this user alone and this user as owner, read back. A folder that cannot be made private is refused.
-	if err := restrictDirToCurrentUser(dir); err != nil {
-		return nil, fmt.Errorf("cannot make %s private to this user: %w", dir, err)
-	}
-	if state == nil {
-		return f, firstRunFiles(f, now)
-	}
-	return f, reuseFiles(f, state)
-}
-
-// firstRunFiles fills a folder that must be empty. Nothing may exist; everything is made exclusively.
-func firstRunFiles(f *quickstartFolder, now time.Time) error {
-	entries, err := os.ReadDir(f.Dir)
-	if err != nil {
-		return err
-	}
-	if len(entries) != 0 {
-		return fmt.Errorf("%s was empty when it was checked and is not now (it holds %q). Somebody else may be writing there. Nothing was used", f.Dir, entries[0].Name())
-	}
-	b, _ := json.MarshalIndent(quickstartState{Kind: quickstartKind, Version: 1, Addr: f.Addr, Playground: true, Created: now.UTC().Format(time.RFC3339)}, "", "  ")
-	if err := createExclusive(filepath.Join(f.Dir, quickstartMarker), append(b, '\n')); err != nil {
-		return err
-	}
-	for _, d := range []string{f.PolicyDir, f.LogDir} {
-		if err := os.Mkdir(d, 0o700); err != nil {
-			return err
-		}
-	}
-	keys, err := newQuickstartKeySet()
-	if err != nil {
-		return err
-	}
-	for _, c := range []struct {
-		path string
-		data []byte
-	}{
-		{filepath.Join(f.PolicyDir, quickstartProject+".yaml"), quickstartPolicy},
-		{f.Keys, keys},
-		{f.DB, nil}, // an empty file is an empty database; made here so nobody else can make it first
-	} {
-		if err := createExclusive(c.path, c.data); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// reuseFiles checks a folder of an earlier run before anything in it is trusted, then
-// makes what is missing, exclusively.
-func reuseFiles(f *quickstartFolder, state *quickstartState) error {
-	if again, err := readQuickstartState(f.Dir); err != nil || *again != *state {
-		return fmt.Errorf("%s changed while the quickstart was starting (%v). Nothing was used", filepath.Join(f.Dir, quickstartMarker), err)
-	}
-	trust := []string{filepath.Join(f.Dir, quickstartMarker), f.Keys, f.DB, f.DB + "-wal", f.DB + "-shm", f.TokenFile, f.PolicyDir, f.LogDir}
-	for _, d := range []string{f.PolicyDir, f.LogDir} {
-		if entries, err := os.ReadDir(d); err == nil {
-			for _, e := range entries {
-				trust = append(trust, filepath.Join(d, e.Name()))
-			}
-		}
-	}
-	existed := map[string]bool{}
-	for _, p := range trust {
-		if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err := checkTrusted(p); err != nil {
-			return fmt.Errorf("will not use %s: %w. If you did not put it there, somebody else may have; use a new --dir", p, err)
-		}
-		existed[p] = true
-	}
-	// What was missing at the check is made now, exclusively: a file that has appeared since was not checked and is refused.
-	policy := filepath.Join(f.PolicyDir, quickstartProject+".yaml")
-	keys, err := newQuickstartKeySet()
-	if err != nil {
-		return err
-	}
-	for _, c := range []struct {
-		path  string
-		isDir bool
-		data  []byte
-	}{
-		{f.PolicyDir, true, nil}, {f.LogDir, true, nil},
-		{policy, false, quickstartPolicy}, {f.Keys, false, keys},
-		{f.DB, false, nil}, // so nobody can make the database first
-	} {
-		if existed[c.path] {
-			continue
-		}
-		var err error
-		if c.isDir {
-			err = os.Mkdir(c.path, 0o700)
-		} else {
-			err = createExclusive(c.path, c.data)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// createExclusive writes data to a NEW file with mode 0600 and fails if the file exists.
-func createExclusive(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
-		return err
-	}
-	return f.Close()
 }
 
 // newQuickstartKeySet is a pinned run-token key set with one runner key whose
@@ -645,6 +303,14 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	}
 	enrol, err := console.IssueFirstEnrollment(ctx, app.DB, quickstartEnrollTTL, time.Now())
 	if err != nil {
+		return err
+	}
+	// chapd has opened its files by path. Before anything is shown or served, the path must still lead to the folder
+	// that was prepared (a folder renamed away and replaced in between would hold the attacker's files).
+	if quickstartAfterBuild != nil {
+		quickstartAfterBuild()
+	}
+	if err := f.stillTheSameFolder(); err != nil {
 		return err
 	}
 	origin, _ := localEndpoints(f.Addr, nil)

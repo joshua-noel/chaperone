@@ -102,7 +102,7 @@ func TestBindQuickstartRefusesATakenIPv6Port(t *testing.T) {
 	}
 
 	// The whole command refuses too, before it makes a folder.
-	dir := filepath.Join(t.TempDir(), "qs")
+	dir := filepath.Join(qsTemp(t), "qs")
 	if err := runQuickstart(t.Context(), quickstartOptions{Dir: dir, Addr: "127.0.0.1:" + port, Playground: true}, io.Discard); err == nil {
 		t.Error("runQuickstart started with another program on [::1]")
 	}
@@ -149,7 +149,7 @@ func TestQuickstartAnswersOnBothLoopbackAddresses(t *testing.T) {
 		t.Skip("no IPv6 loopback on this machine")
 	}
 	port := freeBothPort(t)
-	r := startQuickstart(t, quickstartOptions{Dir: filepath.Join(t.TempDir(), "qs"), Addr: "127.0.0.1:" + port})
+	r := startQuickstart(t, quickstartOptions{Dir: filepath.Join(qsTemp(t), "qs"), Addr: "127.0.0.1:" + port})
 	r.ready()
 	get := func(addr, host string) int {
 		req, _ := http.NewRequest("GET", "http://"+addr+"/enroll", nil)
@@ -191,7 +191,7 @@ func makeLink(t *testing.T, link, target string) {
 // Go's EvalSymlinks does not follow Windows junctions, so the real install is found by file identity: a path whose
 // ancestor IS the install folder is refused whatever its text says, and so is a folder above it.
 func TestQuickstartRefusesALinkIntoTheRealInstall(t *testing.T) {
-	real := filepath.Join(t.TempDir(), "install")
+	real := filepath.Join(qsTemp(t), "install")
 	if err := os.MkdirAll(real, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestQuickstartRefusesALinkIntoTheRealInstall(t *testing.T) {
 	realInstallDir = func() string { return real }
 	defer func() { realInstallDir = old }()
 
-	link := filepath.Join(t.TempDir(), "link")
+	link := filepath.Join(qsTemp(t), "link")
 	makeLink(t, link, real)
 
 	for _, d := range []string{real, filepath.Join(real, "sub"), link, filepath.Join(link, "new"), filepath.Join(link, "profiles", "x"), filepath.Dir(real)} {
@@ -208,15 +208,21 @@ func TestQuickstartRefusesALinkIntoTheRealInstall(t *testing.T) {
 		}
 	}
 	// A folder elsewhere is fine.
-	if _, _, err := checkQuickstartDir(filepath.Join(t.TempDir(), "elsewhere")); err != nil {
+	if _, _, err := checkQuickstartDir(filepath.Join(qsTemp(t), "elsewhere")); err != nil {
 		t.Errorf("an unrelated folder: %v", err)
 	}
-	// A link to somewhere else is fine too.
-	other := t.TempDir()
-	link2 := filepath.Join(t.TempDir(), "link2")
+	// A symlink to somewhere else is resolved to where it leads, and that place is judged (here: fine). A Windows junction
+	// is not resolved by Go; it is a link below the allowed root, and every link or junction on the path is refused.
+	other := qsTemp(t)
+	link2 := filepath.Join(qsTemp(t), "link2")
 	makeLink(t, link2, other)
-	if _, _, err := checkQuickstartDir(filepath.Join(link2, "new")); err != nil {
-		t.Errorf("a link to an unrelated folder: %v", err)
+	_, _, err := checkQuickstartDir(filepath.Join(link2, "new"))
+	if st, lerr := os.Lstat(link2); lerr == nil && st.Mode()&os.ModeSymlink == 0 {
+		if err == nil || !strings.Contains(err.Error(), "link or junction") {
+			t.Errorf("a junction on the path was accepted: %v", err)
+		}
+	} else if err != nil {
+		t.Errorf("a symlink to an unrelated folder: %v", err)
 	}
 }
 

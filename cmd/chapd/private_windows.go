@@ -5,6 +5,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"runtime"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -20,20 +22,16 @@ func elevated() bool { return windows.GetCurrentProcessToken().IsElevated() }
 // "an ACL granting only that user"). Administrators can still take ownership;
 // that is Windows, and an administrator can read the process anyway.
 func restrictToCurrentUser(path string) error {
-	return setUserOnlyDACL(path, windows.NO_INHERITANCE, false)
-}
-
-// restrictDirToCurrentUser is restrictToCurrentUser for a folder: the entries are
-// inherited by every file and folder made in it later, the folder takes no
-// permission from its parent, and its OWNER is set to the current user (an owner
-// can always rewrite the permission list, so a folder another user owns is never
-// private). It reads owner and ACL back and fails unless they are exactly that.
-// If the owner cannot be set the folder is refused.
-func restrictDirToCurrentUser(path string) error {
-	if err := setUserOnlyDACL(path, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT, true); err != nil {
+	sid, err := currentUserSID()
+	if err != nil {
 		return err
 	}
-	return verifyUserOnlyDACL(path, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT)
+	acl, err := userOnlyACL(sid, windows.NO_INHERITANCE)
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil)
 }
 
 func currentUserSID() (*windows.SID, error) {
@@ -44,11 +42,7 @@ func currentUserSID() (*windows.SID, error) {
 	return user.User.Sid, nil
 }
 
-func setUserOnlyDACL(path string, inheritance uint32, setOwner bool) error {
-	sid, err := currentUserSID()
-	if err != nil {
-		return err
-	}
+func userOnlyACL(sid *windows.SID, inheritance uint32) (*windows.ACL, error) {
 	acl, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
 		AccessPermissions: windows.GENERIC_ALL,
 		AccessMode:        windows.SET_ACCESS,
@@ -60,15 +54,109 @@ func setUserOnlyDACL(path string, inheritance uint32, setOwner bool) error {
 		},
 	}}, nil)
 	if err != nil {
-		return fmt.Errorf("build the ACL: %w", err)
+		return nil, fmt.Errorf("build the ACL: %w", err)
 	}
-	info := windows.SECURITY_INFORMATION(windows.DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION)
-	var owner *windows.SID
-	if setOwner {
-		info |= windows.OWNER_SECURITY_INFORMATION
-		owner = sid
+	return acl, nil
+}
+
+// createPrivateDir makes a NEW folder that is private from the instant it exists: CreateDirectory is given a
+// security descriptor that already names the current user as owner and holds the protected, user-only DACL
+// with object and container inheritance. It fails if the folder exists. So no handle can have been opened on it
+// under looser permissions (Windows checks access when a handle is opened, and a handle opened with WRITE_DAC
+// before a later lock keeps that right), and nobody else owns it. The result is read back.
+func createPrivateDir(path string) error {
+	sid, err := currentUserSID()
+	if err != nil {
+		return err
 	}
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, info, owner, nil, acl, nil)
+	acl, err := userOnlyACL(sid, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT)
+	if err != nil {
+		return err
+	}
+	sd, err := windows.NewSecurityDescriptor()
+	if err != nil {
+		return err
+	}
+	if err := sd.SetOwner(sid, false); err != nil {
+		return fmt.Errorf("set the owner: %w", err)
+	}
+	if err := sd.SetDACL(acl, true, false); err != nil {
+		return err
+	}
+	if err := sd.SetControl(windows.SE_DACL_PROTECTED, windows.SE_DACL_PROTECTED); err != nil {
+		return err
+	}
+	sa := &windows.SecurityAttributes{SecurityDescriptor: sd}
+	sa.Length = uint32(unsafe.Sizeof(*sa))
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	err = windows.CreateDirectory(p, sa)
+	runtime.KeepAlive(acl)
+	runtime.KeepAlive(sd)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", path, err)
+	}
+	if err := verifyPrivateDir(path); err != nil {
+		_ = windows.RemoveDirectory(p)
+		return err
+	}
+	return nil
+}
+
+// verifyPrivateDir reads owner and ACL of a folder this program made: see verifyUserOnlyDACL.
+func verifyPrivateDir(path string) error {
+	return verifyUserOnlyDACL(path, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT)
+}
+
+// Access rights that let a principal swap, rewrite or take a folder: add entries (rename a folder in),
+// delete children, delete the folder, change its permissions or owner, or any generic write or all.
+const riskyFolderRights = 0x2 | 0x4 | 0x40 | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER | windows.GENERIC_WRITE | windows.GENERIC_ALL
+
+// trustedPrincipal reports whether sid is the current user, SYSTEM, the Administrators group, the
+// service installer, or CREATOR OWNER: the principals an ordinary profile folder lists.
+func trustedPrincipal(sid *windows.SID, user *windows.SID) bool {
+	return windows.EqualSid(sid, user) || sid.IsWellKnown(windows.WinLocalSystemSid) ||
+		sid.IsWellKnown(windows.WinBuiltinAdministratorsSid) || sid.IsWellKnown(windows.WinCreatorOwnerSid) ||
+		strings.HasPrefix(sid.String(), "S-1-5-80-")
+}
+
+// ancestorSafe decides whether a folder ABOVE the quickstart folder may stay as it is: nobody but the
+// user, SYSTEM and Administrators may own it or hold, through an entry that applies to the folder itself,
+// a right to add to it, delete in it or from it, or change its permissions or owner. Otherwise they could
+// rename the quickstart folder away after it is made and put their own in its place.
+func ancestorSafe(path string) error {
+	sd, err := securityOf(path)
+	if err != nil {
+		return err
+	}
+	user, err := currentUserSID()
+	if err != nil {
+		return err
+	}
+	owner, _, err := sd.Owner()
+	if err != nil || owner == nil || !trustedPrincipal(owner, user) {
+		return fmt.Errorf("%s is owned by somebody other than you, SYSTEM or Administrators", path)
+	}
+	acl, _, err := sd.DACL()
+	if err != nil || acl == nil {
+		return fmt.Errorf("%s has no permission list (everyone has full control): %v", path, err)
+	}
+	for i := range uint32(acl.AceCount) {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(acl, i, &ace); err != nil {
+			return err
+		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || uint32(ace.Header.AceFlags)&windows.INHERIT_ONLY_ACE != 0 {
+			continue
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if !trustedPrincipal(sid, user) && uint32(ace.Mask)&riskyFolderRights != 0 {
+			return fmt.Errorf("%s lets %s add to it, delete from it or change its permissions (rights 0x%x)", path, sid, uint32(ace.Mask))
+		}
+	}
+	return nil
 }
 
 // ownerTrusted reports whether sd's owner is the current user, or, for an elevated process, the Administrators group, which owns what such a process creates.

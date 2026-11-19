@@ -96,7 +96,7 @@ func TestQuickstartRefusesTheRealPort(t *testing.T) {
 			t.Errorf("%s: %v", addr, err)
 		}
 	}
-	dir := filepath.Join(t.TempDir(), "qs")
+	dir := filepath.Join(qsTemp(t), "qs")
 	var out, errb bytes.Buffer
 	if code := quickstartCmd([]string{"--dir", dir, "--addr", "127.0.0.1:55398"}, &out, &errb); code != 2 {
 		t.Fatalf("exit %d, want 2", code)
@@ -108,7 +108,7 @@ func TestQuickstartRefusesTheRealPort(t *testing.T) {
 		t.Error("the folder was created before the address was refused")
 	}
 	// A marker that names the real port is refused too, so a folder cannot be edited into it.
-	d := t.TempDir()
+	d := qsTemp(t)
 	if err := os.WriteFile(filepath.Join(d, quickstartMarker), []byte(`{"kind":"chaperone-quickstart","version":1,"addr":"127.0.0.1:55398"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestQuickstartRefusesANonLoopbackAddress(t *testing.T) {
 		if err := checkQuickstartAddr(addr); err == nil {
 			t.Errorf("%s was accepted", addr)
 		}
-		dir := filepath.Join(t.TempDir(), "qs")
+		dir := filepath.Join(qsTemp(t), "qs")
 		var out, errb bytes.Buffer
 		if code := quickstartCmd([]string{"--dir", dir, "--addr", addr}, &out, &errb); code != 2 {
 			t.Errorf("%s: exit %d, want 2", addr, code)
@@ -144,7 +144,7 @@ func TestQuickstartRefusesANonLoopbackAddress(t *testing.T) {
 // A real GitHub App is not in this version: say so, point at the runbook, and touch nothing.
 func TestQuickstartRealGitHubIsNotInThisVersion(t *testing.T) {
 	for _, args := range [][]string{{"--playground=false"}, {"--github-app-id", "12345"}} {
-		dir := filepath.Join(t.TempDir(), "qs")
+		dir := filepath.Join(qsTemp(t), "qs")
 		var out, errb bytes.Buffer
 		if code := quickstartCmd(append([]string{"--dir", dir}, args...), &out, &errb); code != 2 {
 			t.Errorf("%v: exit %d", args, code)
@@ -160,32 +160,41 @@ func TestQuickstartRealGitHubIsNotInThisVersion(t *testing.T) {
 
 func TestQuickstartRefusesFoldersItDidNotMake(t *testing.T) {
 	// Not empty and no marker: a real install looks like this.
-	d := t.TempDir()
+	d := qsTemp(t)
 	if err := os.WriteFile(filepath.Join(d, "state.db"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := checkQuickstartDir(d); err == nil || !strings.Contains(err.Error(), "not empty") {
+	if _, _, err := checkQuickstartDir(d); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("a folder with a state.db and no marker: %v", err)
 	}
+	// Even an EMPTY existing folder: a first run makes its own, so nobody can have held it open or put anything in it.
+	if _, _, err := checkQuickstartDir(qsTemp(t)); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("an empty existing folder: %v", err)
+	}
+	var out, errb bytes.Buffer
+	empty := qsTemp(t)
+	if code := quickstartCmd([]string{"--dir", empty}, &out, &errb); code != 1 || !strings.Contains(errb.String(), "already exists") {
+		t.Errorf("exit %d: %s", code, errb.String())
+	}
+	if entries, _ := os.ReadDir(empty); len(entries) != 0 {
+		t.Errorf("the empty folder was written to: %v", entries)
+	}
 	// A file.
-	f := filepath.Join(t.TempDir(), "f")
+	f := filepath.Join(qsTemp(t), "f")
 	_ = os.WriteFile(f, []byte("x"), 0o600)
 	if _, _, err := checkQuickstartDir(f); err == nil {
 		t.Error("a file was accepted")
 	}
 	// A marker of another kind, or a damaged one.
 	for _, m := range []string{`{"kind":"other","version":1,"addr":"127.0.0.1:55421"}`, `{"kind":"chaperone-quickstart","version":2,"addr":"127.0.0.1:55421"}`, `nope`} {
-		d := t.TempDir()
+		d := qsTemp(t)
 		_ = os.WriteFile(filepath.Join(d, quickstartMarker), []byte(m), 0o600)
 		if _, _, err := checkQuickstartDir(d); err == nil {
 			t.Errorf("marker %q accepted", m)
 		}
 	}
-	// New and empty folders are fine.
-	if _, st, err := checkQuickstartDir(filepath.Join(t.TempDir(), "new", "deeper")); err != nil || st != nil {
-		t.Error(st, err)
-	}
-	if _, st, err := checkQuickstartDir(t.TempDir()); err != nil || st != nil {
+	// A path that does not exist, however deep, is fine: the first run makes every missing folder.
+	if _, st, err := checkQuickstartDir(filepath.Join(qsTemp(t), "new", "deeper")); err != nil || st != nil {
 		t.Error(st, err)
 	}
 }
@@ -210,9 +219,9 @@ func TestQuickstartRefusesTheRealInstallFolder(t *testing.T) {
 // A symlink is followed before the real-install comparison, and whatever the link is (a symlink, or a Windows junction,
 // which Go's EvalSymlinks does not follow) the marker rule still refuses a folder that holds a state.db and no marker.
 func TestQuickstartFollowsLinks(t *testing.T) {
-	target := t.TempDir()
+	target := qsTemp(t)
 	_ = os.WriteFile(filepath.Join(target, "state.db"), []byte("x"), 0o600)
-	link := filepath.Join(t.TempDir(), "link")
+	link := filepath.Join(qsTemp(t), "link")
 	symlink := true
 	if err := os.Symlink(target, link); err != nil {
 		symlink = false
@@ -244,18 +253,24 @@ func TestQuickstartFollowsLinks(t *testing.T) {
 }
 
 func TestQuickstartDefaultFolder(t *testing.T) {
-	ok := func(s string) func() (string, error) { return func() (string, error) { return s, nil } }
+	ok := func(s string) func() (string, error) {
+		return func() (string, error) { return filepath.FromSlash(s), nil }
+	}
 	bad := func() (string, error) { return "", errors.New("unset") }
+	p := filepath.FromSlash
 	cases := []struct {
 		goos                string
 		cache, config, home func() (string, error)
 		want                string
 		fail                bool
 	}{
-		{"windows", ok(`C:\Profiles\a\AppData\Local`), ok(`C:\Profiles\a\AppData\Roaming`), ok(`C:\Profiles\a`), filepath.Join(`C:\Profiles\a\AppData\Local`, "chaperone-quickstart"), false},
-		{"darwin", ok("/Users/a/Library/Caches"), ok("/Users/a/Library/Application Support"), ok("/Users/a"), filepath.Join("/Users/a/Library/Application Support", "chaperone-quickstart"), false},
-		{"linux", ok("/home/a/.cache"), ok("/home/a/.config"), ok("/home/a"), filepath.Join("/home/a/.config", "chaperone-quickstart"), false},
-		{"linux", ok("/c"), bad, ok("/home/a"), filepath.Join("/home/a", ".chaperone-quickstart"), false},
+		{"windows", ok("/h/a/AppData/Local"), ok("/h/a/AppData/Roaming"), ok("/h/a"), p("/h/a/AppData/Local/chaperone-quickstart"), false},
+		{"darwin", ok("/h/a/Library/Caches"), ok("/h/a/Library/Application Support"), ok("/h/a"), p("/h/a/Library/Application Support/chaperone-quickstart"), false},
+		{"linux", ok("/h/a/.cache"), ok("/h/a/.config"), ok("/h/a"), p("/h/a/.config/chaperone-quickstart"), false},
+		{"linux", ok("/c"), bad, ok("/h/a"), p("/h/a/.chaperone-quickstart"), false},
+		// A config or profile folder redirected out of home: a folder directly in home instead.
+		{"linux", bad, ok("/data/cfg"), ok("/h/a"), p("/h/a/.chaperone-quickstart"), false},
+		{"windows", ok("/net/share/a"), bad, ok("/h/a"), p("/h/a/.chaperone-quickstart"), false},
 		{"linux", bad, bad, bad, "", true},
 	}
 	for _, c := range cases {
@@ -264,6 +279,11 @@ func TestQuickstartDefaultFolder(t *testing.T) {
 			t.Errorf("%s: %q %v, want %q (fail %v)", c.goos, got, err, c.want, c.fail)
 		}
 	}
+}
+
+// Tests may place folders in the temp folder. Nothing but a test can add an allowed root.
+func init() {
+	quickstartTestRoots = []string{os.TempDir()}
 }
 
 // ---- the playground cannot be turned on from `chapd run` or the service ----
@@ -341,7 +361,7 @@ func TestFakeGitHubIsOnlyWiredByQuickstartAndDemo(t *testing.T) {
 // ---- state: a second run reuses the folder ----
 
 func TestQuickstartSecondRunReusesState(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "qs")
+	dir := filepath.Join(qsTemp(t), "qs")
 	addr := qsFreeAddr(t)
 	read := func(name string) []byte {
 		b, err := os.ReadFile(filepath.Join(dir, name))
@@ -435,7 +455,7 @@ func TestQuickstartSecondRunReusesState(t *testing.T) {
 
 // The folder's address cannot change: its passkey is bound to it.
 func TestQuickstartKeepsItsAddress(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "qs")
+	dir := filepath.Join(qsTemp(t), "qs")
 	if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55431", time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +486,7 @@ func TestQuickstartKeepsItsAddress(t *testing.T) {
 
 func qsApp(t *testing.T) (*App, string) {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "qs")
+	dir := filepath.Join(qsTemp(t), "qs")
 	f, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55433", time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -534,33 +554,13 @@ func TestQuickstartTokenFile(t *testing.T) {
 	}
 }
 
-// The folder is private to the user on systems with modes; the files in it start at 0600.
-func TestQuickstartFolderPermissions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("modes do not apply; the token file's ACL is checked in quickstart_windows_test.go")
-	}
-	dir := filepath.Join(t.TempDir(), "qs")
-	if err := os.MkdirAll(dir, 0o755); err != nil { // an existing folder with open permissions is closed again
-		t.Fatal(err)
-	}
-	if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55434", time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{".", "policy", "logs", "run-keys.json", quickstartMarker, "policy/playground.yaml"} {
-		st, err := os.Stat(filepath.Join(dir, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.Mode().Perm()&0o077 != 0 {
-			t.Errorf("%s has mode %v", name, st.Mode().Perm())
-		}
-	}
-}
+// The folder's permissions are tested per system: quickstart_perm_other_test.go (modes) and
+// quickstart_windows_test.go (owner and ACL).
 
 // ---- the whole thing, over HTTP ----
 
 func TestQuickstartServesLoopbackOnlyAndRefusesThenMakesACard(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "qs")
+	dir := filepath.Join(qsTemp(t), "qs")
 	addr := qsFreeAddr(t)
 	_, port, _ := net.SplitHostPort(addr)
 	r := startQuickstart(t, quickstartOptions{Dir: dir, Addr: addr})
@@ -752,7 +752,7 @@ func TestQuoteArg(t *testing.T) {
 
 // The embedded starter policy loads, and says what the playground needs.
 func TestQuickstartPolicyLoads(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "qs")
+	dir := filepath.Join(qsTemp(t), "qs")
 	f, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55435", time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -775,5 +775,139 @@ func TestQuickstartPolicyLoads(t *testing.T) {
 func TestQuickstartEnrollLifetime(t *testing.T) {
 	if quickstartEnrollTTL != 15*time.Minute {
 		t.Errorf("the first address lives %v; docs/quickstart.md says 15 minutes", quickstartEnrollTTL)
+	}
+}
+
+// qsTemp is a scratch folder for a test that lies where the quickstart will accept a folder. On Unix that is the
+// temp folder (added as an allowed root by init above). On Windows the temp folder may carry entries for other
+// accounts (it does on some machines, and the quickstart rightly refuses such an ancestor), so the folder is made
+// under the user's local application data folder, inside the home folder, whose ACL is the user, SYSTEM and Administrators.
+func qsTemp(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return t.TempDir()
+	}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(base, "chapd-qs-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// ---- where the folder may be ----
+
+// outsideHome is a path that is not in the home folder, on any system.
+func outsideHome(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	p := filepath.Join(os.TempDir(), "qs-outside-home")
+	if runtime.GOOS == "windows" {
+		p = filepath.Join(os.Getenv("SystemRoot"), "Temp", "qs-outside-home")
+	}
+	if within(p, home) {
+		t.Skipf("%s is inside the home folder %s on this machine", p, home)
+	}
+	return p
+}
+
+func TestQuickstartFolderMustBeInsideTheHomeFolder(t *testing.T) {
+	old := quickstartTestRoots
+	quickstartTestRoots = nil // production: the home folder alone
+	defer func() { quickstartTestRoots = old }()
+	home, _ := os.UserHomeDir()
+	outside := outsideHome(t)
+
+	_, _, err := checkQuickstartDir(outside)
+	if err == nil || !strings.Contains(err.Error(), "outside your home folder") || !strings.Contains(err.Error(), home) {
+		t.Errorf("a folder outside home: %v", err)
+	}
+	var out, errb bytes.Buffer
+	if code := quickstartCmd([]string{"--dir", outside}, &out, &errb); code != 1 || !strings.Contains(errb.String(), "outside your home folder") {
+		t.Errorf("exit %d: %s", code, errb.String())
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Error("a folder outside home was made")
+	}
+	// The home folder itself is not a place for the folder either, and "..", whatever it does to the text, is resolved.
+	if _, _, err := checkQuickstartDir(home); err == nil {
+		t.Error("the home folder itself was accepted")
+	}
+	if _, _, err := checkQuickstartDir(filepath.Join(home, "..", "other-user-dir", "qs")); err == nil || !strings.Contains(err.Error(), "outside your home folder") {
+		t.Errorf("a path that climbs out of home: %v", err)
+	}
+	// Inside home is not refused for being outside (it may still be refused for an unsafe ancestor, which is another rule).
+	inside := filepath.Join(home, ".chaperone-quickstart-path-test-not-made")
+	if _, _, err := checkQuickstartDir(inside); err != nil && strings.Contains(err.Error(), "outside your home folder") {
+		t.Errorf("a path in home: %v", err)
+	}
+	// A link inside home that leads out is refused: a symlink is resolved to where it leads; a Windows junction is a link below the root.
+	target := outsideHome(t)
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Skipf("cannot make a folder outside home: %v", err)
+	}
+	defer os.RemoveAll(target)
+	link := filepath.Join(home, ".chaperone-quickstart-link-test")
+	defer os.Remove(link)
+	makeLink(t, link, target)
+	if _, _, err := checkQuickstartDir(filepath.Join(link, "qs")); err == nil {
+		t.Error("a link from home to a folder outside it was accepted")
+	}
+}
+
+// There is no way for a user to add an allowed root: no flag, no environment variable read by the quickstart's own code,
+// and no non-test code that sets the test variable.
+func TestQuickstartHasNoWayToAddAnAllowedRoot(t *testing.T) {
+	for _, flag := range []string{"--allow-root", "--root", "--test-root", "-allow-dir", "--allowed-root"} {
+		var out, errb bytes.Buffer
+		if code := quickstartCmd([]string{flag, os.TempDir()}, &out, &errb); code != 2 {
+			t.Errorf("%s: exit %d, want 2 (an unknown flag)", flag, code)
+		}
+	}
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatal(files, err)
+	}
+	fset := token.NewFileSet()
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		own := strings.HasPrefix(name, "quickstart") || strings.HasPrefix(name, "private_")
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.AssignStmt:
+				for _, l := range x.Lhs {
+					if id, ok := l.(*ast.Ident); ok && id.Name == "quickstartTestRoots" {
+						t.Errorf("%s: non-test code sets quickstartTestRoots", fset.Position(id.Pos()))
+					}
+				}
+			case *ast.CallExpr:
+				if s, ok := x.Fun.(*ast.SelectorExpr); ok && own {
+					if p, ok := s.X.(*ast.Ident); ok && p.Name == "os" {
+						switch s.Sel.Name {
+						case "Getenv", "LookupEnv", "Environ", "ExpandEnv", "Setenv":
+							t.Errorf("%s: the quickstart reads or sets an environment variable directly (os.%s)", fset.Position(s.Pos()), s.Sel.Name)
+						}
+					}
+				}
+			case *ast.Ident:
+				if x.Name == "quickstartTestRoots" && name != "quickstart_dir.go" {
+					t.Errorf("%s: quickstartTestRoots is used outside quickstart_dir.go", fset.Position(x.Pos()))
+				}
+			}
+			return true
+		})
 	}
 }

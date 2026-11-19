@@ -12,47 +12,70 @@ import (
 
 const attackerKeys = "ATTACKER KEYS"
 
-func emptyFolder(t *testing.T) string {
+// newPath is a folder path inside the allowed temp root that does not exist yet: a first run makes it.
+func newPath(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "qs")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return dir
+	return filepath.Join(qsTemp(t), "qs")
 }
 
-// The window between "the folder is empty" and "the folder is private": another user plants run-keys.json with an
-// entry of its own that the later lock does not remove. It must be refused, never loaded.
-func TestQuickstartRefusesAFileAPlantedBeforeTheLock(t *testing.T) {
+// madeAndPrepared is a folder of a first run and its marker.
+func madeAndPrepared(t *testing.T, addr string) (string, *quickstartState) {
+	t.Helper()
+	dir := newPath(t)
+	if _, err := prepareQuickstartFolder(dir, nil, addr, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := readQuickstartState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir, st
+}
+
+// The window between "the folder does not exist" and "the first run makes it": another user makes it first and puts a
+// run-keys.json in it. A first run never uses a folder that exists, so the planted key set is never loaded.
+func TestQuickstartRefusesAFolderPlantedBeforeTheFirstRunMakesIt(t *testing.T) {
 	for _, openIt := range []bool{false, true} {
-		dir := emptyFolder(t)
+		dir := newPath(t)
 		if _, st, err := checkQuickstartDir(dir); err != nil || st != nil {
-			t.Fatal(st, err) // the check says: new or empty
+			t.Fatal(st, err) // the check says: new
 		}
-		planted := filepath.Join(dir, "run-keys.json")
-		if err := os.WriteFile(planted, []byte(attackerKeys), 0o644); err != nil {
-			t.Fatal(err)
+		plant := func() {
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				t.Error(err)
+				return
+			}
+			p := filepath.Join(dir, "run-keys.json")
+			if err := os.WriteFile(p, []byte(attackerKeys), 0o644); err != nil {
+				t.Error(err)
+				return
+			}
+			if openIt {
+				makeWorldWritable(t, p)
+			}
 		}
-		if openIt {
-			makeWorldWritable(t, planted) // an entry on the file itself, which locking the folder does not remove
-		}
+		plant()
 		_, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55437", time.Now())
-		if err == nil || !strings.Contains(err.Error(), "run-keys.json") {
-			t.Fatalf("openIt=%v: a planted run-keys.json was accepted: %v", openIt, err)
+		if err == nil || !strings.Contains(err.Error(), "already exists") {
+			t.Fatalf("openIt=%v: a folder made by somebody else was used: %v", openIt, err)
 		}
-		if b, _ := os.ReadFile(planted); string(b) != attackerKeys {
+		if b, _ := os.ReadFile(filepath.Join(dir, "run-keys.json")); string(b) != attackerKeys {
 			t.Errorf("the planted file was changed: %q", b)
 		}
 		if _, err := os.Stat(filepath.Join(dir, quickstartMarker)); err == nil {
-			t.Error("a marker was written into a folder somebody else wrote in")
+			t.Error("a marker was written into a folder somebody else made")
 		}
 	}
 }
 
-// The same through the whole command: the file appears after the check and the bind; nothing is built, loaded or printed.
-func TestQuickstartRunRefusesAFilePlantedAfterTheCheck(t *testing.T) {
-	dir := emptyFolder(t)
+// The same through the whole command, with the folder appearing after the check and the bind: nothing is built, loaded or printed.
+func TestQuickstartRunRefusesAFolderMadeAfterTheCheck(t *testing.T) {
+	dir := newPath(t)
 	quickstartAfterCheck = func() {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Error(err)
+			return
+		}
 		p := filepath.Join(dir, "run-keys.json")
 		if err := os.WriteFile(p, []byte(attackerKeys), 0o644); err != nil {
 			t.Error(err)
@@ -63,8 +86,8 @@ func TestQuickstartRunRefusesAFilePlantedAfterTheCheck(t *testing.T) {
 	defer func() { quickstartAfterCheck = nil }()
 	var out bytes.Buffer
 	err := runQuickstart(context.Background(), quickstartOptions{Dir: dir, Addr: qsFreeAddr(t), Playground: true}, &out)
-	if err == nil || !strings.Contains(err.Error(), "run-keys.json") {
-		t.Fatalf("runQuickstart went on with a planted key set: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("runQuickstart went on with a folder it did not make: %v", err)
 	}
 	if out.Len() != 0 {
 		t.Errorf("it printed:\n%s", out.String())
@@ -77,45 +100,61 @@ func TestQuickstartRunRefusesAFilePlantedAfterTheCheck(t *testing.T) {
 	}
 }
 
-// A reused folder: every file about to be trusted must be the user's alone.
+// A reused folder: every entry about to be trusted must be the user's alone.
 func TestQuickstartRefusesOpenOrForeignFilesInAReusedFolder(t *testing.T) {
-	for _, name := range []string{"run-keys.json", "state.db", "policy/playground.yaml", quickstartMarker, quickstartTokenFile, "logs/chapd.log", "policy", "logs"} {
-		dir := emptyFolder(t)
-		if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55438", time.Now()); err != nil {
-			t.Fatal(err)
-		}
+	for _, name := range []string{"run-keys.json", "state.db", "policy/playground.yaml", quickstartMarker, quickstartTokenFile, "logs/chapd.log",
+		"policy", "logs", "state.db-journal", "state.db-wal", "state.db-shm"} {
+		dir, st := madeAndPrepared(t, "127.0.0.1:55438")
 		if err := writePrivate(filepath.Join(dir, quickstartTokenFile), []byte("chap_orch_x\n")); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "logs", "chapd.log"), []byte("log\n"), 0o600); err != nil {
-			t.Fatal(err)
+		for _, extra := range []string{"logs/chapd.log", "state.db-journal", "state.db-wal", "state.db-shm"} {
+			if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(extra)), []byte("x\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
-		st, err := readQuickstartState(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		// Untouched, the folder is accepted again (the log file made by hand is inside the user's own folder).
+		// Untouched, the folder is accepted again (everything in it is the user's own and closed).
 		if _, err := prepareQuickstartFolder(dir, st, "", time.Now()); err != nil {
 			t.Fatalf("%s: a good folder was refused: %v", name, err)
 		}
 		makeWorldWritable(t, filepath.Join(dir, filepath.FromSlash(name)))
-		_, err = prepareQuickstartFolder(dir, st, "", time.Now())
+		_, err := prepareQuickstartFolder(dir, st, "", time.Now())
 		if err == nil || !strings.Contains(err.Error(), "will not use") || !strings.Contains(err.Error(), filepath.Base(name)) {
 			t.Errorf("%s opened to everyone was accepted: %v", name, err)
 		}
 	}
 }
 
-// A marker that changed between the read and the lock is refused.
+// Reviewer's experiment (c): SQLite opens a rollback journal it finds next to the database and writes its pages into it. A
+// state.db-journal planted by somebody else must be refused, and so must any other entry the quickstart does not make.
+func TestQuickstartRefusesAPlantedJournalAndUnknownEntries(t *testing.T) {
+	for _, name := range []string{"state.db-journal", "evil.txt", "run-keys.json.bak", ".hidden", "other.db"} {
+		dir, st := madeAndPrepared(t, "127.0.0.1:55445")
+		planted := filepath.Join(dir, name)
+		if err := os.WriteFile(planted, []byte("EVIL JOURNAL"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if name != "state.db-journal" { // a journal is a known name: it is refused by the owner/permission check, below
+			_, err := prepareQuickstartFolder(dir, st, "", time.Now())
+			if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "did not make") {
+				t.Errorf("%s: an unknown entry was accepted: %v", name, err)
+			}
+			continue
+		}
+		makeWorldWritable(t, planted) // stand-in for a file owned by another user: closed to nobody
+		_, err := prepareQuickstartFolder(dir, st, "", time.Now())
+		if err == nil || !strings.Contains(err.Error(), "will not use") || !strings.Contains(err.Error(), "state.db-journal") {
+			t.Errorf("a planted journal was accepted: %v", err)
+		}
+		if b, _ := os.ReadFile(planted); string(b) != "EVIL JOURNAL" {
+			t.Error("the planted journal was consumed")
+		}
+	}
+}
+
+// A marker that changed between the read and the use is refused.
 func TestQuickstartRefusesAMarkerThatChanged(t *testing.T) {
-	dir := emptyFolder(t)
-	if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55439", time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	st, err := readQuickstartState(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dir, st := madeAndPrepared(t, "127.0.0.1:55439")
 	other := *st
 	other.Addr = "127.0.0.1:55440"
 	if _, err := prepareQuickstartFolder(dir, &other, "", time.Now()); err == nil || !strings.Contains(err.Error(), "changed") {
@@ -125,7 +164,7 @@ func TestQuickstartRefusesAMarkerThatChanged(t *testing.T) {
 
 // Files made on a first run are made exclusively: an existing one is an error, not an input.
 func TestCreateExclusiveRefusesAnExistingFile(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "f")
+	p := filepath.Join(qsTemp(t), "f")
 	if err := createExclusive(p, []byte("one")); err != nil {
 		t.Fatal(err)
 	}
@@ -137,16 +176,9 @@ func TestCreateExclusiveRefusesAnExistingFile(t *testing.T) {
 	}
 }
 
-// A reused folder with a file missing at the check makes it exclusively: one that appears in between is refused.
+// A reused folder with a file missing at the check makes it exclusively.
 func TestQuickstartReuseCreatesMissingFilesExclusively(t *testing.T) {
-	dir := emptyFolder(t)
-	if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55441", time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	st, err := readQuickstartState(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dir, st := madeAndPrepared(t, "127.0.0.1:55441")
 	keys := filepath.Join(dir, "run-keys.json")
 	if err := os.Remove(keys); err != nil {
 		t.Fatal(err)
@@ -156,5 +188,61 @@ func TestQuickstartReuseCreatesMissingFilesExclusively(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(keys); !bytes.Contains(b, []byte(`"kid"`)) {
 		t.Errorf("run-keys.json: %q", b)
+	}
+}
+
+// Reviewer's experiment (b), the identity half: the folder is renamed away after chapd has opened its files, and another
+// put in its place. Whatever the parent check missed, the path no longer leads to the folder that was prepared, so
+// nothing is printed or served. (Windows refuses to rename a folder that holds open files, which is protection of its
+// own; the test then has nothing to swap.)
+func TestQuickstartRefusesAFolderSwappedAfterBuild(t *testing.T) {
+	dir := newPath(t)
+	swapped := false
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	quickstartAfterBuild = func() {
+		away := dir + ".away"
+		if err := os.Rename(dir, away); err != nil {
+			cancel() // nothing to swap here: stop instead of serving
+			return
+		}
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Error(err)
+			return
+		}
+		swapped = true
+	}
+	defer func() { quickstartAfterBuild = nil }()
+	var out bytes.Buffer
+	err := runQuickstart(ctx, quickstartOptions{Dir: dir, Addr: qsFreeAddr(t), Playground: true}, &out)
+	if !swapped {
+		t.Skip("the folder cannot be renamed while chapd holds its files open on this system")
+	}
+	if err == nil || !strings.Contains(err.Error(), "no longer the folder") {
+		t.Fatalf("a swapped folder was not refused: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("it printed:\n%s", out.String())
+	}
+}
+
+// The identity check passes for the folder itself.
+func TestQuickstartFolderIdentity(t *testing.T) {
+	dir := newPath(t)
+	f, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55446", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.stillTheSameFolder(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(dir, dir+".away"); err != nil {
+		t.Skipf("cannot rename here: %v", err)
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.stillTheSameFolder(); err == nil {
+		t.Error("a replaced folder passed the identity check")
 	}
 }
