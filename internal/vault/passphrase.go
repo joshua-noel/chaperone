@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
+	"syscall"
 	"unicode/utf8"
 
 	"filippo.io/age"
@@ -18,17 +20,20 @@ import (
 const PassphraseName = "age-passphrase"
 
 const (
-	// minPassphraseChars is a floor, not a strength test. It stops a one-word
-	// passphrase; it cannot tell a good twelve characters from a bad one.
-	minPassphraseChars = 12
+	// minPassphraseChars is a floor, not a strength test. It stops a short
+	// passphrase; it cannot tell a good sixteen characters from a bad one.
+	// Sixteen is the owner's decision for now.
+	minPassphraseChars = 16
 	// maxPassphraseBytes bounds what is read from a terminal or a pipe.
 	maxPassphraseBytes = 1024
 	// passphraseWorkFactor is the scrypt cost as a power of two (age's own
 	// default: about one second on a current laptop).
 	passphraseWorkFactor = 18
-	// maxUnwrapWorkFactor caps the cost a blob may ask for on unwrap, so a
-	// damaged or planted file cannot make chapd spend minutes in scrypt.
-	maxUnwrapWorkFactor = 22
+	// maxUnwrapWorkFactor caps the cost a blob may ask for on unwrap. This
+	// code only writes passphraseWorkFactor (18, 256 MiB, about a second). At
+	// 2^20 a planted key file costs at most 1 GiB and some seconds; the age
+	// default of 2^22 would allow 4 GiB and minutes.
+	maxUnwrapWorkFactor = 20
 	// maxWrappedBlob bounds an age-passphrase blob. The vault wraps two keys
 	// of well under 300 bytes each.
 	maxWrappedBlob = 4 << 10
@@ -139,6 +144,9 @@ func (w *passphraseWrapper) Wrap(plaintext []byte) ([]byte, error) {
 	return out, nil
 }
 
+// errTooMuchWork: the file asks for more scrypt work than this code ever writes.
+var errTooMuchWork = fmt.Errorf("vault: %s: the key file asks for more scrypt work (above 2^%d) than chapd ever writes, so it was not tried; it is damaged or was not made by chapd", PassphraseName, maxUnwrapWorkFactor)
+
 // errWrongPassphrase is deliberately vague: a wrong passphrase and a damaged
 // file look the same to age, and the text names neither.
 var errWrongPassphrase = fmt.Errorf("vault: %s: the passphrase is wrong, or the key file is damaged", PassphraseName)
@@ -156,6 +164,9 @@ func (w *passphraseWrapper) Unwrap(wrapped []byte) ([]byte, error) {
 		id.SetMaxWorkFactor(maxUnwrapWorkFactor)
 		r, err := age.Decrypt(bytes.NewReader(wrapped), id)
 		if err != nil {
+			if strings.Contains(err.Error(), "work factor too large") {
+				return errTooMuchWork
+			}
 			return errWrongPassphrase
 		}
 		plain, err := io.ReadAll(io.LimitReader(r, maxWrappedBlob))
@@ -199,8 +210,26 @@ type fdPassphrase struct {
 }
 
 // FDPassphrase returns a [PassphraseSource] that reads the first line of the
-// open file descriptor fd. Descriptors 1 and 2 are refused. Off Unix-like
-// systems only descriptor 0 (standard input) is available.
+// open file descriptor fd. It checks the descriptor now, so call it before the
+// program opens anything of its own: a descriptor number is only a number, and
+// one the program opened itself (a log file, the database) must not be taken
+// for the passphrase.
+//
+// What is accepted:
+//
+//   - a pipe or FIFO, on any descriptor (`secret-command | chapd ...`, or one
+//     the parent set up);
+//   - a regular file, on descriptor 0 only, so a service manager can give it
+//     with StandardInput=file:... or a shell with `< file`. On any other
+//     number a regular file is far more likely to be one the program opened
+//     itself.
+//
+// Refused: descriptors 1 and 2; a terminal (it would echo the passphrase and
+// not ask twice: leave the flag out and the terminal prompt is used instead);
+// everything else (sockets, devices). On Windows only descriptor 0 exists.
+//
+// A descriptor other than 0 is duplicated, read once and the duplicate
+// closed; the original is left alone.
 func FDPassphrase(fd int) (PassphraseSource, error) {
 	f, err := openPassphraseFD(fd)
 	if err != nil {
@@ -213,21 +242,53 @@ func FDPassphrase(fd int) (PassphraseSource, error) {
 	return s, nil
 }
 
+// isTerminal reports whether f is a terminal. The files for each operating
+// system replace it.
+var isTerminal = func(*os.File) bool { return false }
+
+// dupDescriptor returns a new file over a duplicate of descriptor fd, so that
+// refusing the descriptor, or closing it after the read, cannot close the
+// original (which may belong to something else in this process). The files for
+// each operating system replace it.
+var dupDescriptor = func(int) (*os.File, error) {
+	return nil, errors.New("vault: reading the passphrase from a descriptor other than 0 is not supported on this system")
+}
+
 func openPassphraseFD(fd int) (*os.File, error) {
+	var f *os.File
 	switch {
 	case fd < 0 || fd == 1 || fd == 2:
 		return nil, fmt.Errorf("vault: passphrase descriptor %d is not allowed", fd)
 	case fd == 0:
-		return os.Stdin, nil
+		f = os.Stdin
 	case runtime.GOOS == "windows":
 		return nil, errors.New("vault: on Windows the passphrase can only come from standard input (descriptor 0)")
+	default:
+		var err error
+		if f, err = dupDescriptor(fd); err != nil {
+			return nil, fmt.Errorf("vault: passphrase descriptor %d is not open", fd)
+		}
 	}
-	f := os.NewFile(uintptr(fd), "passphrase")
-	if f == nil {
-		return nil, fmt.Errorf("vault: passphrase descriptor %d is not open", fd)
+	refuse := func(why string) (*os.File, error) {
+		if fd != 0 {
+			f.Close()
+		}
+		return nil, fmt.Errorf("vault: passphrase descriptor %d %s", fd, why)
 	}
-	if _, err := f.Stat(); err != nil {
-		return nil, fmt.Errorf("vault: passphrase descriptor %d is not open", fd)
+	if isTerminal(f) {
+		return refuse("is a terminal, where the passphrase would show as you type and would not be asked twice; drop the descriptor flag to be asked on the terminal")
+	}
+	st, err := f.Stat()
+	if err != nil {
+		return refuse("cannot be examined")
+	}
+	switch m := st.Mode(); {
+	case m&os.ModeNamedPipe != 0:
+	case fd == 0 && m.IsRegular():
+	case fd == 0:
+		return refuse("is not a pipe or a file; give the passphrase through a pipe or with < file")
+	default:
+		return refuse("is not a pipe or FIFO; give the passphrase through a pipe")
 	}
 	return f, nil
 }
@@ -314,6 +375,11 @@ var errNoTerminal = errors.New("there is no terminal to ask for the passphrase o
 
 var errInterrupted = errors.New("interrupted")
 
+// interruptSignals end a prompt. Any of them could otherwise leave the
+// terminal with echo off. SIGKILL cannot be caught; nothing can be done about
+// that. SIGHUP and SIGQUIT are only delivered on Unix.
+var interruptSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT}
+
 // terminalPassphrase prompts on the controlling terminal with echo off.
 type terminalPassphrase struct{}
 
@@ -328,7 +394,7 @@ func (terminalPassphrase) Passphrase(confirm bool) ([]byte, error) {
 	}
 	defer t.Close()
 	intr := make(chan os.Signal, 1)
-	signal.Notify(intr, os.Interrupt)
+	signal.Notify(intr, interruptSignals...)
 	defer signal.Stop(intr)
 	return promptOn(t, confirm, intr)
 }

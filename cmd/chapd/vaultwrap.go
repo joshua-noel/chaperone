@@ -13,19 +13,28 @@ import (
 // passphrase comes from. Every command that opens the vault takes the same two
 // flags. The zero value means the system's own wrapper.
 type wrapperChoice struct {
-	name  string // "" means the system's own
-	fd    int    // descriptor to read the passphrase from; valid when fdSet
-	fdSet bool   // false means ask on the terminal
+	name string // "" means the system's own
+
+	// fd and src are set together by -vault-passphrase-fd. The descriptor is
+	// opened and checked while the flags are parsed, before this program opens
+	// a log file, the database or anything else that could take that number.
+	fd    int
+	fdSet bool
+	src   vault.PassphraseSource
 }
 
 func (c *wrapperChoice) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.name, "vault-wrapper", "", "what protects the vault's keys: dpapi-user (Windows), keychain-macos, secret-service (Linux) or age-passphrase (any system). Default: the system's own. A vault must be opened with the wrapper that made it")
-	fs.Func("vault-passphrase-fd", "with -vault-wrapper age-passphrase: read the passphrase's first line from this open file descriptor (0 is standard input) instead of asking on the terminal; never give a passphrase in a flag or an environment variable", func(v string) error {
+	fs.Func("vault-passphrase-fd", "with -vault-wrapper age-passphrase: read the passphrase's first line from this file descriptor (0 is standard input), which must be a pipe or FIFO (a regular file only on 0, as < file); a terminal is refused, leave the flag out to be asked there; never give a passphrase in a flag or an environment variable", func(v string) error {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
 			return errors.New("want a file descriptor number")
 		}
-		c.fd, c.fdSet = n, true
+		src, err := vault.FDPassphrase(n)
+		if err != nil {
+			return err
+		}
+		c.fd, c.fdSet, c.src = n, true, src
 		return nil
 	})
 }
@@ -45,11 +54,7 @@ func (c wrapperChoice) build() (vault.KeyWrapper, error) {
 		if c.name != vault.PassphraseName {
 			return nil, errors.New("-vault-passphrase-fd needs -vault-wrapper " + vault.PassphraseName)
 		}
-		src, err := vault.FDPassphrase(c.fd)
-		if err != nil {
-			return nil, err
-		}
-		opts.Passphrase = src
+		opts.Passphrase = c.src
 	}
 	return vault.NewWrapper(c.name, opts)
 }

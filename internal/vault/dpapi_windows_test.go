@@ -4,6 +4,7 @@ package vault
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -118,5 +119,53 @@ func TestDPAPIWrongAccount(t *testing.T) {
 		if strings.Contains(err.Error(), string(marker)) {
 			t.Error("error holds plaintext")
 		}
+	}
+}
+
+// A vault made before NewWrapper existed (made with NewDPAPI, its index saying
+// dpapi-user) opens with the default wrapper, which is what `chapd run` with no
+// -vault-wrapper builds on Windows.
+func TestVaultMadeBeforeTheNewWrappersStillOpens(t *testing.T) {
+	ctx := context.Background()
+	cfg := newConfig(t, NewDPAPI())
+	if err := Init(ctx, cfg, func(string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	v, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Import(ctx, Meta{ID: "k", Kind: "test", Owner: "t"}, []byte("a secret value of some length")); err != nil {
+		t.Fatal(err)
+	}
+	v.Close()
+	if name, ok, err := metaGet(ctx, cfg.DB.SQL(), "key_wrapper"); err != nil || !ok || name != "dpapi-user" {
+		t.Fatalf("index says %q, %v, %v", name, ok, err)
+	}
+
+	w, err := NewWrapper("", WrapperOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Name() != DPAPIName {
+		t.Fatalf("the default on Windows is %q", w.Name())
+	}
+	cfg.Wrapper = w
+	v2, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("an existing DPAPI vault does not open with the default wrapper: %v", err)
+	}
+	defer v2.Close()
+	if err := v2.Use(ctx, "k", func(s []byte) error {
+		if string(s) != "a secret value of some length" {
+			t.Error("wrong value")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The same through the explicit name.
+	if w2, err := NewWrapper("dpapi-user", WrapperOptions{}); err != nil || w2.Name() != DPAPIName {
+		t.Errorf("explicit dpapi-user: %v, %v", w2, err)
 	}
 }

@@ -21,6 +21,17 @@ func init() {
 		}
 		return ttyTerminal{f}, nil
 	}
+	isTerminal = func(f *os.File) bool {
+		_, err := unix.IoctlGetTermios(int(f.Fd()), ioctlGetTermios)
+		return err == nil
+	}
+	dupDescriptor = func(fd int) (*os.File, error) {
+		n, err := unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, 3)
+		if err != nil {
+			return nil, err
+		}
+		return os.NewFile(uintptr(n), "passphrase"), nil
+	}
 }
 
 func (t ttyTerminal) Read(p []byte) (int, error)  { return t.f.Read(p) }

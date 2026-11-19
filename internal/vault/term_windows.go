@@ -25,6 +25,10 @@ func init() {
 		}
 		return consoleTerminal{in, out}, nil
 	}
+	isTerminal = func(f *os.File) bool {
+		var mode uint32
+		return windows.GetConsoleMode(windows.Handle(f.Fd()), &mode) == nil
+	}
 }
 
 func (t consoleTerminal) Read(p []byte) (int, error)  { return t.in.Read(p) }

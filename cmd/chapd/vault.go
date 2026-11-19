@@ -82,6 +82,10 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if sub == "recover" && wc.fdSet && wc.fd == 0 {
+		fmt.Fprintln(stderr, "chapd vault recover: -vault-passphrase-fd 0 is refused: recover reads the recovery identity from standard input. Use another descriptor, or leave the flag out to be asked on the terminal")
+		return 2
+	}
 	if sub == "import" {
 		if name == "" || file == "" {
 			fmt.Fprintln(stderr, "chapd vault import: --name and --file are required")

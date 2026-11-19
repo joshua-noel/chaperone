@@ -51,11 +51,25 @@ const (
 	toolTimeout = 2 * time.Minute
 )
 
-// execRunner is the real [commandRunner].
-type execRunner struct{}
+// toolWaitDelay is how long Run waits, after the tool has exited or was
+// killed at the timeout, for its output pipes to close. A tool that left a
+// child holding them would otherwise block Run for as long as the child lives.
+const toolWaitDelay = 5 * time.Second
 
-func (execRunner) Run(ctx context.Context, path string, args []string, stdin []byte) (cmdResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, toolTimeout)
+// execRunner is the real [commandRunner]. The zero value uses the default
+// limits; tests shorten them.
+type execRunner struct {
+	timeout, waitDelay time.Duration
+}
+
+func (r execRunner) Run(ctx context.Context, path string, args []string, stdin []byte) (cmdResult, error) {
+	if r.timeout == 0 {
+		r.timeout = toolTimeout
+	}
+	if r.waitDelay == 0 {
+		r.waitDelay = toolWaitDelay
+	}
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 	out := newFixedBuffer(maxToolStdout)
 	errb := newFixedBuffer(maxToolStderr)
@@ -63,19 +77,25 @@ func (execRunner) Run(ctx context.Context, path string, args []string, stdin []b
 	cmd.Stdin = bytes.NewReader(stdin)
 	cmd.Stdout = out
 	cmd.Stderr = errb
+	cmd.WaitDelay = r.waitDelay
 	err := cmd.Run()
 	res := cmdResult{stdout: out.buf, stderr: errb.buf}
 	var ee *exec.ExitError
 	switch {
+	case err != nil && ctx.Err() != nil:
+		// Checked first: a tool killed at the timeout also reports an
+		// ExitError, which must not be taken for a normal failure.
+		res.wipe()
+		return cmdResult{}, fmt.Errorf("%s did not finish in %s", filepath.Base(path), r.timeout)
 	case err == nil:
+	case errors.Is(err, exec.ErrWaitDelay):
+		res.wipe()
+		return cmdResult{}, fmt.Errorf("%s left a process holding its output open", filepath.Base(path))
 	case errors.As(err, &ee):
 		res.exit = ee.ExitCode()
 		if res.exit == 0 { // killed by a signal
 			res.exit = -1
 		}
-	case ctx.Err() != nil:
-		res.wipe()
-		return cmdResult{}, fmt.Errorf("%s did not finish in %s", filepath.Base(path), toolTimeout)
 	default:
 		res.wipe()
 		return cmdResult{}, fmt.Errorf("start %s: %w", filepath.Base(path), err)
@@ -112,17 +132,31 @@ func (b *fixedBuffer) Write(p []byte) (int, error) {
 }
 
 // findTool returns the absolute path of the first regular, executable file
-// called name in dirs. The directories are fixed by the caller, not read from
-// PATH: a program that another process of the same user could put on PATH
-// would receive the secret.
+// called name in dirs that [toolTrusted] accepts. The directories are fixed by
+// the caller, not read from PATH: a program that another process of the same
+// user could put on PATH would receive the secret.
 func findTool(name string, dirs []string) (string, error) {
+	return findToolWith(name, dirs, toolTrusted)
+}
+
+// findToolWith is findTool with the trust rule given, for tests.
+func findToolWith(name string, dirs []string, trusted func(file, dir os.FileInfo) bool) (string, error) {
+	var skipped []string
 	for _, d := range dirs {
 		p := filepath.Join(d, name)
 		st, err := os.Stat(p)
 		if err != nil || !st.Mode().IsRegular() || (runtime.GOOS != "windows" && st.Mode().Perm()&0o111 == 0) {
 			continue
 		}
+		dst, err := os.Stat(d)
+		if err != nil || !trusted(st, dst) {
+			skipped = append(skipped, p)
+			continue
+		}
 		return p, nil
+	}
+	if len(skipped) > 0 {
+		return "", fmt.Errorf("%s found at %v but not trusted: the file and its folder must be owned by root and writable by nobody else", name, skipped)
 	}
 	return "", fmt.Errorf("%s not found in %v", name, dirs)
 }

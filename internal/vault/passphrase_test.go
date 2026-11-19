@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -103,18 +104,18 @@ func TestPassphraseWrapperRejectsDamagedAndOversizeBlobs(t *testing.T) {
 
 func TestPassphraseWrapperEnforcesMinimumAndKeepsNothingOnFailure(t *testing.T) {
 	w, src := newTestPassphraseWrapper("short one")
-	if _, err := w.Wrap([]byte("k")); err == nil || !strings.Contains(err.Error(), "at least") {
+	if _, err := w.Wrap([]byte("k")); err == nil || !strings.Contains(err.Error(), "at least 16") {
 		t.Errorf("a short passphrase was accepted: %v", err)
 	}
-	// Twelve characters are enough; count characters, not bytes.
-	src.pass = "çççççççççççç"
+	// Sixteen characters are enough; count characters, not bytes.
+	src.pass = "çççççççççççççççç"
 	if _, err := w.Wrap([]byte("k")); err != nil {
-		t.Errorf("12 characters refused: %v", err)
+		t.Errorf("16 characters refused: %v", err)
 	}
-	src.pass = "elevenchars"
+	src.pass = "fifteen chars 15"[:15]
 	w.Forget()
 	if _, err := w.Wrap([]byte("k")); err == nil {
-		t.Error("11 characters accepted")
+		t.Error("15 characters accepted")
 	}
 	if _, err := w.Wrap(nil); err == nil {
 		t.Error("wrapped nothing")
@@ -445,5 +446,109 @@ func TestTerminalPassphraseOnARealTerminal(t *testing.T) {
 	}
 	if string(got) != testPassphrase {
 		t.Errorf("got %d bytes that are not the expected passphrase", len(got))
+	}
+}
+
+func TestUnwrapRefusesAKeyFileThatAsksForTooMuchWork(t *testing.T) {
+	maker, _ := newTestPassphraseWrapper(testPassphrase)
+	blob, err := maker.Wrap([]byte("a key worth keeping"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rewrite the work factor in the header, as a planted file would. The
+	// check comes before any scrypt, so this returns at once; with a cap of 22
+	// it would try to allocate 4 GiB first.
+	planted := bytes.Replace(blob, []byte(" 10\n"), []byte(" 21\n"), 1)
+	if bytes.Equal(planted, blob) {
+		t.Fatal("test could not find the work factor in the header")
+	}
+	w, _ := newTestPassphraseWrapper(testPassphrase)
+	start := time.Now()
+	if out, err := w.Unwrap(planted); !errors.Is(err, errTooMuchWork) || out != nil {
+		t.Errorf("got %v", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("took %s: scrypt ran", time.Since(start))
+	}
+	if maxUnwrapWorkFactor > 20 || maxUnwrapWorkFactor < passphraseWorkFactor {
+		t.Errorf("cap %d must be between what is written (%d) and 20", maxUnwrapWorkFactor, passphraseWorkFactor)
+	}
+}
+
+func TestMinimumPassphraseIsSixteen(t *testing.T) {
+	if minPassphraseChars != 16 {
+		t.Errorf("minimum is %d", minPassphraseChars)
+	}
+}
+
+func TestInterruptSignalsCoverTheWaysAPromptEnds(t *testing.T) {
+	have := map[os.Signal]bool{}
+	for _, s := range interruptSignals {
+		have[s] = true
+	}
+	for _, want := range []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT} {
+		if !have[want] {
+			t.Errorf("%v does not end a prompt", want)
+		}
+	}
+}
+
+func TestOpenPassphraseFDStdinKinds(t *testing.T) {
+	old := os.Stdin
+	t.Cleanup(func() { os.Stdin = old })
+
+	// A pipe on descriptor 0: accepted.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	os.Stdin = r
+	s, err := FDPassphrase(0)
+	if err != nil {
+		t.Fatalf("a pipe on descriptor 0: %v", err)
+	}
+	go func() { io.WriteString(w, testPassphrase+"\n"); w.Close() }()
+	if got, err := s.Passphrase(false); err != nil || string(got) != testPassphrase {
+		t.Errorf("got %q, %v", got, err)
+	}
+
+	// A regular file on descriptor 0 (< file): accepted.
+	f, err := os.CreateTemp(t.TempDir(), "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	io.WriteString(f, testPassphrase+"\n")
+	f.Seek(0, io.SeekStart)
+	os.Stdin = f
+	s, err = FDPassphrase(0)
+	if err != nil {
+		t.Fatalf("a file on descriptor 0: %v", err)
+	}
+	if got, err := s.Passphrase(false); err != nil || string(got) != testPassphrase {
+		t.Errorf("got %q, %v", got, err)
+	}
+
+	// A device that is not a terminal: refused.
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	os.Stdin = null
+	if _, err := FDPassphrase(0); err == nil || !strings.Contains(err.Error(), "not a pipe") {
+		t.Errorf("%s on descriptor 0: %v", os.DevNull, err)
+	}
+}
+
+func TestIsTerminalIsFalseForAFile(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if isTerminal(f) {
+		t.Error("a regular file is a terminal")
 	}
 }
