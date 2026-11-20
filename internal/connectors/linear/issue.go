@@ -15,8 +15,8 @@ import (
 )
 
 // The generic issue ops: `issue.get`, `issue.list`, `issue.comment`,
-// `issue.label`, `issue.move` and `issue.link` on Linear, for an agent that
-// holds a key and for the orchestrator. They sit beside the operator-board
+// `issue.label`, `issue.move` and `issue.link` on Linear, for the orchestrator
+// token (a custom key cannot hold an `issue.*` op: internal/ops/keyceiling.go). They sit beside the operator-board
 // intake ops and are fenced away from it:
 //
 //   - They work only in the project's `linear.issues.team` and, for a write,
@@ -100,6 +100,19 @@ func intakeRefused(format string, a ...any) error {
 	return policyRefused("intake_label_excluded: "+format, a...)
 }
 
+// namesTheBoard refuses text that points at an item of the operator board: an
+// identifier of the intake team (SHOP-12, in any case, alone or inside a URL),
+// or a URL of that team's pages. Linear may turn a link or a mention into a
+// backlink on the item it names, which would be a write to the operator board.
+func namesTheBoard(pol *policy.Linear, what, text string) error {
+	key := regexp.QuoteMeta(pol.Team)
+	re := regexp.MustCompile("(?i)((^|[^a-z0-9])" + key + "-[0-9]|(/|%2f)team(/|%2f)" + key + "([^a-z0-9]|$))")
+	if re.MatchString(text) {
+		return intakeRefused("%s names an item or a page of the operator board (the intake team); the issue ops never point at it", what)
+	}
+	return nil
+}
+
 // issueIdent checks a target that names an issue and returns its identifier.
 func issueIdent(r *ops.Request, pol *policy.Linear, iss *policy.LinearIssues) (string, error) {
 	m := identRefRE.FindStringSubmatch(r.Target.Ref)
@@ -134,7 +147,7 @@ func issueFence(pol *policy.Linear, iss *policy.LinearIssues, ident, teamKey, te
 	case labelsMore:
 		return intakeRefused("issue %s has more labels than one page shows, so it cannot be shown free of the operator-board label", ident)
 	case teamKey != iss.Team:
-		return scopeRefused("issue %s is in team %s, not %s: the identifier is an old one; nothing was done", ident, clip(teamKey, 12), iss.Team)
+		return scopeRefused("issue %s is not in team %s: the identifier is an old one; nothing was done", ident, iss.Team)
 	case strings.EqualFold(strings.TrimSpace(teamName), "engineering"):
 		return scopeRefused("issue %s is in the Engineering team, which the issue ops never use", ident)
 	case write && !hasFold(labels, iss.Label):
@@ -338,6 +351,9 @@ func (a *issueCommentAdapter) parse(r *ops.Request) (issueCommentParams, error) 
 	if err != nil {
 		return p, err
 	}
+	if !iss.Comment {
+		return p, policyRefused("comment_enabled: issue.comment on Linear is refused for project %s: its linear.issues block does not set comment: true", clip(r.Project, 60))
+	}
 	if p.ident, err = issueIdent(r, pol, iss); err != nil {
 		return p, err
 	}
@@ -348,6 +364,9 @@ func (a *issueCommentAdapter) parse(r *ops.Request) (issueCommentParams, error) 
 		return p, err
 	}
 	if err := checkText("body", p.body, MaxCommentBytes); err != nil {
+		return p, err
+	}
+	if err := namesTheBoard(pol, "a comment", p.body); err != nil {
 		return p, err
 	}
 	if n := len(mentionRE.FindAllString(p.body, -1)); n > iss.MaxMentions {
@@ -648,6 +667,9 @@ func (a *issueLinkAdapter) parse(r *ops.Request) (issueLinkParams, error) {
 		return p, err
 	}
 	if err := checkText("url", p.url, maxURL); err != nil {
+		return p, err
+	}
+	if err := namesTheBoard(pol, "a link", p.url); err != nil {
 		return p, err
 	}
 	u, err := url.ParseRequestURI(p.url)

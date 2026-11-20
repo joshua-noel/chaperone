@@ -1881,7 +1881,7 @@ components:
       required: [title, labels]
       additionalProperties: false
     ParamsIssueComment:
-      description: "Phase 1 shape for `issue.comment`. One name for two connectors, picked by `target.adapter`. GitHub: target `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`; `body` up to 10000. Linear: target `{adapter: linear, ref: \"<issue identifier>\"}`, for example `AGT-12`; the issue must be in the project's `linear.issues.team`, carry `linear.issues.label` when the comment is posted, and never be an operator-board item (`intake_label_excluded`); `body` up to 4000 bytes."
+      description: "Phase 1 shape for `issue.comment`. One name for two connectors, picked by `target.adapter`. GitHub: target `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`; `body` up to 10000. Linear: target `{adapter: linear, ref: \"<issue identifier>\"}`, for example `AGT-12`; the issue must be in the project's `linear.issues.team`, carry `linear.issues.label` when the comment is posted, and never be an operator-board item (`intake_label_excluded`), and the block must set `linear.issues.comment: true`; `body` up to 4000 bytes."
       type: object
       properties:
         body: { type: string, minLength: 1, maxLength: 10000 }

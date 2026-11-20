@@ -22,6 +22,7 @@ linear:
     states: [In Progress, Done]
     labels: [bug]
     link_hosts: [github.com]
+    comment: true
 `
 
 func newIssueE2E(t *testing.T) *linearE2E {
@@ -143,5 +144,28 @@ func TestIssueCommentIsRefusedForLinearWithoutTheIssuesBlock(t *testing.T) {
 	mustValidDenial(t, body, "OP_POLICY_REFUSED")
 	if n := len(l.fake.Requests()); n != 0 {
 		t.Errorf("%d requests reached Linear", n)
+	}
+}
+
+// The review's case: an operator adds a linear.issues block only so that agents
+// can read, with the shipped baseline in which issue.comment is on for GitHub.
+// Linear comments stay off until the block says comment: true.
+func TestAnIssuesBlockWithoutTheCommentSwitchDoesNotLetTokensCommentOnLinear(t *testing.T) {
+	readOnly := strings.Replace(issuesProject, "    comment: true\n", "", 1)
+	if readOnly == issuesProject {
+		t.Fatal("the fixture has no comment switch to remove")
+	}
+	l := newLinearE2EWith(t, true, true, readOnly, true)
+	l.fake.AddIssue(lineartest.Issue{Identifier: "AGT-1", TeamKey: "AGT", Title: "x", Labels: []string{"agent"}})
+	st, body := l.ask("issue.comment", "AGT-1", map[string]any{"body": "hi"})
+	if st != 403 && st != 400 {
+		t.Fatalf("status %d %v", st, body)
+	}
+	mustValidDenial(t, body, "OP_POLICY_REFUSED")
+	if !strings.Contains(toJSONString(body), "comment: true") {
+		t.Errorf("the denial does not say what to set: %v", body)
+	}
+	if got := l.fake.Issue("AGT-1"); len(got.Comments) != 0 {
+		t.Errorf("a comment was posted: %+v", got)
 	}
 }

@@ -71,7 +71,7 @@ func conformanceRig(t testing.TB, canary string) *conformance.Rig {
 	// operator board (team SHOP, label claude) is out of their reach.
 	pol.Issues = &policy.LinearIssues{
 		Team: "AGT", Label: "agent", States: []string{"In Progress", "Done"},
-		Labels: []string{"bug", "triaged"}, LinkHosts: []string{"github.com"},
+		Labels: []string{"bug", "triaged"}, LinkHosts: []string{"github.com"}, Comment: true,
 	}
 	ads, err := Adapters(Config{
 		Client: client, Board: board, Redactor: reg, Now: clk.Now,

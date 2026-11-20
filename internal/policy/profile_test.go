@@ -205,8 +205,16 @@ func TestLinearProfileCarriesTheIntakeExclusion(t *testing.T) {
 			if !slices.Contains(o.Conditions, "intake_label_excluded") {
 				t.Errorf("%s does not list intake_label_excluded", o.Name)
 			}
-			if o.OrchestratorOnly {
-				t.Errorf("%s is the key-facing family; it must not be orchestrator-only", o.Name)
+			// A custom key can never hold an issue.* op (internal/ops/keyceiling.go: the prefix is on the
+			// never-in-a-key list), so the profile says what the code does: the orchestrator token only.
+			if !o.OrchestratorOnly {
+				t.Errorf("%s must be orchestrator-only: a custom key cannot hold an issue.* op", o.Name)
+			}
+			if o.Name == "issue.comment" && (!slices.Contains(o.Conditions, "comment_enabled") || o.NeedsPolicyBlock != "linear.issues") {
+				t.Errorf("issue.comment on Linear needs the comment_enabled condition and the linear.issues block")
+			}
+			if (o.Name == "issue.comment" || o.Name == "issue.link") && !slices.Contains(o.Conditions, "no_board_reference") {
+				t.Errorf("%s must list no_board_reference", o.Name)
 			}
 		case strings.HasPrefix(o.Name, "intake."):
 			if !o.OrchestratorOnly {

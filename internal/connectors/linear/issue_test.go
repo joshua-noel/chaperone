@@ -21,7 +21,7 @@ func issueRig(t *testing.T, opts ...rigOpts) *rig {
 	r.seed()
 	r.pol.Issues = &policy.LinearIssues{
 		Team: "AGT", Label: "agent", States: []string{"In Progress", "Done"},
-		Labels: []string{"bug", "triaged"}, LinkHosts: []string{"github.com"},
+		Labels: []string{"bug", "triaged"}, LinkHosts: []string{"github.com"}, Comment: true,
 	}
 	// AGT-1: a normal agent issue. AGT-2: no provenance label. AGT-3: carries
 	// the operator-board label. AGT-4: completed. AGT-5: too many labels to judge.
@@ -295,7 +295,10 @@ func TestIssueGetRefusesAnotherTeamAndABadRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustFail(t, out, err2, "ENG")
+	mustFail(t, out, err2, "old one")
+	if strings.Contains(out.Result["error"].(string), "ENG") {
+		t.Errorf("the refusal names the team the issue moved to: %v", out.Result["error"])
+	}
 }
 
 // ---- issue.list -------------------------------------------------------------
@@ -788,5 +791,94 @@ func TestTheIssueDocumentsCannotCreateEditAssignOrDelete(t *testing.T) {
 	}
 	if !strings.Contains(mutationIssueLink, "AttachmentCreateInput") {
 		t.Error("the link mutation changed its input type")
+	}
+}
+
+// Linear's comments have their own switch in the block: the op's name is on for
+// GitHub, so a block that only lets an agent read must not let it comment.
+func TestIssueCommentIsRefusedUnlessTheBlockSwitchesItOn(t *testing.T) {
+	r := issueRig(t)
+	r.pol.Issues.Comment = false
+	ctx := context.Background()
+	q := req(OpIssueComment, "AGT-1", map[string]any{"body": "hello"})
+	_, err := r.ad(OpIssueComment).Check(ctx, q)
+	ref := wantRefusal(t, err, ops.CodePolicyRefused)
+	if !strings.Contains(ref.Why, "comment: true") {
+		t.Errorf("refusal: %s", ref.Why)
+	}
+	out, err := r.ad(OpIssueComment).Execute(ctx, q)
+	if err != nil || !out.Failed {
+		t.Fatalf("execute: %v %+v", err, out)
+	}
+	if n := len(r.fake.Requests()); n != 0 || r.mutations() != 0 {
+		t.Errorf("%d requests reached Linear", n)
+	}
+	// The other operations are not affected by the switch.
+	if _, err := r.ad(OpIssueGet).Check(ctx, req(OpIssueGet, "AGT-1", nil)); err != nil {
+		t.Errorf("issue.get: %v", err)
+	}
+}
+
+// A link or a comment that names an item of the operator board is refused, in
+// Check and in Execute, whichever way the identifier is written.
+func TestIssueLinkAndCommentRefuseWhatNamesTheOperatorBoard(t *testing.T) {
+	r := issueRig(t)
+	ctx := context.Background()
+	named := []string{
+		"SHOP-1", "shop-1", "see SHOP-12 for it", "(SHOP-1)", "x/SHOP-1", "SHOP-1,SHOP-2",
+		"https://linear.app/example/issue/SHOP-1/the-title", "https://linear.app/example/team/SHOP/all", "https://linear.app/example/team/shop",
+		"https://linear.app/example/issue/shop-3#comment-9",
+	}
+	for _, text := range named {
+		c := req(OpIssueComment, "AGT-1", map[string]any{"body": text})
+		_, err := r.ad(OpIssueComment).Check(ctx, c)
+		ref := wantRefusal(t, err, ops.CodePolicyRefused)
+		if !strings.Contains(ref.Why, "intake_label_excluded") || strings.Contains(ref.Why, "SHOP") {
+			t.Errorf("comment %q: %s", text, ref.Why)
+		}
+		if out, err := r.ad(OpIssueComment).Execute(ctx, c); err != nil || !out.Failed {
+			t.Errorf("comment %q executed: %v %+v", text, err, out)
+		}
+		if !strings.HasPrefix(text, "https://") {
+			continue
+		}
+	}
+	for _, u := range []string{"https://github.com/example-org/SHOP-1", "https://github.com/example-org/shop-12/pull/1", "https://github.com/x/y?ref=SHOP-1"} {
+		l := req(OpIssueLink, "AGT-1", map[string]any{"url": u})
+		_, err := r.ad(OpIssueLink).Check(ctx, l)
+		ref := wantRefusal(t, err, ops.CodePolicyRefused)
+		if !strings.Contains(ref.Why, "intake_label_excluded") || strings.Contains(ref.Why, "SHOP") {
+			t.Errorf("link %q: %s", u, ref.Why)
+		}
+		if out, err := r.ad(OpIssueLink).Execute(ctx, l); err != nil || !out.Failed {
+			t.Errorf("link %q executed: %v %+v", u, err, out)
+		}
+	}
+	if r.mutations() != 0 {
+		t.Errorf("%d writes reached Linear", r.mutations())
+	}
+	// Names that only look alike are fine: another team, and letters before the key.
+	for _, text := range []string{"AGT-1 is related to AGT-2", "NOTSHOP-1 is another team", "SHOPPING-1", "the shop is open"} {
+		if _, err := r.ad(OpIssueComment).Check(ctx, req(OpIssueComment, "AGT-1", map[string]any{"body": text})); err != nil {
+			t.Errorf("comment %q refused: %v", text, err)
+		}
+	}
+}
+
+// A refusal for an issue that moved to another team does not say which team.
+func TestAMovedIssueDoesNotNameItsNewTeam(t *testing.T) {
+	r := issueRig(t)
+	r.fake.MoveToTeam("AGT-4", "ENG", "ENG-5")
+	ctx := context.Background()
+	for _, q := range []*ops.Request{req(OpIssueComment, "AGT-4", map[string]any{"body": "x"}), req(OpIssueMove, "AGT-4", map[string]any{"state": "Done"})} {
+		_, err := r.ad(q.Op).Check(ctx, q)
+		ref := wantRefusal(t, err, ops.CodeScopePath)
+		if strings.Contains(ref.Why, "ENG") {
+			t.Errorf("%s: the refusal names the team it moved to: %s", q.Op, ref.Why)
+		}
+	}
+	out, err := r.ad(OpIssueGet).Execute(ctx, req(OpIssueGet, "AGT-4", nil))
+	if err != nil || !out.Failed || strings.Contains(out.Result["error"].(string), "ENG") {
+		t.Errorf("issue.get: %v %+v", err, out)
 	}
 }

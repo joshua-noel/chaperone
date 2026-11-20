@@ -7,10 +7,11 @@
 # Two families:
 #   intake.*  the operator board. Frozen names. For the orchestrator token only: no key can hold
 #             them. Project policy: `linear:` {team, label, states}.
-#   issue.*   the generic issue family, shared with GitHub's names. For a key holder's agent and the
-#             orchestrator, in the project's `linear.issues` team only. OFF in the baseline
-#             (issue.comment's name is on for GitHub; Linear's adapter refuses a project with no
-#             `linear.issues` block).
+#   issue.*   the generic issue family, shared with GitHub's names. For the orchestrator token only:
+#             a custom key cannot hold an issue.* op (internal/ops/keyceiling.go). In the project's
+#             `linear.issues` team only. OFF in the baseline (issue.comment's name is on for GitHub;
+#             Linear's adapter refuses a project with no `linear.issues` block, and refuses a comment
+#             unless the block sets `comment: true`).
 #
 # `intake_label_excluded` (the security review's first finding): no issue.* op may read, list,
 # comment on, label, move or link an item that is in the intake team or carries the intake label. A
@@ -31,18 +32,18 @@ ops:
   - {name: intake.states,  class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: true,  chap: intake states,  orchestrator_only: true,
      conditions: [orchestrator_only, team_in_scope, not_engineering_team, rate, client_hourly_budget]}
 
-  - {name: issue.get,      class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue get,
+  - {name: issue.get,      class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue get, orchestrator_only: true,
      conditions: [team_in_scope, not_engineering_team, intake_label_excluded, rate, client_hourly_budget, secret_text_withheld]}
-  - {name: issue.list,     class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue list,
+  - {name: issue.list,     class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue list, orchestrator_only: true,
      conditions: [team_in_scope, not_engineering_team, intake_label_excluded, bulk_cap_page, rate, client_hourly_budget, secret_text_withheld]}
-  - {name: issue.comment,  class: routine, reversibility: compensable, surface: op, unit: team, enabled_default: true,  chap: issue comment, needs_policy_block: linear.issues,
-     conditions: [team_in_scope, not_engineering_team, intake_label_excluded, label_present_now, content_guard_secret, no_broadcast_mentions, rate, client_hourly_budget]}
-  - {name: issue.label,    class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue label,
+  - {name: issue.comment,  class: routine, reversibility: compensable, surface: op, unit: team, enabled_default: true,  chap: issue comment, orchestrator_only: true, needs_policy_block: linear.issues,
+     conditions: [comment_enabled, team_in_scope, not_engineering_team, intake_label_excluded, label_present_now, content_guard_secret, no_broadcast_mentions, no_board_reference, rate, client_hourly_budget]}
+  - {name: issue.label,    class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue label, orchestrator_only: true,
      conditions: [team_in_scope, not_engineering_team, intake_label_excluded, label_present_now, label_in_policy_list, provenance_label_immutable, rate, client_hourly_budget]}
-  - {name: issue.move,     class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue move,
+  - {name: issue.move,     class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue move, orchestrator_only: true,
      conditions: [team_in_scope, not_engineering_team, intake_label_excluded, label_present_now, state_in_policy, rate, client_hourly_budget]}
-  - {name: issue.link,     class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue link,
-     conditions: [team_in_scope, not_engineering_team, intake_label_excluded, label_present_now, link_host_allowlist, content_guard_secret, rate, client_hourly_budget]}
+  - {name: issue.link,     class: routine, reversibility: reversible,  surface: op, unit: team, enabled_default: false, chap: issue link, orchestrator_only: true,
+     conditions: [team_in_scope, not_engineering_team, intake_label_excluded, label_present_now, link_host_allowlist, no_board_reference, content_guard_secret, rate, client_hourly_budget]}
 
 # Names the standard has for Linear that are not built.
 standard_not_built: [issue.open, issue.update]

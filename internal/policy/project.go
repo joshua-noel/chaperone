@@ -77,6 +77,7 @@ type narrowFile struct {
 			Labels      []string `yaml:"labels"`
 			LinkHosts   []string `yaml:"link_hosts"`
 			MaxMentions int      `yaml:"max_mentions"`
+			Comment     bool     `yaml:"comment"`
 		} `yaml:"issues"`
 	} `yaml:"linear"`
 }
@@ -196,7 +197,7 @@ func (p *Pack) LoadProject(project string, data []byte, cat *Catalog) (*Effectiv
 		if in := f.Linear.Issues; in != nil {
 			l.Issues = &LinearIssues{
 				Team: in.Team, Label: in.Label, States: slices.Clone(in.States), Labels: slices.Clone(in.Labels),
-				LinkHosts: slices.Clone(in.LinkHosts), MaxMentions: in.MaxMentions,
+				LinkHosts: slices.Clone(in.LinkHosts), MaxMentions: in.MaxMentions, Comment: in.Comment,
 			}
 		}
 		if err := l.validate(); err != nil {

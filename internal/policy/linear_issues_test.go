@@ -15,7 +15,8 @@ linear:
     label: agent
     states: [In Progress, Done]
     labels: [bug, triaged]
-    link_hosts: [github.com, linear.app]
+    link_hosts: [github.com, docs.example.org]
+    comment: true
     max_mentions: 1
 `
 
@@ -25,7 +26,7 @@ func TestLinearIssuesBlockLoads(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := eff.Linear.Issues
-	if i == nil || i.Team != "AGT" || i.Label != "agent" || len(i.States) != 2 || len(i.Labels) != 2 || len(i.LinkHosts) != 2 || i.MaxMentions != 1 {
+	if i == nil || i.Team != "AGT" || i.Label != "agent" || len(i.States) != 2 || len(i.Labels) != 2 || len(i.LinkHosts) != 2 || i.MaxMentions != 1 || !i.Comment {
 		t.Fatalf("block: %+v", i)
 	}
 	if s, ok := i.StateAllowed("done"); !ok || s != "Done" {
@@ -110,5 +111,44 @@ func TestIntakeItemIsTheIntakeTeamOrTheIntakeLabel(t *testing.T) {
 		if got := l.IntakeItem(c.team, c.labels); got != c.want {
 			t.Errorf("IntakeItem(%s, %v) = %v, want %v", c.team, c.labels, got, c.want)
 		}
+	}
+}
+
+// Linear's side of issue.comment has its own switch, off by default: the name
+// is on in the baseline for GitHub, so a block with no switch must not turn
+// Linear comments on.
+func TestLinearIssuesCommentIsOffUnlessTheBlockSaysSo(t *testing.T) {
+	block := "linear:\n  team: SHOP\n  label: Claude\n  issues:\n    team: AGT\n    label: agent\n"
+	eff, err := linearProject(t, block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eff.Linear.Issues.Comment {
+		t.Error("a block with no comment key turned Linear comments on")
+	}
+	for _, v := range []string{"true", "false"} {
+		eff, err := linearProject(t, block+"    comment: "+v+"\n")
+		if err != nil || eff.Linear.Issues.Comment != (v == "true") {
+			t.Errorf("comment: %s: %v %+v", v, err, eff)
+		}
+	}
+	if _, err := linearProject(t, block+"    comment: perhaps\n"); err == nil {
+		t.Error("comment: perhaps was accepted")
+	}
+}
+
+// A link to Linear itself could point at an item of the operator board, so the
+// host list may not name Linear or any of its subdomains. The mistake refuses
+// the project's whole policy file, like every other mistake in the block.
+func TestLinearIssuesLinkHostsRefuseLinear(t *testing.T) {
+	for _, h := range []string{"linear.app", "www.linear.app", "a.b.linear.app"} {
+		_, err := linearProject(t, "linear:\n  team: SHOP\n  label: Claude\n  issues:\n    team: AGT\n    label: agent\n    link_hosts: [github.com, "+h+"]\n")
+		if err == nil || !strings.Contains(err.Error(), "linear.app") || !strings.Contains(err.Error(), "intake_label_excluded") {
+			t.Errorf("link_hosts %s: %v", h, err)
+		}
+	}
+	// A host that only ends in the same letters is not Linear.
+	if _, err := linearProject(t, "linear:\n  team: SHOP\n  label: Claude\n  issues:\n    team: AGT\n    label: agent\n    link_hosts: [notlinear.app, linear.app.example.org]\n"); err != nil {
+		t.Errorf("an unrelated host was refused: %v", err)
 	}
 }

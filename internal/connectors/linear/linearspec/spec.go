@@ -242,7 +242,7 @@ var IssueComment = kit.Op{
 	Summary:       "Comment on an issue the policy allows.",
 	Usage:         "chap issue comment <n|AGT-12> [--body <b> | --body-file <f>]",
 	RatePerMinute: 6,
-	Doc:           "Linear side of `issue.comment`. Target is `{adapter: linear, ref: \"<issue identifier>\"}`, for example `AGT-12`; the issue must be in the project's `linear.issues.team`, carry `linear.issues.label` when the comment is posted, and never be an operator-board item (`intake_label_excluded`); `body` up to 4000 bytes.",
+	Doc:           "Linear side of `issue.comment`. Target is `{adapter: linear, ref: \"<issue identifier>\"}`, for example `AGT-12`; the issue must be in the project's `linear.issues.team`, carry `linear.issues.label` when the comment is posted, and never be an operator-board item (`intake_label_excluded`), and the block must set `linear.issues.comment: true`; `body` up to 4000 bytes.",
 	Target:        issueOpTarget,
 	Params: []kit.Param{
 		{Name: "body", Kind: kit.Text, Required: true, MinLength: 1, MaxLength: MaxCommentBytes},

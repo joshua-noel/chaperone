@@ -32,6 +32,7 @@ ops:
   # adapter refuses every project whose policy file has no `linear.issues` block, so the name being on does not turn
   # Linear on. The five Linear issue ops below are OFF until a policy change flips them: reads of and writes to the
   # issue team only, never the operator board (`intake_label_excluded`). `issue.open` and `issue.update` are not built.
+  # Linear comments also need `comment: true` in the project's `linear.issues` block, and share this name's rate budget.
   issue.get:            { enabled: false, rate_per_minute: 12 }
   issue.list:           { enabled: false, rate_per_minute: 12 }
   issue.label:          { enabled: false, rate_per_minute: 6 }

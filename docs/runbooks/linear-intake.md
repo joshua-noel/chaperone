@@ -145,7 +145,7 @@ Try the mistakes as well: a state that is not in the policy (`OP_POLICY_REFUSED`
 
 ## The generic issue ops (optional, off; ADR-003 amendment 7)
 
-Six more ops use the same two vault secrets and the same Linear app: `issue.get`, `issue.list`, `issue.comment`, `issue.label`, `issue.move` and `issue.link`. They are for a key holder's agent (and the orchestrator) and they are **separate from the operator board**: they work in one other Linear team and never touch an item that is in the intake team or carries the intake label. Nothing about the operator board above changes. **Nothing in Linear was tried: the first real run is a live test on a scratch workspace, before the policy change below.**
+Six more ops use the same two vault secrets and the same Linear app: `issue.get`, `issue.list`, `issue.comment`, `issue.label`, `issue.move` and `issue.link`. They are for the orchestrator token (a custom key cannot hold an `issue.*` operation) and they are **separate from the operator board**: they work in one other Linear team and never touch an item that is in the intake team or carries the intake label. Nothing about the operator board above changes. **Nothing in Linear was tried: the first real run is a live test on a scratch workspace, before the policy change below.**
 
 | What | Where |
 | --- | --- |
@@ -165,8 +165,18 @@ linear:
     label: ai-ok       # a write acts only on an issue that carries this label now; must not be the board's label
     states: [In Progress, Done]   # what issue.move may set
     labels: [bug, triaged]        # what issue.label may add or remove (not the two labels above)
-    link_hosts: [github.com]      # issue.link: exact host names, https only
+    link_hosts: [github.com]      # issue.link: exact host names, https only; linear.app is refused
+    comment: false                # Linear comments are off unless this is true (issue.comment is on for GitHub)
     max_mentions: 0               # people a comment may mention
 ```
 
 How to see it work (after the policy change, with a token that holds `issue.*`): `chap issue list --project <p>`, `chap issue get AGT-12`, `chap issue move AGT-12 --state Done`. An item of the operator board comes back refused with `intake_label_excluded` in the reason.
+
+**Comments need their own switch.** `issue.comment` is one name for GitHub's error watcher and for Linear, and it is on in the baseline. A `linear.issues` block alone does not let anyone comment on Linear: the block must also say `comment: true`. The two share one rate budget (6 a minute, 20 an hour per caller): a Linear comment counts against the error watcher's GitHub comments. A comment or a link that names an issue of the intake team (`SHOP-12`, in any case) or a page of that team is refused, and `link_hosts` may not list `linear.app`.
+
+**Before turning `issue.move`, `issue.label` and `issue.link` on, check in Linear** (nothing in Chaperone can check these, and none of them was run against real Linear):
+
+- The `linear.issues.team` has **no two-way GitHub sync**. A move to a done state can close the linked GitHub issue; only the Engineering mirror is blocked by name.
+- No **webhook** or integration on that team starts a deploy, a build or another action when an issue changes state, gets a label or an attachment. A move notifies subscribers and fires webhooks and Slack.
+- The **provenance label is not in a label group**. In Linear only one label of a group can be on an issue, so adding another label of that group could remove the provenance label, and the agent would lose the right to write to that issue.
+- A parent issue may close by itself when its last sub-issue is moved to a done state.

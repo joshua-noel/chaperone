@@ -36,7 +36,8 @@ type Linear struct {
 }
 
 // LinearIssues is the policy of the generic `issue.get|list|comment|label|move|
-// link` ops on Linear. They are for a key holder's agent (and the orchestrator), and they
+// link` ops on Linear. They are for the orchestrator token (a custom key cannot hold an
+// `issue.*` op: internal/ops/keyceiling.go), and they
 // are fenced away from the operator board: the intake team and the intake label
 // (the enclosing [Linear] Team and Label) are never reachable through them,
 // whatever this block says (`intake_label_excluded`, the security review's P1).
@@ -62,6 +63,11 @@ type LinearIssues struct {
 	// MaxMentions is the most people a comment may mention; zero (the default)
 	// refuses any mention.
 	MaxMentions int
+	// Comment turns on Linear's side of `issue.comment`. The name is also the
+	// GitHub op of the error watcher and is on in the baseline, so without this
+	// switch the block would let every token that holds `issue.comment` comment
+	// on Linear. False (the default) refuses every Linear comment.
+	Comment bool
 }
 
 // Limits of the issues block.
@@ -116,6 +122,9 @@ func (i *LinearIssues) validate(intake *Linear) error {
 	for _, h := range i.LinkHosts {
 		if !linearHostRE.MatchString(h) || len(h) > 253 {
 			return fmt.Errorf("issues.link_hosts entry %q must be a lower-case host name such as github.com", h)
+		}
+		if h == "linear.app" || strings.HasSuffix(h, ".linear.app") {
+			return fmt.Errorf("issues.link_hosts lists %q: a link to Linear itself could point at an item of the operator board (intake_label_excluded)", h)
 		}
 		if seen[h] {
 			return fmt.Errorf("issues.link_hosts lists %q twice", h)
