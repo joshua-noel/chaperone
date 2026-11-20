@@ -223,6 +223,9 @@ func (a *prMergeAdapter) request(r *Request) (PRMergeRequest, error) {
 	if err != nil {
 		return PRMergeRequest{}, err
 	}
+	if len(base) > githubspec.BranchMax {
+		return PRMergeRequest{}, paramsInvalid("param base is at most %d bytes", githubspec.BranchMax)
+	}
 	head, err := paramString(r.Params, "head_sha")
 	if err != nil {
 		return PRMergeRequest{}, err

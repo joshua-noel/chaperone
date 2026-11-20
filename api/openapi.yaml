@@ -1575,8 +1575,8 @@ components:
       properties:
         title: { type: string, minLength: 1, maxLength: 200 }
         body: { type: string, maxLength: 20000 }
-        head: { type: string }
-        base: { type: string }
+        head: { type: string, maxLength: 255 }
+        base: { type: string, maxLength: 255 }
         draft: { type: boolean }
       required: [title, head, base]
       additionalProperties: false
@@ -1595,7 +1595,7 @@ components:
       description: "Phase 1 shape for `pr.merge` (owned by L1-10; the spec's reference example). Target is `{adapter: github, ref: \"owner/repo#N\"}`."
       type: object
       properties:
-        base: { type: string }
+        base: { type: string, maxLength: 255 }
         head_sha: { type: string, pattern: "^[0-9a-f]{40}$" }
         method: { const: squash }
       required: [base, head_sha, method]
