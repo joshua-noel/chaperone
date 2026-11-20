@@ -77,7 +77,7 @@ func (e *Engine) For(project string) *Effective {
 		if rerr != nil {
 			eff = e.broken(project, rerr)
 		} else if eff, err = e.base.LoadProject(project, data, e.cat); err != nil {
-			eff = e.broken(project, err)
+			eff = e.broken(project, fmt.Errorf("%s: %w", filepath.Base(path), err))
 		}
 		c = cached{checked: now, size: st.Size(), mtime: st.ModTime(), eff: eff}
 	}

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/joshua-noel/chaperone/internal/tierglob"
 )
 
 //go:embed data/baseline.yaml
@@ -173,6 +175,18 @@ func (p *PR) validate() error {
 	for _, n := range p.ExtraChecks {
 		if strings.TrimSpace(n) == "" {
 			return errors.New("extra_checks has an empty name")
+		}
+	}
+	// A tier glob that no plain path can match would silently do nothing: refuse it here, when the file loads, as
+	// the classifier does at request time (both call tierglob.Validate).
+	for _, set := range []struct {
+		name  string
+		globs []string
+	}{{"high", p.Tiers.High}, {"medium", p.Tiers.Medium}, {"low", p.Tiers.Low}} {
+		for _, g := range set.globs {
+			if err := tierglob.Validate(g); err != nil {
+				return fmt.Errorf("tiers.%s: %w", set.name, err)
+			}
 		}
 	}
 	if l := p.LocalCI; l != nil {

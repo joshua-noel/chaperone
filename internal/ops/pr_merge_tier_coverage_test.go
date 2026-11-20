@@ -13,7 +13,7 @@ import (
 func TestOnlyDocumentationFileTypesAreLowUnderDocs(t *testing.T) {
 	g := ops.PRTierGlobs{}
 	for p, want := range map[string]ops.PRTier{
-		"docs/notes.md": ops.TierLow, "docs/a/b/guide.MD": ops.TierLow, "docs/page.mdx": ops.TierLow, "docs/notes.txt": ops.TierLow,
+		"docs/notes.md": ops.TierLow, "docs/a/b/guide.MD": ops.TierLow, "docs/page.mdx": ops.TierMedium, "page.mdx": ops.TierMedium, "src/Page.MDX": ops.TierMedium, "docs/notes.txt": ops.TierLow,
 		"docs/index.rst": ops.TierLow, "docs/guide.adoc": ops.TierLow, "docs/img/logo.png": ops.TierLow, "docs/a.jpg": ops.TierLow,
 		"docs/a.jpeg": ops.TierLow, "docs/a.gif": ops.TierLow, "docs/a.webp": ops.TierLow,
 		"docs/diagram.svg": ops.TierMedium, // an SVG can carry script
