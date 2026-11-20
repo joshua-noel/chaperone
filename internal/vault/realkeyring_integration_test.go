@@ -20,6 +20,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -155,11 +156,50 @@ func removeVaultItemsAfter(t *testing.T, st secretStore, w storeWrapper, dir str
 
 // psHas reports whether needle is in the command line of any process now.
 func psHas(needle string) (bool, error) {
-	out, err := exec.Command("ps", "-axww", "-o", "command=").Output()
+	out, err := psList()
 	if err != nil {
 		return false, err
 	}
 	return bytes.Contains(out, []byte(needle)), nil
+}
+
+// psArgs is the exact ps command used on every system: all processes (-ax),
+// no width limit (-ww), the command line only (-o command=). Both the BSD ps of
+// macOS and the procps ps of Linux take it.
+var psArgs = []string{"-axww", "-o", "command="}
+
+func psList() ([]byte, error) {
+	return exec.Command("ps", psArgs...).Output()
+}
+
+// describePS is what the next run needs to see when the control check fails:
+// the command, how many lines came back, the first lines, and every line that
+// could be the control process. It holds no key (it runs before any is made).
+func describePS(marker string) string {
+	out, err := psList()
+	var b strings.Builder
+	fmt.Fprintf(&b, "command: ps %s\nerror: %v\nbytes: %d\n", strings.Join(psArgs, " "), err, len(out))
+	lines := strings.Split(string(out), "\n")
+	fmt.Fprintf(&b, "lines: %d\nfirst lines:\n", len(lines))
+	clip := func(s string) string {
+		if len(s) > 200 {
+			return s[:200] + "..."
+		}
+		return s
+	}
+	for i, l := range lines {
+		if i >= 8 {
+			break
+		}
+		fmt.Fprintf(&b, "  %s\n", clip(l))
+	}
+	b.WriteString("lines naming the control process or its sleep:\n")
+	for _, l := range lines {
+		if strings.Contains(l, marker) || strings.Contains(l, "chaperone-ps-control") || strings.Contains(l, "sleep") {
+			fmt.Fprintf(&b, "  %s\n", clip(l))
+		}
+	}
+	return b.String()
 }
 
 // requirePSSeesArguments proves, with a process whose command line holds a
@@ -168,7 +208,11 @@ func psHas(needle string) (bool, error) {
 func requirePSSeesArguments(t *testing.T) {
 	t.Helper()
 	marker := "chaperone-ps-control-" + randomHex(t, 8)
-	c := exec.Command("sh", "-c", "sleep 20", marker)
+	// The marker is $0 of a shell that stays a shell. The script must not end
+	// in a single command: a shell may then exec that command in its own place
+	// (macOS does), the process becomes `sleep 20`, and the marker is gone from
+	// its command line.
+	c := exec.Command("sh", "-c", "sleep 20; true", marker)
 	if err := c.Start(); err != nil {
 		t.Fatalf("start the ps control process: %v", err)
 	}
@@ -183,7 +227,8 @@ func requirePSSeesArguments(t *testing.T) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("ps did not show the command line of a control process: the process-list check cannot work on this system")
+			t.Fatalf("ps did not show the command line of a control process: the process-list check cannot work on this system\ncontrol command: sh -c %q %s\n%s",
+				"sleep 20; true", marker, describePS(marker))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
