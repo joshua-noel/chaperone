@@ -88,7 +88,7 @@ The parts listed under "What is included" are built and have automated tests. Th
 - Running a whole agent setup on Chaperone alone, with the agents holding no other access.
 - The Google mail and Drive actions against the real Google service. The tests use a fake.
 - Phone approval over a real network. The browser flow was tested without a real phone.
-- A real tool call by a model through `chap mcp`, beyond one short trial. A model listed the tools and read a pull request once, with one MCP client. Claude Code has not been tried, and no model has been watched through an approval.
+- A model working through `chap mcp` all the way to an approved merge. Claude Code has listed the tools, read a pull request, been refused a merge and asked for an approval card in the playground. No one has yet approved that card and watched the model finish.
 
 Do not rely on Chaperone to protect something you cannot afford to lose until you have tested it in your own setup.
 
