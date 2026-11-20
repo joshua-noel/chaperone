@@ -676,7 +676,11 @@ func TestMergeRequestValidation(t *testing.T) {
 		"no merge base": func(r *ops.PRMergeRequest) { r.Policy.Base = "" },
 		"bad repo":      func(r *ops.PRMergeRequest) { r.Repo = gh.Repo{Owner: "a b", Name: "c"} },
 		"bad tier glob": func(r *ops.PRMergeRequest) { r.Policy.Tiers.High = []string{"[x"} },
-		"empty extra":   func(r *ops.PRMergeRequest) { r.Policy.ExtraChecks = []string{""} },
+		// A glob that can never match a plain path (v0.1.0 accepted these and they matched nothing).
+		"brace glob":  func(r *ops.PRMergeRequest) { r.Policy.Tiers.Low = []string{"site/**/*.{md,mdx}"} },
+		"tilde glob":  func(r *ops.PRMergeRequest) { r.Policy.Tiers.High = []string{"backup~/**"} },
+		"accent glob": func(r *ops.PRMergeRequest) { r.Policy.Tiers.Low = []string{"docs/caf\u00e9/**"} },
+		"empty extra": func(r *ops.PRMergeRequest) { r.Policy.ExtraChecks = []string{""} },
 	}
 	for name, mod := range bad {
 		r := f.req(n, head)
