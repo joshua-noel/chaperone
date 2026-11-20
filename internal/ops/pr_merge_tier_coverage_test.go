@@ -139,3 +139,28 @@ func TestBuildFilesAreNotLowInAnyTestFolder(t *testing.T) {
 		}
 	}
 }
+
+// More agent instruction files, and the other common spellings of a Python requirements file.
+func TestMoreAgentAndInstallFilesAreNotLow(t *testing.T) {
+	var g ops.PRTierGlobs
+	for _, p := range []string{
+		"AGENTS.override.md", "sub/agents.override.md", "CLAUDE.project.md", "WARP.md", "x.chatmode.md", "review.prompt.md",
+		".windsurf/rules/x.md", ".kiro/steering/x.md", ".roo/rules/x.md", ".junie/guidelines.md", ".continue/rules/x.md",
+		".amazonq/rules/x.md", ".trae/rules/x.md", ".agents/skills/x.md", "pkg/.kiro/steering/x.md",
+	} {
+		if got := g.ClassifyPath(p); got != ops.TierHigh {
+			t.Errorf("%s is %s, want high", p, got)
+		}
+	}
+	for _, p := range []string{"dev-requirements.txt", "requirements/dev.txt", "requirements/base.txt", "api/requirements/prod/pins.txt", "test-constraints.txt"} {
+		if got := g.ClassifyPath(p); got != ops.TierMedium {
+			t.Errorf("%s is %s, want medium", p, got)
+		}
+	}
+	// A YAML fixture under testdata is low only when no test folder is above it: the test-folder rule is checked first.
+	for p, want := range map[string]ops.PRTier{"x/testdata/case.yaml": ops.TierLow, "tests/testdata/case.yaml": ops.TierMedium, "notes/requirements-gathering.md": ops.TierLow} {
+		if got := g.ClassifyPath(p); got != want {
+			t.Errorf("%s is %s, want %s", p, got, want)
+		}
+	}
+}

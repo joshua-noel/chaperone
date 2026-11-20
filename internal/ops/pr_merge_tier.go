@@ -71,6 +71,8 @@ var (
 		"**/gemini.md", "**/agent.md", "**/claude.local.md", "**/skill.md", "**/copilot-instructions.md", "**/*.instructions.md",
 		"**/.cursorrules", "**/.windsurfrules", "**/.clinerules", "**/.aider*", "**/.mcp.json", "**/mcp.json",
 		"**/.claude/**", "**/.cursor/**", "**/.clinerules/**", "**/.codex/**", "**/.gemini/**", "**/.omp/**",
+		"**/agents.*.md", "**/claude.*.md", "**/gemini.*.md", "**/warp.md", "**/*.chatmode.md", "**/*.prompt.md",
+		"**/.windsurf/**", "**/.kiro/**", "**/.roo/**", "**/.junie/**", "**/.continue/**", "**/.amazonq/**", "**/.trae/**", "**/.agents/**",
 		// A documentation build runs these.
 		"**/.readthedocs.yaml", "**/.readthedocs.yml",
 	}
@@ -81,7 +83,7 @@ var (
 	// above; pyproject.toml would be medium as a .toml file, and is listed so
 	// the floor does not depend on the extension list.
 	baselineMedium = []string{
-		"**/requirements*.txt", "**/constraints*.txt", "**/pyproject.toml",
+		"**/*requirements*.txt", "**/*constraints*.txt", "**/requirements/**/*.txt", "**/pyproject.toml",
 		// A build script that the *.txt rule would call low.
 		"**/cmakelists.txt",
 		// MDX is compiled to a program that runs when the site is built, and an SVG can carry script; the other
