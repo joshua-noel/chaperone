@@ -23,7 +23,7 @@ func PlainRune(r rune) bool {
 // Validate reports why a tier glob is not usable. Globs are slash-separated and case-insensitive. `**` as a whole
 // component matches any number of directories, `*` and `?` match within a component, and `[...]` is a character
 // class: a set of characters or ranges such as `[a-c]`, with `^` first for "not". The class has no escape, so a
-// folder whose name holds brackets, such as Next.js `app/[slug]/`, is written with `?` for each bracket:
+// folder whose name holds `[` and `]`, such as Next.js `app/[slug]/`, is written with `?` for each bracket:
 // `app/?slug?/`.
 //
 // A glob is refused when it can never match a plain path: it is empty, absolute, or holds a backslash or a
