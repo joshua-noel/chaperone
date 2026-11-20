@@ -101,6 +101,10 @@ type ScreensConfig struct {
 	// Projects names projects to list on the catalog even before they have
 	// made a request. Projects that appear in ops or runs are listed anyway.
 	Projects []string
+
+	// Keys turns on the Agents screen: a person's own agents, their requests and their keys (ADR-008). Nil: the
+	// screen says agent keys are off in this chapd.
+	Keys *KeyDecisions
 }
 
 // operatorID is the orchestrator id the console uses for what the operator
@@ -127,7 +131,7 @@ func (c *Console) UseScreens(cfg ScreensConfig) error {
 		return errors.New("console: UseScreens: Vault needs Record (secret writes are ledgered)")
 	}
 	s := &screens{c: c, cfg: cfg, pages: map[string]*template.Template{}, pend: newPendingSecrets(c.now)}
-	for _, name := range []string{"dashboard", "catalog", "ledger", "runs", "secrets"} {
+	for _, name := range []string{"dashboard", "catalog", "ledger", "runs", "secrets", "agents", "agent_request"} {
 		t, err := newTemplate().ParseFS(web.Templates(), "layout.html", "fragments.html", name+".html")
 		if err != nil {
 			return fmt.Errorf("console: parse template %s: %w", name, err)
@@ -159,6 +163,13 @@ func (c *Console) screenRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /secrets/request", s.secretRequest)
 	mux.HandleFunc("POST /secrets/{id}/commit", s.secretCommit)
 	mux.HandleFunc("POST /secrets/{id}/cancel", s.secretCancel)
+	mux.HandleFunc("GET /agents", s.agentsPage)
+	mux.HandleFunc("POST /agents/enrol/lookup", s.agentEnrolLookup)
+	mux.HandleFunc("POST /agents/enrol/approve", s.agentEnrolApprove)
+	mux.HandleFunc("GET /agents/requests/{id}", s.agentRequestPage)
+	mux.HandleFunc("POST /agents/requests/{id}/grant", s.agentRequestGrant)
+	mux.HandleFunc("POST /agents/requests/{id}/deny", s.agentRequestDeny)
+	mux.HandleFunc("POST /agents/keys/{id}/extend", s.agentKeyExtend)
 }
 
 // ---- shared plumbing ----

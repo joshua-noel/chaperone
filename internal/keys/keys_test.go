@@ -87,6 +87,7 @@ type rig struct {
 	sink   *sink
 	now    time.Time
 	hooked []string
+	who    string // the approver id the approvals this rig makes are signed by; "" means approver.operator
 }
 
 func newRig(t *testing.T) *rig {
@@ -125,8 +126,8 @@ func (g *rig) approved() (approvalID, requestID string) {
 	_, err := g.db.SQL().Exec(`INSERT INTO approvals (approval_id, request_id, requester_kind, requester_key, project, op, op_hash, class,
         policy_version, request_json, checks_json, evidence_json, card_text, display_sha256, state, created_unix, request_expires_unix,
         decided_unix, approver, nonce, challenge_sha256, record_json)
-        VALUES (?, ?, 'orchestrator', 'main', 'acme-shop', 'keys.issue', ?, 'high', 'p', '{}', '[]', '[]', 'card', ?, 'approved', 1, 2, 3, 'approver.operator', 'n', 'sha256:c', '{}')`,
-		approvalID, requestID, "sha256:"+strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64))
+        VALUES (?, ?, 'orchestrator', 'main', 'acme-shop', 'keys.issue', ?, 'high', 'p', '{}', '[]', '[]', 'card', ?, 'approved', 1, 2, 3, ?, 'n', 'sha256:c', '{}')`,
+		approvalID, requestID, "sha256:"+strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64), g.signer())
 	if err != nil {
 		g.t.Fatal(err)
 	}
@@ -595,7 +596,8 @@ func TestImmutabilityTriggersRefuseWhatTheyShould(t *testing.T) {
 	g := newRig(t)
 	_, info := g.issueAndClaim(nil)
 	for _, q := range []string{
-		`UPDATE keys SET expires_at = expires_at + 86400 WHERE id = '` + info.ID + `'`,
+		`UPDATE keys SET expires_at = expires_at - 3600 WHERE id = '` + info.ID + `'`, // an expiry only moves later (an extension)
+		`UPDATE keys SET issued_at = issued_at + 86400 WHERE id = '` + info.ID + `'`,
 		`UPDATE keys SET project = 'other' WHERE id = '` + info.ID + `'`,
 		`UPDATE keys SET owner_id = 'other' WHERE id = '` + info.ID + `'`,
 		`UPDATE keys SET rate_per_hour = 100 WHERE id = '` + info.ID + `'`,
@@ -639,4 +641,11 @@ func TestTenConcurrentClaimsGiveExactlyOneToken(t *testing.T) {
 	if _, err := g.s.VerifyKey(ctx, tokens[0]); err != nil {
 		t.Errorf("the one token does not verify: %v", err)
 	}
+}
+
+func (g *rig) signer() string {
+	if g.who == "" {
+		return "approver.operator"
+	}
+	return g.who
 }

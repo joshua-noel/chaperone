@@ -1,0 +1,81 @@
+{{define "content"}}
+<h1>Answer a request</h1>
+<p><a href="/agents">Back to agents</a></p>
+<div id="decision-status" aria-live="polite"></div>
+
+<div class="card" role="region" aria-labelledby="ask-heading">
+  <header>
+    <h2 id="ask-heading">{{if eq .Request.Kind "extend"}}<code>{{.Request.Holder}}</code> asks for more time{{else}}<code>{{.Request.Holder}}</code> asks for a key{{end}}</h2>
+    <p>Project <code>{{.Request.Project}}</code>. It waits until <time datetime="{{.Request.Expires}}">{{.Request.Expires}}</time>.{{if .Request.Needed}} The agent marked it <strong>needed today</strong>; that changes nothing about the order or the limits.{{end}}</p>
+  </header>
+  <section>
+    <dl class="dl">
+      {{if eq .Request.Kind "extend"}}
+      <dt>Asks to add</dt><dd>{{.Request.For}} to the life of its key</dd>
+      <dt>The key can do</dt><dd>{{.Request.Ops}}{{if ne .Request.Units "(none)"}} on {{.Request.Units}}{{end}} (this does not change)</dd>
+      {{else}}
+      <dt>Ops</dt><dd>{{.Request.Ops}}</dd>
+      <dt>Repositories</dt><dd>{{.Request.Units}}</dd>
+      <dt>For</dt><dd>{{.Request.For}} from the moment you sign</dd>
+      <dt>Rate</dt><dd>at most {{.Request.Rate}} calls an hour</dd>
+      {{end}}
+      <dt>Reason</dt><dd><q>{{.Request.Reason}}</q> <small>(written by the agent)</small></dd>
+    </dl>
+    <p>A key never approves anything, never issues keys and never does a critical action. A risky op in it still raises its own card each time.</p>
+  </section>
+</div>
+
+{{if eq .Request.State "pending"}}
+<div class="card" role="region" aria-labelledby="grant-heading">
+  <header>
+    <h2 id="grant-heading">Grant it</h2>
+    <p>Granting makes a card that says exactly what you are granting. Nothing is made until you sign it with Windows Hello. You can only take away from what was asked, never add.</p>
+  </header>
+  <section>
+    <form id="grant-form" class="form form-wide" autocomplete="off" hx-post="/agents/requests/{{.Request.ID}}/grant" hx-vals='{"mode":"narrow"}' hx-target="#decision-status" hx-swap="innerHTML">
+      {{if eq .Request.Kind "extend"}}
+      <div class="grid gap-2"><label for="g-ttl">Add</label>
+        <select class="select" id="g-ttl" name="ttl">{{range .Hours}}<option value="{{.Hours}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></div>
+      {{else}}
+      <fieldset class="grid gap-2">
+        <legend>Ops to keep</legend>
+        {{range .Ops}}<label><input type="checkbox" name="op" value="{{.}}" checked> <code>{{.}}</code></label>{{end}}
+      </fieldset>
+      {{if .Units}}
+      <fieldset class="grid gap-2">
+        <legend>Repositories to keep</legend>
+        {{range .Units}}<label><input type="checkbox" name="unit" value="{{.}}" checked> <code>{{.}}</code></label>{{end}}
+      </fieldset>
+      {{end}}
+      <div class="field-row">
+        <div class="grid gap-2"><label for="g-ttl">Lasts</label>
+          <select class="select" id="g-ttl" name="ttl">{{range .Hours}}<option value="{{.Hours}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></div>
+        <div class="grid gap-2"><label for="g-rate">Calls an hour at most</label>
+          <input class="input" id="g-rate" name="rate" type="number" min="1" max="{{.Rate}}" value="{{.Rate}}"></div>
+      </div>
+      {{end}}
+      <div class="form-actions">
+        <button class="btn" type="button" hx-post="/agents/requests/{{.Request.ID}}/grant" hx-vals='{"mode":"asked"}' hx-target="#decision-status" hx-swap="innerHTML">Grant as asked</button>
+        <button class="btn" data-variant="outline" type="submit">Narrow and grant</button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<div class="card" role="region" aria-labelledby="deny-heading">
+  <header>
+    <h2 id="deny-heading">Deny it</h2>
+    <p>The agent is told no, with your reason. The same exact request is refused for the next hour.</p>
+  </header>
+  <section>
+    <form id="deny-form" class="form" autocomplete="off" hx-post="/agents/requests/{{.Request.ID}}/deny" hx-target="#decision-status" hx-swap="innerHTML">
+      <div class="grid gap-2"><label for="d-reason">Reason (optional, shown to the agent)</label>
+        <input class="input" id="d-reason" name="reason" type="text" maxlength="200" autocomplete="off"></div>
+      <button class="btn" data-variant="destructive" type="submit">Deny</button>
+    </form>
+  </section>
+</div>
+{{else}}
+<p class="empty">This request is {{.Request.State}}: nothing more to answer.</p>
+{{end}}
+{{end}}

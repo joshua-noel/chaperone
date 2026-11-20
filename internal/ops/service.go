@@ -258,6 +258,7 @@ func (s *Service) Submit(ctx context.Context, c *Caller, sub *Submission, mode M
 	case errors.As(err, &ref):
 		d := deny(ref.Code, ref.Why)
 		d.Surface = ref.Surface
+		d.Status, d.RetryAfter = ref.Status, ref.RetryAfter
 		d.CanRequest = ref.CanRequest && s.appr != nil
 		d.Command = requestCommand(sub.Op, sub.Target, sub.ParamsJSON)
 		if sub.DryRun {
@@ -337,6 +338,16 @@ func (s *Service) resolveProject(c *Caller, sub *Submission) (string, *denial) {
 
 // notInToken returns the reason an op is outside the caller's scope, or "".
 func (s *Service) notInToken(c *Caller, eff *policy.Effective, project, op string) string {
+	// keys.request is the one op in no key's list: an agent's key may always ask for more, and nothing else is implied.
+	if c.Kind == KindKey && op == OpKeysRequest {
+		switch {
+		case c.KeyHolderKind != "agent":
+			return "only an agent's key asks for a key this way; a person asks through the console"
+		case project != c.Project:
+			return "project " + project + " is not this key's project"
+		}
+		return ""
+	}
 	if !spec.OpAllowed(op, c.opPatterns()) {
 		return op + " is not in this token's scope"
 	}

@@ -141,6 +141,7 @@ type ServerConfig struct {
 	Vault   VaultBackend   // optional
 	Git     GitHandler     // optional: /git/ is unmounted when nil (the git proxy, L1-09)
 	Keys    KeyAdmin       // optional: /v0/keys routes are unmounted when nil
+	Agents  AgentEnrol     // optional: /v0/agents/enrolments is unmounted when nil
 	Host    http.Handler   // optional: /v0/host/ is unmounted when nil (chap-host's routes, [HostBus.Handler])
 }
 
@@ -191,6 +192,13 @@ func NewServer(cfg ServerConfig) *Server {
 		m.Handle("GET /v0/keys/{id}", auth(s.getKey))
 		m.Handle("POST /v0/keys/{id}/claim", auth(s.claimKey))
 		m.Handle("POST /v0/keys/{id}/revoke", auth(s.revokeKey))
+		m.Handle("GET /v0/keys/requests", auth(s.listKeyRequests))
+		m.Handle("GET /v0/keys/requests/{id}", auth(s.getKeyRequest))
+		m.Handle("POST /v0/keys/requests/{id}/withdraw", auth(s.withdrawKeyRequest))
+	}
+	if cfg.Agents != nil {
+		m.HandleFunc("POST /v0/agents/enrolments", s.startEnrol)
+		m.HandleFunc("POST /v0/agents/enrolments/{id}/poll", s.pollEnrol)
 	}
 	if cfg.Interim != nil {
 		m.Handle("POST /v0/dev-tokens", auth(s.mintInterim))
@@ -783,6 +791,9 @@ func (s *Server) catalog(w http.ResponseWriter, r *http.Request, c *Caller) {
 				}
 			}
 			ops = append(ops, op)
+		}
+		if c.Kind == KindKey && c.KeyHolderKind == "agent" {
+			ops = append(ops, OpKeysRequest) // the one op an agent's key holds without listing it
 		}
 	}
 	entries := []map[string]any{}

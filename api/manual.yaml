@@ -222,6 +222,18 @@ ops:
     surface: op
     summary: Give a script or an agent a key after approval (HIGH).
     usage: chap key create --project <p> --holder <name> --ops <op,op> [--repo owner/name] [--ttl 24h]
+  keys.request:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Ask your owner for the access a job needs.
+    usage: chap key request --ops <op,op> [--repo owner/name] [--ttl 24h] --reason <why> [--wait]
+  keys.extend:
+    class: high
+    reversibility: compensable
+    surface: op
+    summary: Make an agent's key last longer, with a Hello (HIGH).
+    usage: chap key extend --for <hours> --reason <why>
   secrets.write:
     class: critical
     reversibility: compensable

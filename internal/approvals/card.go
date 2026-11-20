@@ -187,9 +187,15 @@ var cardTemplates = map[string]cardTemplate{
 	"host.scripts.refresh": {target: "Host"},
 	// ADR-008: the grant card. Every field of the key is here, so none can be left off what the operator signs.
 	"keys.issue": {target: "Key for", fields: []field{
-		{"holder_kind", "Holder is a", kIdent}, {"holder", "Holder", kIdent},
+		{"holder_kind", "Holder is a", kIdent}, {"holder", "Holder", kIdent}, {"owner", "Acting for", kIdent},
+		{"request", "Answers request", kIdent}, {"enrolment", "Completes enrolment", kIdent},
 		{"ops", "The key can do exactly these", kIdents}, {"units", "Repositories", kIdents},
 		{"ttl_hours", "Lasts (hours, from approval)", kIdent}, {"rate_per_hour", "Calls an hour at most", kIdent},
+	}},
+	// ADR-008: making an agent's key last longer. The scope is not a field: an extension never changes it.
+	"keys.extend": {target: "Key", fields: []field{
+		{"key", "Key", kIdent}, {"holder", "Agent", kIdent}, {"owner", "Acting for", kIdent},
+		{"extend_hours", "Hours added to its life", kIdent}, {"request", "Answers request", kIdent},
 	}},
 	"approvers.enroll": {target: "For", fields: []field{
 		{"label", "Device name", kText}, {"origin", "Address", kIdent},

@@ -120,16 +120,17 @@ type Config struct {
 
 // App is a built chapd: the database, the ledger, the services and the handler.
 type App struct {
-	cfg     Config
-	log     *slog.Logger
-	DB      *store.DB
-	Ledger  *ledger.Ledger
-	Policy  *policy.Engine
-	Ops     *ops.Service
-	Runs    *runtoken.Runs
-	Orch    *runtoken.Orchestrators
-	Keys    *keystore.Store
-	Console *console.Console
+	cfg        Config
+	log        *slog.Logger
+	DB         *store.DB
+	Ledger     *ledger.Ledger
+	Policy     *policy.Engine
+	Ops        *ops.Service
+	Runs       *runtoken.Runs
+	Orch       *runtoken.Orchestrators
+	Keys       *keystore.Store
+	KeyDecider *keystore.Decider
+	Console    *console.Console
 	// Approvals is the approvals engine (L1-12); bridge connects it to Ops.
 	Approvals *approvals.Engine
 	bridge    *approvalsBridge
@@ -307,6 +308,11 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	var svcRef *ops.Service
 	keyStore, err := keystore.New(keystore.Config{
 		DB: db, Ledger: sink, Redact: a.Reg, Now: cfg.now, PolicyVersion: base.BaselineVersion,
+		// Agents may be enrolled only for a project whose policy turns keys.request on; a looping agent is logged.
+		EnrolProject: func(project string) bool { return a.Policy.For(project).Enabled(keystore.OpRequest) },
+		OnLooping: func(_ context.Context, l keystore.Looping) {
+			a.log.Warn("a looping agent: its key requests were refused again and again", "agent", l.Holder, "owner", l.Owner, "key", l.KeyID, "refusals", l.Refusals)
+		},
 		TxRevoke: func(ctx context.Context, tx *store.Tx, id string) error { return svcRef.CancelKeyOps(ctx, tx, id) },
 	})
 	if err != nil {
@@ -321,6 +327,16 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		return nil, err
 	}
 	// ADR-008: the grant op. It is on only when a policy PR turns keys.issue on.
+	approvalOf := func(ctx context.Context, requestID string) (string, string, error) {
+		ap, err := eng.GetByRequest(ctx, requestID)
+		if err != nil {
+			return "", "", err
+		}
+		if ap == nil || ap.Approver == "" {
+			return "", "", fmt.Errorf("chapd: no signed approval for %s", requestID)
+		}
+		return ap.ID, ap.Approver, nil
+	}
 	issue, err := keystore.NewIssueAdapter(keystore.IssueConfig{
 		Store: keyStore, Catalog: a.Policy.Catalog(),
 		Enabled: func(project, op string) bool { return a.Policy.For(project).Enabled(op) },
@@ -331,21 +347,34 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 			}
 			return ops.PRProject{Repo: eff.PR.Repo, Base: eff.PR.Base}, true
 		},
-		Approval: func(ctx context.Context, requestID string) (string, string, error) {
-			ap, err := eng.GetByRequest(ctx, requestID)
-			if err != nil {
-				return "", "", err
-			}
-			if ap == nil || ap.Approver == "" {
-				return "", "", fmt.Errorf("chapd: no signed approval for %s", requestID)
-			}
-			return ap.ID, ap.Approver, nil
-		},
+		Approval: approvalOf,
 	})
 	if err != nil {
 		return nil, err
 	}
 	ads[keystore.OpIssue] = issue
+	// ADR-008, tracer 2: an agent asks for a key (keys.request, routine), and its owner makes a key last longer
+	// (keys.extend, a card). Both are on only when a policy PR turns them on.
+	request, err := keystore.NewRequestAdapter(keystore.RequestConfig{
+		Store: keyStore, Catalog: a.Policy.Catalog(),
+		Enabled: func(project, op string) bool { return a.Policy.For(project).Enabled(op) },
+		Project: func(name string) (ops.PRProject, bool) {
+			eff := a.Policy.For(name)
+			if eff.Invalid != nil || eff.PR == nil {
+				return ops.PRProject{}, false
+			}
+			return ops.PRProject{Repo: eff.PR.Repo, Base: eff.PR.Base}, true
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	ads[keystore.OpRequest] = request
+	extend, err := keystore.NewExtendAdapter(keyStore, approvalOf)
+	if err != nil {
+		return nil, err
+	}
+	ads[keystore.OpExtend] = extend
 	// L1-16: mail.send and drive.share adapters; both ops stay off in the baseline.
 	if err := a.installGoogle(ads); err != nil {
 		return nil, err
@@ -374,6 +403,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	a.Ops = svc
 	svcRef = svc
 	bridge.svc = svc
+	a.KeyDecider = keystore.NewDecider(keyStore, svc)
 
 	keys, err := runtoken.LoadKeySet(cfg.KeysPath)
 	if err != nil {
@@ -437,6 +467,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		AllowInterim: keys.AllowInterim, Hosts: hosts,
 		Runs:   runsBackend{r: runs},
 		Keys:   keystore.NewAdmin(keyStore),
+		Agents: keystore.NewEnrolment(keyStore),
 		Ledger: ledgerBackend{l: led},
 	}
 	scfg.ApproverCredentials = func(ctx context.Context) (int, error) {
@@ -484,6 +515,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	screens := console.ScreensConfig{
 		Version: version.Version, Runs: runs, Orch: orch, Ledger: led, Policy: a.Policy,
 		Record: approvalsLedger{l: led},
+		Keys:   a.KeyDecider,
 	}
 	if a.vault != nil { // an interface holding a nil *vault.Vault would not be nil
 		screens.Vault = a.vault

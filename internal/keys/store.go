@@ -39,6 +39,16 @@ type Config struct {
 	// the revoke back.
 	TxRevoke func(ctx context.Context, tx *store.Tx, keyID string) error
 	Now      func() time.Time
+	// Access bounds what an owner may be granted; nil means [PersonAccess].
+	Access Access
+	// Limits are the caps on key requests (a cap on requests); the zero value means [DefaultRequestLimits].
+	Limits RequestLimits
+	// OnLooping is called, after the request was refused, when an agent has been refused three times in five
+	// minutes: the looping-agent alert hook (the alert itself is not built yet). Optional.
+	OnLooping func(ctx context.Context, l Looping)
+	// EnrolProject reports whether agents may be enrolled for a project (the policy turns keys.request on for
+	// it). Nil allows any project name; chapd always sets it.
+	EnrolProject func(project string) bool
 }
 
 // Store issues, claims, verifies and revokes keys.
@@ -60,6 +70,12 @@ func New(cfg Config) (*Store, error) {
 	if now == nil {
 		now = time.Now
 	}
+	if cfg.Access == nil {
+		cfg.Access = PersonAccess{}
+	}
+	if cfg.Limits == (RequestLimits{}) {
+		cfg.Limits = DefaultRequestLimits
+	}
 	return &Store{cfg: cfg, now: now}, nil
 }
 
@@ -77,8 +93,10 @@ func tokenHash(token string) string {
 
 // Issue writes the key row of an approved keys.issue (state granted: no token
 // yet). It is idempotent per request id. An agent that a human stopped is
-// refused; granting an agent more replaces its live key in the same
-// transaction (one live key per agent).
+// refused. A grant that answers a key request marks that request granted, and
+// a bootstrap grant completes its enrolment, in the same transaction, so a key
+// and the answer to the ask are never apart. The agent's older keys are not
+// touched here: the claim of the new key replaces them.
 func (s *Store) Issue(ctx context.Context, g Grant) (ops.KeyInfo, error) {
 	if err := g.Shape(); err != nil {
 		return ops.KeyInfo{}, err
@@ -86,8 +104,12 @@ func (s *Store) Issue(ctx context.Context, g Grant) (ops.KeyInfo, error) {
 	if g.ApprovalID == "" || g.RequestID == "" || g.GrantedBy == "" || g.Claimant == "" || g.Owner == "" {
 		return ops.KeyInfo{}, errors.New("keys: a grant needs its approval, request, approver, claimant and owner")
 	}
+	kind := g.Kind
+	if kind == "" {
+		kind = GrantApproved
+	}
 	id := KeyIDFor(g.RequestID)
-	opsJSON, _ := json.Marshal(g.Ops)
+	opsJSON, _ := json.Marshal(nonNil(g.Ops))
 	unitsJSON, _ := json.Marshal(nonNil(g.Units))
 	now := s.now()
 	expires := now.Add(time.Duration(g.TTLHours) * time.Hour)
@@ -108,17 +130,47 @@ func (s *Store) Issue(ctx context.Context, g Grant) (ops.KeyInfo, error) {
 			if stopped > 0 {
 				return rule("%s is %s", g.Holder, StoppedWhy)
 			}
-			if err := s.revokeReplaced(ctx, tx, g, id); err != nil {
+		}
+		if kind == GrantBootstrap {
+			var live int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM keys WHERE owner_id = ? AND holder_kind = 'agent' AND holder = ? AND revoked_at IS NULL
+                AND (claimed_at IS NULL AND claim_deadline > ? OR claimed_at IS NOT NULL AND expires_at > ?)`,
+				g.Owner, g.Holder, now.Unix(), now.Unix()).Scan(&live); err != nil {
 				return err
+			}
+			if live > 0 {
+				return rule("the agent %s already has a key: revoke it first, or ask it to request what it needs", g.Holder)
 			}
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO keys (id, project, owner_id, holder_kind, holder, ops_json, units_json, sensitive,
                 rate_per_hour, issued_at, expires_at, claim_deadline, claimant, granted_by, grant_kind, approval_id, request_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'approved',?,?)`,
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			id, g.Project, g.Owner, g.HolderKind, g.Holder, string(opsJSON), string(unitsJSON), b2i(g.Sensitive),
-			g.Rate, now.Unix(), expires.Unix(), now.Add(ClaimWindow).Unix(), g.Claimant, g.GrantedBy, g.ApprovalID, g.RequestID)
+			g.Rate, now.Unix(), expires.Unix(), now.Add(ClaimWindow).Unix(), g.Claimant, g.GrantedBy, kind, g.ApprovalID, g.RequestID)
 		if err != nil {
 			return fmt.Errorf("keys: store key: %w", err)
+		}
+		if g.KeyRequest != "" {
+			res, err := tx.ExecContext(ctx, `UPDATE key_requests SET state = 'granted', decided_at = ?, decided_by = ?, granted_key_id = ?,
+                    grant_ops_json = ?, grant_units_json = ?, grant_ttl_hours = ?, grant_rate = ?
+                WHERE id = ? AND state = 'pending' AND expires_at > ?`,
+				now.Unix(), g.GrantedBy, id, string(opsJSON), string(unitsJSON), g.TTLHours, g.Rate, g.KeyRequest, now.Unix())
+			if err != nil {
+				return fmt.Errorf("keys: answer the request: %w", err)
+			}
+			if n, _ := res.RowsAffected(); n != 1 {
+				return rule("request %s is no longer waiting: it was withdrawn, answered, cancelled or it expired", g.KeyRequest)
+			}
+		}
+		if g.Enrolment != "" {
+			res, err := tx.ExecContext(ctx, `UPDATE key_enrolments SET state = 'issued', key_id = ?, owner_id = ?
+                WHERE id = ? AND state = 'pending' AND expires_at > ?`, id, g.Owner, g.Enrolment, now.Unix())
+			if err != nil {
+				return fmt.Errorf("keys: complete the enrolment: %w", err)
+			}
+			if n, _ := res.RowsAffected(); n != 1 {
+				return rule("enrolment %s is no longer waiting: it expired or was already answered", g.Enrolment)
+			}
 		}
 		info, err = s.get(ctx, tx, id)
 		return err
@@ -126,10 +178,11 @@ func (s *Store) Issue(ctx context.Context, g Grant) (ops.KeyInfo, error) {
 	return info, err
 }
 
-// revokeReplaced revokes the agent's earlier keys that are still granted or
-// live (a new grant replaces them). It is not a human stop.
-func (s *Store) revokeReplaced(ctx context.Context, tx *store.Tx, g Grant, newID string) error {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM keys WHERE owner_id = ? AND holder_kind = 'agent' AND holder = ? AND revoked_at IS NULL`, g.Owner, g.Holder)
+// replaceOthers revokes the agent's other keys that are still granted or live:
+// a newly claimed key replaces them (one live key per agent). It is not a
+// human stop.
+func (s *Store) replaceOthers(ctx context.Context, tx *store.Tx, owner, holder, newID string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM keys WHERE owner_id = ? AND holder_kind = 'agent' AND holder = ? AND revoked_at IS NULL AND id <> ?`, owner, holder, newID)
 	if err != nil {
 		return err
 	}
@@ -156,8 +209,15 @@ func (s *Store) revokeReplaced(ctx context.Context, tx *store.Tx, g Grant, newID
 
 // Claim hands the claimant of a granted key its token, once. The token is made
 // here and only its hash is kept; it is registered with the redaction sink
-// before the row commits, so no response, log line or event can carry it.
+// before the row commits, so no response, log line or event can carry it. The
+// claim of an agent's key revokes the agent's other keys, the one it asked
+// with included, in the same transaction.
 func (s *Store) Claim(ctx context.Context, id, claimant string) (token string, info ops.KeyInfo, err error) {
+	return s.claim(ctx, id, claimant, nil)
+}
+
+// claim is Claim with a step that runs in the claim's own transaction (the enrolment is marked claimed there).
+func (s *Store) claim(ctx context.Context, id, claimant string, after func(ctx context.Context, tx *store.Tx, k ops.KeyInfo) error) (token string, info ops.KeyInfo, err error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", ops.KeyInfo{}, fmt.Errorf("keys: random: %w", err)
@@ -196,13 +256,24 @@ func (s *Store) Claim(ctx context.Context, id, claimant string) (token string, i
 			hash, hash[:8], now.Unix(), id); err != nil {
 			return fmt.Errorf("keys: store claim: %w", err)
 		}
+		if k.HolderKind == HolderAgent {
+			if err := s.replaceOthers(ctx, tx, k.Owner, k.Holder, id); err != nil {
+				return err
+			}
+		}
 		params := map[string]any{"id": id, "fingerprint": hash[:8]}
 		body := fmt.Sprintf("key %s claimed by %s (fingerprint %s)", id, claimant, hash[:8])
 		if err := s.appendOp(ctx, tx, "keys.claim", k.Project, claimerID(claimant), id, params, body); err != nil {
 			return err
 		}
 		info, err = s.get(ctx, tx, id)
-		return err
+		if err != nil {
+			return err
+		}
+		if after != nil {
+			return after(ctx, tx, info)
+		}
+		return nil
 	})
 	if errors.Is(err, errExpiredCommit) {
 		// The transaction wrote nothing; the sweeper writes the revoke down, in its own.
@@ -227,6 +298,13 @@ func claimerID(callerKey string) string {
 	}
 	if id, ok := strings.CutPrefix(callerKey, "key:"); ok {
 		return spec.KeyRequesterPrefix + id
+	}
+	if rest, ok := strings.CutPrefix(callerKey, "agent:"); ok {
+		// "agent:person:operator/scout": the agent, named the way the ledger can hold it
+		return clipText(strings.ToLower(strings.NewReplacer("person:", "", "/", ".", ":", ".").Replace("agent."+rest)), 62)
+	}
+	if id, ok := strings.CutPrefix(callerKey, "enrol:"); ok {
+		return "enrol." + id
 	}
 	return "operator"
 }
@@ -278,6 +356,10 @@ func (s *Store) revokeTx(ctx context.Context, tx *store.Tx, id, byID, reason str
 			owner, holder, now, byID, id); err != nil {
 			return fmt.Errorf("keys: stop agent: %w", err)
 		}
+		// The agent's waiting asks go with it: nobody may be asked about an agent a human stopped.
+		if _, err := tx.ExecContext(ctx, `UPDATE key_requests SET state = 'cancelled' WHERE owner_id = ? AND holder = ? AND state = 'pending'`, owner, holder); err != nil {
+			return fmt.Errorf("keys: cancel the agent's requests: %w", err)
+		}
 	}
 	if s.cfg.TxRevoke != nil {
 		if err := s.cfg.TxRevoke(ctx, tx, id); err != nil {
@@ -299,6 +381,10 @@ func (s *Store) AgentStopped(ctx context.Context, owner, label string) (bool, er
 // Sweep revokes every key that was not claimed by its deadline (and so holds no
 // token), one ledger event each. It returns how many it revoked.
 func (s *Store) Sweep(ctx context.Context) (int, error) {
+	// Asks and enrolments that waited past their deadline are written down as expired.
+	if err := s.cfg.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error { return s.expireTx(ctx, tx, s.now()) }); err != nil {
+		return 0, err
+	}
 	rows, err := s.cfg.DB.SQL().QueryContext(ctx, `SELECT id FROM keys WHERE token_sha256 IS NULL AND revoked_at IS NULL AND claim_deadline <= ?`, s.now().Unix())
 	if err != nil {
 		return 0, err
@@ -367,7 +453,7 @@ func (s *Store) VerifyKey(ctx context.Context, bearer string) (*ops.Caller, erro
 	if subtle.ConstantTimeCompare([]byte(stored), []byte(want)) != 1 {
 		return nil, &ops.VerifyError{Code: ops.CodeTokenInvalid, Detail: "unknown key"}
 	}
-	who := &ops.Caller{Kind: ops.KindKey, KeyID: id, Project: project, KeyOwner: owner, KeyHolder: holder, Fingerprint: fp}
+	who := &ops.Caller{Kind: ops.KindKey, KeyID: id, Project: project, KeyOwner: owner, KeyHolder: holder, KeyHolderKind: holderKind, Fingerprint: fp}
 	if revoked.Valid {
 		why := "key " + id + " was revoked"
 		if stopped == 1 {
@@ -409,7 +495,7 @@ type queryer interface {
 const infoColumns = `id, project, owner_id, holder_kind, holder, ops_json, units_json, sensitive, rate_per_hour, issued_at, expires_at,
     claim_deadline, COALESCE(claimed_at,0), COALESCE(fingerprint,''), granted_by, approval_id, request_id, COALESCE(revoked_at,0),
     COALESCE(revoked_by,''), COALESCE(revoke_reason,''), human_stopped, COALESCE(last_used_at,0),
-    (SELECT COUNT(*) FROM ops WHERE ops.requester_key = 'key:' || keys.id)`
+    (SELECT COUNT(*) FROM ops WHERE ops.requester_key = 'key:' || keys.id), grant_kind`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -420,7 +506,7 @@ func (s *Store) scan(r rowScanner) (ops.KeyInfo, error) {
 	var issued, expires, deadline, claimed, revoked, used int64
 	if err := r.Scan(&k.ID, &k.Project, &k.Owner, &k.HolderKind, &k.Holder, &opsJSON, &unitsJSON, &sens, &k.RatePerHour, &issued, &expires,
 		&deadline, &claimed, &k.Fingerprint, &k.GrantedBy, &k.ApprovalID, &k.RequestID, &revoked,
-		&k.RevokedBy, &k.RevokeReason, &stopped, &used, &k.Uses); err != nil {
+		&k.RevokedBy, &k.RevokeReason, &stopped, &used, &k.Uses, &k.GrantKind); err != nil {
 		return ops.KeyInfo{}, err
 	}
 	_ = json.Unmarshal([]byte(opsJSON), &k.Ops)

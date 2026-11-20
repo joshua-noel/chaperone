@@ -85,9 +85,11 @@ type Caller struct {
 	KeyID     string
 	KeyOwner  string
 	KeyHolder string
-	KeyOps    []string // the key's frozen op list, already cut down to what a key may ever hold
-	KeyUnits  []string // repositories (lower case owner/name) the key is bound to; empty means none
-	KeyRate   int      // calls an hour, 0 for the policy default
+	// KeyHolderKind is "person" or "agent". Only an agent's key may ask for more (keys.request).
+	KeyHolderKind string
+	KeyOps        []string // the key's frozen op list, already cut down to what a key may ever hold
+	KeyUnits      []string // repositories (lower case owner/name) the key is bound to; empty means none
+	KeyRate       int      // calls an hour, 0 for the policy default
 
 	ScopeOps []string // orchestrator scope.ops
 	Expires  time.Time
@@ -246,6 +248,9 @@ type Refusal struct {
 	// can be created). Preconditions such as red CI are never requestable.
 	CanRequest bool
 	Surface    string // default "op"
+	// Status and RetryAfter turn the refusal into a rate refusal: 429 and the seconds to wait. Zero for every other refusal.
+	Status     int
+	RetryAfter int
 }
 
 func (r *Refusal) Error() string { return r.Code + ": " + r.Why }

@@ -661,6 +661,134 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v0/keys/requests:
+    get:
+      tags: [keys]
+      operationId: listKeyRequests
+      summary: "`chap key request --status`: an agent's own requests (its key), or every request (orchestrator token)."
+      responses:
+        "200":
+          description: The requests, newest first. No token and no hash.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/KeyRequest" }
+                required: [items]
+                additionalProperties: false
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/keys/requests/{id}:
+    parameters:
+      - $ref: "#/components/parameters/KeyRequestIdParam"
+    get:
+      tags: [keys]
+      operationId: getKeyRequest
+      summary: "`chap key request --status <id>`: one request, with what was granted and what was removed from it."
+      responses:
+        "200":
+          description: The request. A granted request names the key to claim (`key_id`) or, for an extension, the key that now lasts longer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyRequest"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/keys/requests/{id}/withdraw:
+    parameters:
+      - $ref: "#/components/parameters/KeyRequestIdParam"
+    post:
+      tags: [keys]
+      operationId: withdrawKeyRequest
+      summary: "`chap key request --withdraw <id>`: an agent takes back a request that still waits."
+      responses:
+        "200":
+          description: The request, withdrawn.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyRequest"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v0/agents/enrolments:
+    post:
+      tags: [keys]
+      operationId: startAgentEnrolment
+      summary: "`chap agent enrol`: start the device-code enrolment of an agent. No credential: the agent has none yet."
+      description: |
+        The answer holds a short `user_code` the agent prints for its owner and a
+        `device_code` only the agent keeps. The owner types the short code at the
+        console, sees "enrol agent X, no access", and signs a card with Windows
+        Hello. Bounded instead of authenticated: only a project whose policy turns
+        `keys.request` on, at most five enrolments waiting, one per label, ten
+        minutes each. Neither code is stored; only its SHA-256.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project: { type: string, pattern: "^[a-z][a-z0-9-]{1,38}$" }
+                label: { type: string, pattern: "^[a-z][a-z0-9._-]{0,62}$" }
+              required: [project, label]
+              additionalProperties: false
+      responses:
+        "201":
+          description: The enrolment waits for its owner.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentEnrolStart"
+        "400": { $ref: "#/components/responses/EnrolRefused" }
+        "403": { $ref: "#/components/responses/EnrolRefused" }
+        "409": { $ref: "#/components/responses/EnrolRefused" }
+        "429": { $ref: "#/components/responses/EnrolRefused" }
+  /v0/agents/enrolments/{id}/poll:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, pattern: "^en-[0-9a-f]{16}$" }
+    post:
+      tags: [keys]
+      operationId: pollAgentEnrolment
+      summary: "`chap agent enrol`: the agent asks whether its owner signed. The signed answer carries the request-only key, once."
+      description: |
+        The key is in this one response body and nowhere else, sent with
+        no-store, and only to the holder of the device code. A wrong device code
+        is a 404, never a hint that the enrolment exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_code: { type: string, minLength: 43, maxLength: 43 }
+              required: [device_code]
+              additionalProperties: false
+      responses:
+        "200":
+          description: The state of the enrolment.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentEnrolPoll"
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/EnrolRefused" }
   /v0/runs/{id}/revoke:
     parameters:
       - $ref: "#/components/parameters/RunId"
@@ -1077,6 +1205,11 @@ components:
       in: path
       required: true
       schema: { type: string, pattern: "^(k-[0-9a-f]{16}|self)$" }
+    KeyRequestIdParam:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^kr-[0-9a-f]{16}$" }
     RunId:
       name: id
       in: path
@@ -1184,6 +1317,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/NotFound"
+    EnrolRefused:
+      description: "An enrolment call the rules turn down (a caller's mistake): the reason is the answer."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/EnrolRefused"
     Unavailable:
       description: |
         chapd failed closed: the ledger (or the approval store) could not commit, so nothing ran.
@@ -1244,6 +1383,13 @@ components:
       type: object
       properties:
         type: { const: not_found }
+        why: { type: string, minLength: 1, maxLength: 500 }
+      required: [type, why]
+      additionalProperties: false
+    EnrolRefused:
+      type: object
+      properties:
+        type: { const: enrol_refused }
         why: { type: string, minLength: 1, maxLength: 500 }
       required: [type, why]
       additionalProperties: false
@@ -1774,6 +1920,7 @@ components:
         ops: { type: array, items: { type: string } }
         units: { type: array, items: { type: string } }
         sensitive: { type: boolean }
+        grant_kind: { enum: [approved, self, bootstrap], description: "approved: a script's owner; self: an owner granted their own agent; bootstrap: a request-only key that holds no op" }
         rate_per_hour: { type: integer, minimum: 1, maximum: 300 }
         issued_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
@@ -1789,7 +1936,7 @@ components:
         stopped_by_human: { type: boolean, description: "A human revoked this agent's key, so the agent stays stopped until its owner resumes it" }
         last_used_at: { type: string, format: date-time }
         uses: { type: integer }
-      required: [id, state, project, owner, holder_kind, holder, ops, units, sensitive, rate_per_hour, issued_at, expires_at, granted_by, approval_id, request_id, uses]
+      required: [id, state, project, owner, holder_kind, holder, ops, units, sensitive, grant_kind, rate_per_hour, issued_at, expires_at, granted_by, approval_id, request_id, uses]
       additionalProperties: false
     KeyClaim:
       description: "The one answer that carries a key. Sent with Cache-Control no-store. Only the caller that asked for the key gets it, once."
@@ -1798,6 +1945,89 @@ components:
         token: { type: string, pattern: "^chap_key_[A-Za-z0-9_-]{43}$" }
         key: { $ref: "#/components/schemas/Key" }
       required: [token, key]
+      additionalProperties: false
+    KeyRequestId:
+      type: string
+      pattern: "^kr-[0-9a-f]{16}$"
+    KeyRequestGrant:
+      description: "What was granted of a request, or what was removed from it."
+      type: object
+      properties:
+        ops: { type: array, items: { type: string } }
+        units: { type: array, items: { type: string } }
+        ttl_hours: { type: integer }
+        rate_per_hour: { type: integer }
+      required: [ops, units, ttl_hours, rate_per_hour]
+      additionalProperties: false
+    KeyRequest:
+      description: "A key request as the API shows it. The requester sees exactly what was granted and what was removed. Never a token."
+      type: object
+      properties:
+        id: { $ref: "#/components/schemas/KeyRequestId" }
+        kind: { enum: [new, extend] }
+        state: { enum: [pending, granted, denied, withdrawn, expired, cancelled] }
+        project: { type: string }
+        owner: { type: string }
+        holder: { type: string }
+        ops: { type: array, items: { type: string } }
+        units: { type: array, items: { type: string } }
+        ttl_hours: { type: integer, description: "For an extension: the hours added." }
+        rate_per_hour: { type: integer }
+        reason: { type: string }
+        needed_today: { type: boolean }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        extends_key: { $ref: "#/components/schemas/KeyId" }
+        decided_at: { type: string, format: date-time }
+        decided_by: { type: string }
+        deny_reason: { type: string }
+        granted: { $ref: "#/components/schemas/KeyRequestGrant" }
+        removed: { $ref: "#/components/schemas/KeyRequestGrant" }
+        key_id: { $ref: "#/components/schemas/KeyId" }
+        issue_op: { type: string }
+      required: [id, kind, state, project, owner, holder, ops, units, ttl_hours, rate_per_hour, reason, needed_today, created_at, expires_at]
+      additionalProperties: false
+    AgentEnrolStart:
+      type: object
+      properties:
+        id: { type: string, pattern: "^en-[0-9a-f]{16}$" }
+        user_code: { type: string, pattern: "^[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$" }
+        device_code: { type: string, minLength: 43, maxLength: 43 }
+        expires_at: { type: string, format: date-time }
+        interval: { type: integer, description: "Seconds between polls." }
+      required: [id, user_code, device_code, expires_at, interval]
+      additionalProperties: false
+    AgentEnrolPoll:
+      type: object
+      properties:
+        state: { enum: [pending, claimed, expired] }
+        token: { type: string, pattern: "^chap_key_[A-Za-z0-9_-]{43}$" }
+        key: { $ref: "#/components/schemas/Key" }
+      required: [state]
+      additionalProperties: false
+    ParamsKeysRequest:
+      description: "Target is `{adapter: chaperone, ref: key-request}`. Class routine: it only writes the ask down; the owner answers at the console. An agent's key only (its own holder is the one who asks). `reason` is the request's `reason` member and is required. Either `ops` (and `units`, the repositories) or `preset: same-as-me-read`; `ttl_hours` defaults to 24 and `rate_per_hour` to 300. `kind: extend` with `key: self` and `ttl_hours` (the hours to add) asks to make the agent's own key last longer. Asking for the same thing twice returns the request that waits; a stopped agent, a denied exact ask, and the caps (3 waiting per agent, 6 new an hour, 10 per owner, 20 in all) are refused. The result holds `request_id`, `state`, `deduplicated` and the next step."
+      type: object
+      properties:
+        kind: { enum: [new, extend] }
+        ops: { type: array, minItems: 1, maxItems: 16, items: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$" } }
+        units: { type: array, maxItems: 8, items: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}$" } }
+        preset: { const: same-as-me-read }
+        key: { const: self }
+        ttl_hours: { type: integer, minimum: 1, maximum: 720 }
+        rate_per_hour: { type: integer, minimum: 1, maximum: 300 }
+        needed_today: { type: boolean }
+      additionalProperties: false
+    ParamsKeysExtend:
+      description: "Target is `{adapter: chaperone, ref: \"key:<k-id>\"}`. Class high: a card the key's owner signs with Windows Hello at the console; only the console starts it, and a key never extends a key. It changes the expiry and nothing else, within the cap that counts from the day the key was made (30 days in all, 7 with a risky op). The card shows the old and the new expiry."
+      type: object
+      properties:
+        key: { $ref: "#/components/schemas/KeyId" }
+        extend_hours: { type: integer, minimum: 1, maximum: 720 }
+        owner: { type: string }
+        holder: { type: string }
+        request: { $ref: "#/components/schemas/KeyRequestId" }
+      required: [key, extend_hours, owner, holder]
       additionalProperties: false
     ParamsHealth:
       type: object

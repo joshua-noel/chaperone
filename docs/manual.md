@@ -70,7 +70,9 @@ The op catalog (`api/manual.yaml`). Whether an op is switched on is policy, per 
 | `issue.move` | routine | reversible | op | Move an issue to a state the policy lists. | `chap issue move <AGT-12> --state <name> [--dry-run]` |
 | `issue.open` | routine | reversible | op | Open an issue labelled source:error-watcher. | `chap issue open --title <t> --label source:error-watcher [--body <b>]` |
 | `issue.reopen` | routine | reversible | op | Reopen an issue labelled source:error-watcher. | `chap issue reopen <n>` |
+| `keys.extend` | high | compensable | op | Make an agent's key last longer, with a Hello (HIGH). | `chap key extend --for <hours> --reason <why>` |
 | `keys.issue` | high | compensable | op | Give a script or an agent a key after approval (HIGH). | `chap key create --project <p> --holder <name> --ops <op,op> [--repo owner/name] [--ttl 24h]` |
+| `keys.request` | routine | reversible | op | Ask your owner for the access a job needs. | `chap key request --ops <op,op> [--repo owner/name] [--ttl 24h] --reason <why> [--wait]` |
 | `logs` | routine | reversible | op | Read recent log lines from a fixed source. | `chap logs <web\|worker\|db\|tunnel> [--lines <n>]` |
 | `mail.send` | high | irreversible | op | Send one email to allowlisted recipients after approval. | `chap mail send --from <account> --to <a> --subject <s> --body-file <f>` |
 | `notion.write` | high | compensable | op | Write one Notion page after approval. | `chap request op notion.write --reason <why>` |
@@ -95,6 +97,7 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap logo` | show the CHAPERONE banner |
 | `chap mcp` | serve the ops as MCP tools over stdio (Claude Code, Codex, Cursor) |
 | `chap version` | print the build identity |
+| `chap agent enrol` | enrol this agent: print a code for its owner to type at the console, then keep a request-only key in --out (no token needed) |
 | `chap approve list` | list your own approval requests (approving is done in the console) |
 | `chap ci report` | post a finished ci run's result to GitHub as a check run (orchestrator only) |
 | `chap deploy` | deploy a commit to the pilot (needs one approval) |
@@ -117,7 +120,9 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap issue reopen` | reopen an issue labelled source:error-watcher |
 | `chap key claim` | take a granted key into --out, once (only the caller that asked for it) |
 | `chap key create` | build a key for a script or an agent: a card you sign in the console, then the key goes to --out (orchestrator only) |
+| `chap key extend` | ask your owner to make this key last longer: one tap and a Hello for them; it adds time and no access (an agent's key only) |
 | `chap key list` | list keys: holder, state, ops, repositories, expiry, uses (orchestrator only) |
+| `chap key request` | ask your owner for a key: what, how long and why; wait, and the key replaces the one in CHAP_KEY_FILE (an agent's key only) |
 | `chap key revoke` | revoke a key at once; an agent's key also stops the agent (orchestrator only) |
 | `chap key show` | show the key this process holds: what it can do and until when (a key only) |
 | `chap ledger verify` | walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only) |
@@ -138,6 +143,22 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap request scope` | ask for a wider task scope (a the runner surface) |
 | `chap runs revoke` | revoke one run, or every active run (orchestrator only) |
 | `chap vault status` | vault state: names and counts, never a value (orchestrator only) |
+
+### `chap agent enrol`
+
+enrol this agent: print a code for its owner to type at the console, then keep a request-only key in --out (no token needed)
+
+```
+chap agent enrol --label <name> --project <p> --out <file> [--wait <s>]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+| `--label <string>` | this agent's name (lower case) |
+| `--out <string>` | the new file the request-only key is written to (it is not printed) |
+| `--project <string>` | the project the agent works in |
+| `--wait <int>` | seconds to wait for your owner, 10 to 3600 (default 600) |
 
 ### `chap approve list`
 
@@ -541,6 +562,22 @@ chap key create --project <p> --holder <name> (--agent | --person) --ops <op,op>
 | `--ttl <string>` | how long it lasts: 24h by default, at most 30d, 7d for a key with a risky op (default "24h") |
 | `--wait <int>` | seconds to wait for the card to be signed, 0 to not wait (default 300) |
 
+### `chap key extend`
+
+ask your owner to make this key last longer: one tap and a Hello for them; it adds time and no access (an agent's key only)
+
+```
+chap key extend --for <1h..30d> --reason <why> [--today] [--wait <s>]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--for <string>` | how much longer you need the key: 1h to 30d |
+| `--json` | print chapd's JSON reply instead of text |
+| `--reason <string>` | why the work runs long, in a sentence (your owner reads it) |
+| `--today` | mark the request needed today (it changes no order and no limit) |
+| `--wait <int>` | seconds to wait for your owner's answer, 0 to not wait (default 300) |
+
 ### `chap key list`
 
 list keys: holder, state, ops, repositories, expiry, uses (orchestrator only)
@@ -552,6 +589,28 @@ chap key list
 | Flag | Meaning |
 | --- | --- |
 | `--json` | print chapd's JSON reply instead of text |
+
+### `chap key request`
+
+ask your owner for a key: what, how long and why; wait, and the key replaces the one in CHAP_KEY_FILE (an agent's key only)
+
+```
+chap key request --reason <why> (--ops <op,op> [--repo owner/name] | --same-as-me-read) [--ttl 24h|7d] [--rate <n>] [--today] [--wait <s>] | --status <kr-id> | --withdraw <kr-id>
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+| `--ops <string>` | comma-separated ops you need |
+| `--rate <int>` | calls an hour you need, at most 300 (default 300) |
+| `--reason <string>` | why you need it, in a sentence (your owner reads it) |
+| `--repo <string>` | owner/name the ops are for (needed for pull-request ops) |
+| `--same-as-me-read` | ask for what your owner can read, read-only, instead of naming ops |
+| `--status <string>` | show the state of request <kr-id> instead of asking |
+| `--today` | mark the request needed today (it changes no order and no limit) |
+| `--ttl <string>` | how long you need it: 24h by default, at most 30d (7d with a risky op) (default "24h") |
+| `--wait <int>` | seconds to wait for your owner's answer, 0 to not wait (default 300) |
+| `--withdraw <string>` | take back the waiting request <kr-id> instead of asking |
 
 ### `chap key revoke`
 

@@ -191,6 +191,7 @@ type runScope struct {
 type keyScope struct {
 	Units  []string `json:"units"`
 	Holder string   `json:"holder,omitempty"`
+	Kind   string   `json:"holder_kind,omitempty"`
 }
 
 // scopeJSON is the stored form of a caller's scope, "" for an orchestrator.
@@ -200,7 +201,7 @@ func scopeJSON(c *Caller) string {
 	case KindRun:
 		v = runScope{Repo: c.Repo, Base: c.Base, Branch: c.Branch, Paths: c.Paths}
 	case KindKey:
-		v = keyScope{Units: nonNilStrings(c.KeyUnits), Holder: c.KeyHolder}
+		v = keyScope{Units: nonNilStrings(c.KeyUnits), Holder: c.KeyHolder, Kind: c.KeyHolderKind}
 	default: // an orchestrator has no stored scope; an unknown kind has none to store
 		return ""
 	}
@@ -233,7 +234,7 @@ func (r *record) caller() *Caller {
 		c.Project, c.KeyID, c.KeyOwner = r.Project, r.KeyID, r.OwnerID
 		var s keyScope
 		if r.ScopeJSON != "" && json.Unmarshal([]byte(r.ScopeJSON), &s) == nil {
-			c.KeyUnits, c.KeyHolder = s.Units, s.Holder
+			c.KeyUnits, c.KeyHolder, c.KeyHolderKind = s.Units, s.Holder, s.Kind
 		}
 	}
 	return c

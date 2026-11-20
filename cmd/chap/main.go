@@ -55,6 +55,11 @@ type app struct {
 	// createFile writes data to a new file only the user can read; it refuses
 	// to overwrite.
 	createFile func(path string, data []byte) error
+	// replaceFile writes data over an existing private file in one step (a temporary file, then a rename), so a
+	// reader never sees half a key. Nil means [replacePrivateFile].
+	replaceFile func(path string, data []byte) error
+	// sleep waits between polls. Nil means time.Sleep.
+	sleep func(time.Duration)
 	// git runs `git <args>` in the working directory and returns trimmed stdout.
 	git    func(args ...string) (string, error)
 	client *http.Client
@@ -128,6 +133,7 @@ func commands() []*command {
 	all = append(all, kitCommands(declaredOps())...)
 	all = append(all, otherCommands()...)
 	all = append(all, keyCommands()...)
+	all = append(all, agentCommands()...)
 	sort.Slice(all, func(i, j int) bool { return all[i].path < all[j].path })
 	return all
 }
@@ -208,3 +214,33 @@ func (a *app) out(s string) { io.WriteString(a.stdout, a.scrub(s)) }
 
 // err writes to stderr through the scrubber.
 func (a *app) err(s string) { io.WriteString(a.stderr, a.scrub(s)) }
+
+// replacePrivateFile writes data to a new temporary file next to path (private, exclusive) and renames it over
+// path, so the key file is the old key or the new one and never a mix.
+func replacePrivateFile(path string, data []byte) error {
+	tmp := path + ".new"
+	_ = os.Remove(tmp)
+	if err := createPrivateFile(tmp, data); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func (a *app) replace(path string, data []byte) error {
+	if a.replaceFile != nil {
+		return a.replaceFile(path, data)
+	}
+	return replacePrivateFile(path, data)
+}
+
+func (a *app) pause(d time.Duration) {
+	if a.sleep != nil {
+		a.sleep(d)
+		return
+	}
+	time.Sleep(d)
+}

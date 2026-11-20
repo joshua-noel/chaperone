@@ -39,10 +39,14 @@ const Prefix = ops.KeyPrefix
 const secretChars = 43 // base64url of 32 bytes, unpadded
 
 var (
-	projectRE = regexp.MustCompile(`^[a-z][a-z0-9-]{1,38}$`)
-	labelRE   = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,62}$`)
-	unitRE    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}$`)
-	keyIDRE   = regexp.MustCompile(`^k-[0-9a-f]{16}$`)
+	projectRE   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,38}$`)
+	labelRE     = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,62}$`)
+	unitRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}$`)
+	keyIDRE     = regexp.MustCompile(`^k-[0-9a-f]{16}$`)
+	requestIDRE = regexp.MustCompile(`^kr-[0-9a-f]{16}$`)
+	enrolIDRE   = regexp.MustCompile(`^en-[0-9a-f]{16}$`)
+	// personRE is the owner of an agent: a person at the console, by the id the ledger names them with.
+	personRE = regexp.MustCompile(`^person:[a-z0-9][a-z0-9._-]{0,62}$`)
 )
 
 // Holder kinds.
@@ -63,11 +67,24 @@ func (e *RuleError) Error() string { return e.Why }
 
 func rule(format string, a ...any) error { return &RuleError{Why: fmt.Sprintf(format, a...)} }
 
-// Grant is a validated keys.issue request: what the card said and the operator
-// signed. It holds no token.
+// Grant kinds: how a key came to be (the keys.grant_kind column).
+const (
+	GrantApproved  = "approved"  // a card the operator signed for a key built by a script
+	GrantSelf      = "self"      // an owner granted their own agent a key, with their own Hello
+	GrantBootstrap = "bootstrap" // the request-only key an agent is enrolled with: it holds no op
+)
+
+// What a request-only key lives and does (operator decision): 30 days, no op, and a low hourly rate.
+const (
+	BootstrapHours = MaxDays * 24
+	BootstrapRate  = 60
+)
+
+// Grant is a validated keys.issue request: what the card said and the person
+// who signed it agreed to. It holds no token.
 type Grant struct {
 	Project    string
-	Owner      string // who the key acts for: the orchestrator that asked
+	Owner      string // who the key acts for: the orchestrator that asked, or "person:<approver>"
 	HolderKind string
 	Holder     string
 	Ops        []string
@@ -75,12 +92,18 @@ type Grant struct {
 	TTLHours   int
 	Rate       int // calls an hour; 0 means the default
 	Sensitive  bool
+	Kind       string // GrantApproved, GrantSelf or GrantBootstrap; "" means GrantApproved
+
+	// KeyRequest is the key request (key_requests.id) this grant answers, and Enrolment the enrolment
+	// (key_enrolments.id) a bootstrap grant completes. Both are "" for a key a script asked for directly.
+	KeyRequest string
+	Enrolment  string
 
 	// Set when the card was approved.
 	ApprovalID string
 	RequestID  string
 	GrantedBy  string
-	Claimant   string // Caller.Key() of who may claim it
+	Claimant   string // who may claim it: Caller.Key(), "agent:<owner>/<label>" or "enrol:<id>"
 }
 
 // Limits checks the lifetime of a key (operator decisions: at most 30 days; a
@@ -110,8 +133,15 @@ func (g *Grant) Shape() error {
 	if !labelRE.MatchString(g.Holder) {
 		return rule("the holder's name must match %s", labelRE)
 	}
-	if len(g.Ops) == 0 || len(g.Ops) > 16 {
+	if g.Kind == GrantBootstrap {
+		if len(g.Ops) != 0 || len(g.Units) != 0 || g.HolderKind != HolderAgent {
+			return rule("a request-only key belongs to an agent and holds no op")
+		}
+	} else if len(g.Ops) == 0 || len(g.Ops) > 16 {
 		return rule("a key names 1 to 16 ops")
+	}
+	if g.Ops == nil {
+		g.Ops = []string{}
 	}
 	g.Ops = sortedUnique(g.Ops)
 	g.Units = sortedUnique(lowerAll(g.Units))

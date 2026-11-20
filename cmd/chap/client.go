@@ -171,13 +171,25 @@ func (a *app) call(method, path string, q url.Values, body any) (*reply, error) 
 // callCtx is call that stops when ctx is done (`chap mcp` cancels a call the
 // client gave up on).
 func (a *app) callCtx(ctx context.Context, method, path string, q url.Values, body any) (*reply, error) {
+	return a.send(ctx, method, path, q, body, true)
+}
+
+// callAnon sends a call with no credential: only the agent enrolment routes take one, because the agent has
+// none yet. The reply of a poll can hold a key; the caller registers it with the scrubber.
+func (a *app) callAnon(method, path string, body any) (*reply, error) {
+	return a.send(context.Background(), method, path, nil, body, false)
+}
+
+func (a *app) send(ctx context.Context, method, path string, q url.Values, body any, auth bool) (*reply, error) {
 	base, err := a.baseURL()
 	if err != nil {
 		return nil, err
 	}
-	tok, err := a.loadToken()
-	if err != nil {
-		return nil, err
+	var tok string
+	if auth {
+		if tok, err = a.loadToken(); err != nil {
+			return nil, err
+		}
 	}
 	target := base + path
 	if len(q) > 0 {
@@ -195,7 +207,9 @@ func (a *app) callCtx(ctx context.Context, method, path string, q url.Values, bo
 	if err != nil {
 		return nil, failure(exitFail, "cannot build the request: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+tok)
+	if auth {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "chap/"+version.Version)
 	if body != nil {
@@ -314,6 +328,9 @@ func (a *app) refused(asJSON bool, r *reply) int {
 			"\nrequest: not possible, policy does not allow asking\n" +
 			"check CHAP_RUN_TOKEN or the orchestrator token file\n"
 		code = exitAuth
+	case head.Type == "enrol_refused":
+		text = "NOT ENROLLED\nwhy: " + clean(head.Why) + "\n"
+		code = exitDenied
 	case head.Type == "unavailable":
 		kind := "not retryable as is"
 		if head.Retryable {

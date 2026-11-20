@@ -62,6 +62,7 @@ func PhaseOneCatalog() StaticCatalog {
 		"data.apply":           ClassHigh,
 		"pr.push.workflow":     ClassHigh,
 		"keys.issue":           ClassHigh, // ADR-008: every key is a card signed with Hello
+		"keys.extend":          ClassHigh, // ADR-008: making an agent's key last longer is a card signed with Hello
 		"secrets.write":        ClassCritical,
 		"repo.settings":        ClassCritical,
 		"host.scripts.refresh": ClassCritical,

@@ -29,9 +29,9 @@ func newAdapter(t *testing.T, g *rig, enabled func(project, op string) bool) *Is
 			return ops.PRProject{}, false
 		},
 		Approval: func(_ context.Context, requestID string) (string, string, error) {
-			var id string
-			err := g.db.SQL().QueryRow(`SELECT approval_id FROM approvals WHERE request_id = ?`, requestID).Scan(&id)
-			return id, "approver.operator", err
+			var id, who string
+			err := g.db.SQL().QueryRow(`SELECT approval_id, approver FROM approvals WHERE request_id = ?`, requestID).Scan(&id, &who)
+			return id, who, err
 		},
 	})
 	if err != nil {

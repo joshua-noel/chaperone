@@ -242,6 +242,14 @@ func (o *Orchestrators) Issue(ctx context.Context, p IssueParams) (IssueResult, 
 	if !orchIDRe.MatchString(p.ID) || strings.HasPrefix(p.ID, spec.KeyRequesterPrefix) {
 		return IssueResult{}, invalid("orchestrator id %q must match %s and must not start with %q (reserved for keys)", p.ID, orchIDRe, spec.KeyRequesterPrefix)
 	}
+	if p.ID == OperatorID {
+		return IssueResult{}, invalid("orchestrator id %q is reserved: it is what chapd records for a person at the console", p.ID)
+	}
+	for _, prefix := range []string{"person.", "agent.", "enrol."} {
+		if strings.HasPrefix(p.ID, prefix) {
+			return IssueResult{}, invalid("orchestrator id %q must not start with %q (reserved for what chapd records for people, agents and enrolments)", p.ID, prefix)
+		}
+	}
 	if err := p.Scope.check(); err != nil {
 		return IssueResult{}, err
 	}
