@@ -164,10 +164,15 @@ type approvalsView struct {
 }
 
 func requesterLabel(a *approvals.Approval) string {
-	if a.RequesterKind == "orchestrator" {
+	switch a.RequesterKind {
+	case "orchestrator":
 		return "orchestrator " + a.RequesterKey
+	case "key":
+		return "key " + a.RequesterKey
+	case "run":
+		return "run " + a.RunID
 	}
-	return "run " + a.RunID
+	return "unknown requester " + a.RequesterKey
 }
 
 // ago says how long ago t was, in words a person reads at a glance.
@@ -359,6 +364,9 @@ func (c *Console) approvalActor(r *http.Request) (approvals.Actor, bool) {
 		}
 		if strings.HasPrefix(tok, "chap_orch_") {
 			return approvals.Actor{Kind: approvals.ActorOrchestrator}, true
+		}
+		if strings.HasPrefix(tok, "chap_key_") {
+			return approvals.Actor{Kind: approvals.ActorKey}, true
 		}
 		return approvals.Actor{Kind: approvals.ActorRun}, true
 	}

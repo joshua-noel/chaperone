@@ -65,8 +65,8 @@ func TestClassesAndCriticalOps(t *testing.T) {
 	cat, _ := mustDefault(t)
 	want := map[string]Class{
 		"pr.open": ClassRoutine, "branch.push": ClassRoutine, "health": ClassRoutine, "logs": ClassRoutine,
-		"pr.merge": ClassGated,
-		"deploy":   ClassHigh, "mail.send": ClassHigh, "drive.share": ClassHigh, "data.apply": ClassHigh,
+		"pr.merge": ClassGated, "keys.issue": ClassHigh,
+		"deploy": ClassHigh, "mail.send": ClassHigh, "drive.share": ClassHigh, "data.apply": ClassHigh,
 		"repo.settings": ClassCritical, "secrets.write": ClassCritical, "host.scripts.refresh": ClassCritical,
 	}
 	for op, class := range want {

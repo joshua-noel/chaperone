@@ -77,11 +77,20 @@ type GitPushResult struct {
 }
 
 func (s *Service) gitScope(ctx context.Context, c *Caller, repo, verb string) error {
-	if c.Kind == KindRun && c.Repo != "" && strings.EqualFold(c.Repo, repo) {
-		return nil
+	why := "this run's token covers " + clamp(c.Repo, 100) + " only, not " + clamp(repo, 100)
+	switch c.Kind {
+	case KindRun:
+		if c.Repo != "" && strings.EqualFold(c.Repo, repo) {
+			return nil
+		}
+	case KindKey:
+		why = "a key cannot use the git proxy (a key holds no pull-request write op)"
+	case KindOrchestrator:
+		// The auth middleware never lets the orchestrator reach the proxy; refused here as well.
+	default:
+		why = "this caller's kind is not handled by the git proxy"
 	}
-	return s.deny(ctx, c, denial{Project: gitProject(c), Surface: "scope", Verb: verb, Target: repo, Code: CodeScopePath,
-		Why: "this run's token covers " + clamp(c.Repo, 100) + " only, not " + clamp(repo, 100)})
+	return s.deny(ctx, c, denial{Project: gitProject(c), Surface: "scope", Verb: verb, Target: repo, Code: CodeScopePath, Why: why})
 }
 
 func gitProject(c *Caller) string {

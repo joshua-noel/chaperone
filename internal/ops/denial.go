@@ -210,17 +210,19 @@ func (s *Service) refuse(ctx context.Context, tx *store.Tx, c *Caller, d denial)
 	if d.CanRequest {
 		body.Request.Command = clamp(d.Command, 300)
 	}
-	if c.Kind == KindRun {
-		body.RunID, body.Profile = c.RunID, c.Profile
-	} else {
-		body.OrchestratorID = c.OrchID
+	sr := c.specRequester()
+	switch sr.Kind {
+	case KindRun:
+		body.RunID, body.Profile = sr.RunID, sr.Profile
+	case KindOrchestrator:
+		body.OrchestratorID = sr.ID // a key is projected as the orchestrator "key.<id>"
 	}
 
 	if err := s.led.AppendTx(ctx, tx, Event{
 		Name:       "denial",
 		RunID:      body.RunID,
 		Project:    d.Project,
-		Attributes: denialAttrs(id, surface, d.Code, count, c.Kind, body.OrchestratorID),
+		Attributes: denialAttrs(id, surface, d.Code, count, sr.Kind, body.OrchestratorID),
 		Body:       clamp(fmt.Sprintf("%s %s: %s", verb, target, d.Code), 1000),
 	}); err != nil {
 		return nil, err

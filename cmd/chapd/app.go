@@ -19,6 +19,7 @@ import (
 	"github.com/joshua-noel/chaperone/internal/console"
 	"github.com/joshua-noel/chaperone/internal/gh"
 	"github.com/joshua-noel/chaperone/internal/gitproxy"
+	keystore "github.com/joshua-noel/chaperone/internal/keys"
 	"github.com/joshua-noel/chaperone/internal/ledger"
 	"github.com/joshua-noel/chaperone/internal/loopback"
 	"github.com/joshua-noel/chaperone/internal/notify"
@@ -127,6 +128,7 @@ type App struct {
 	Ops     *ops.Service
 	Runs    *runtoken.Runs
 	Orch    *runtoken.Orchestrators
+	Keys    *keystore.Store
 	Console *console.Console
 	// Approvals is the approvals engine (L1-12); bridge connects it to Ops.
 	Approvals *approvals.Engine
@@ -300,12 +302,50 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	bridge.eng = eng
 	a.Approvals, a.bridge = eng, bridge
 
+	// ADR-008: custom keys. The store needs the ops service only to cancel a revoked key's waiting ops,
+	// and the service needs the keys.issue adapter, so the service is reached through a variable.
+	var svcRef *ops.Service
+	keyStore, err := keystore.New(keystore.Config{
+		DB: db, Ledger: sink, Redact: a.Reg, Now: cfg.now, PolicyVersion: base.BaselineVersion,
+		TxRevoke: func(ctx context.Context, tx *store.Tx, id string) error { return svcRef.CancelKeyOps(ctx, tx, id) },
+	})
+	if err != nil {
+		return nil, err
+	}
+	a.Keys = keyStore
+
 	deps := newAdapterDeps(ghc, a.Policy)
 	deps.ciRun = ciRunLookup(func() *runtoken.Runs { return a.Runs })
 	ads, err := adapters(deps)
 	if err != nil {
 		return nil, err
 	}
+	// ADR-008: the grant op. It is on only when a policy PR turns keys.issue on.
+	issue, err := keystore.NewIssueAdapter(keystore.IssueConfig{
+		Store: keyStore, Catalog: a.Policy.Catalog(),
+		Enabled: func(project, op string) bool { return a.Policy.For(project).Enabled(op) },
+		Project: func(name string) (ops.PRProject, bool) {
+			eff := a.Policy.For(name)
+			if eff.Invalid != nil || eff.PR == nil {
+				return ops.PRProject{}, false
+			}
+			return ops.PRProject{Repo: eff.PR.Repo, Base: eff.PR.Base}, true
+		},
+		Approval: func(ctx context.Context, requestID string) (string, string, error) {
+			ap, err := eng.GetByRequest(ctx, requestID)
+			if err != nil {
+				return "", "", err
+			}
+			if ap == nil || ap.Approver == "" {
+				return "", "", fmt.Errorf("chapd: no signed approval for %s", requestID)
+			}
+			return ap.ID, ap.Approver, nil
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	ads[keystore.OpIssue] = issue
 	// L1-16: mail.send and drive.share adapters; both ops stay off in the baseline.
 	if err := a.installGoogle(ads); err != nil {
 		return nil, err
@@ -332,6 +372,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		return nil, err
 	}
 	a.Ops = svc
+	svcRef = svc
 	bridge.svc = svc
 
 	keys, err := runtoken.LoadKeySet(cfg.KeysPath)
@@ -390,10 +431,12 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Auth: &ops.Auth{
 			Run:  runVerifier{v: verifier, stop: raiseTokenMisuse(led, idMaker("s-"), a.log)},
 			Orch: orchVerifier{o: orch},
+			Key:  keyStore,
 			Svc:  svc,
 		},
 		AllowInterim: keys.AllowInterim, Hosts: hosts,
 		Runs:   runsBackend{r: runs},
+		Keys:   keystore.NewAdmin(keyStore),
 		Ledger: ledgerBackend{l: led},
 	}
 	scfg.ApproverCredentials = func(ctx context.Context) (int, error) {
@@ -432,7 +475,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 
 	// Order matters: the Approvals screen first, then the
 	// screens that sit on it. UseApprovals turns on /approvals; UseScreens needs it.
-	if err := con.UseApprovals(eng, console.ApprovalsOptions{ResolveToken: tokenHolder(verifier, orch), Recheck: func(ctx context.Context, requestID string) (console.StaleCheck, error) {
+	if err := con.UseApprovals(eng, console.ApprovalsOptions{ResolveToken: tokenHolder(verifier, orch, keyStore), Recheck: func(ctx context.Context, requestID string) (console.StaleCheck, error) {
 		r, err := svc.Recheck(ctx, requestID)
 		return console.StaleCheck{Stale: r.Stale, Why: r.Why, NewCard: r.NewCard}, err
 	}}); err != nil {
@@ -539,6 +582,12 @@ func (a *App) Start(ctx context.Context) error {
 			case <-t.C:
 				if _, err := a.Ops.Sweep(ctx); err != nil && ctx.Err() == nil {
 					a.log.Error("op expiry sweep", "err", err)
+				}
+				// A granted key nobody claimed within its hour is revoked, and the revoke is written down.
+				if n, err := a.Keys.Sweep(ctx); err != nil && ctx.Err() == nil {
+					a.log.Error("unclaimed key sweep", "err", err)
+				} else if n > 0 {
+					a.log.Warn("keys not claimed in time were revoked", "count", n)
 				}
 			}
 		}

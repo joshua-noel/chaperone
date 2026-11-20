@@ -266,7 +266,7 @@ func TestOrchIssueValidation(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
 	bad := []IssueParams{
-		{ID: "Main", Scope: mainScope},
+		{ID: "Mixed-Case", Scope: mainScope},
 		{ID: "", Scope: mainScope},
 		{ID: "main", Scope: OrchScope{}},
 		{ID: "main", Scope: OrchScope{Projects: []string{"acme-shop"}}},
@@ -299,5 +299,21 @@ func TestOrchList(t *testing.T) {
 	}
 	if rows[0].Live(e.clock.Add(25 * time.Hour)) {
 		t.Fatal("an expired token is live")
+	}
+}
+
+// The id "key.<id>" is how a custom key reaches the spec's ledger (spec.KeyRequester): no orchestrator may be
+// called by it, or its events would pass for a key's.
+func TestOrchestratorIdsCannotStartWithTheKeyPrefix(t *testing.T) {
+	e := newEnv(t)
+	o := e.orch
+	for _, id := range []string{"key.k-0123456789abcdef", "key.x"} {
+		_, err := o.Issue(context.Background(), IssueParams{ID: id, Scope: OrchScope{Projects: []string{"acme-shop"}, Ops: []string{"pr.merge"}}})
+		if err == nil || !strings.Contains(err.Error(), "reserved for keys") {
+			t.Errorf("%s: %v", id, err)
+		}
+	}
+	if _, err := o.Issue(context.Background(), IssueParams{ID: "keymaker", Scope: OrchScope{Projects: []string{"acme-shop"}, Ops: []string{"pr.merge"}}}); err != nil {
+		t.Errorf("an id that merely starts with key: %v", err)
 	}
 }

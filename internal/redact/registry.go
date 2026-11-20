@@ -70,6 +70,7 @@ var patterns = []pattern{
 	{"google-refresh-token", regexp.MustCompile(`1//[0-9A-Za-z_\-]{30,}`)},
 	{"google-client-secret", regexp.MustCompile(`GOCSPX-[0-9A-Za-z_\-]{20,}`)},
 	{"jwt", regexp.MustCompile(`eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]*`)},
+	{"chaperone-key", regexp.MustCompile(`chap_key_[A-Za-z0-9_\-]{43}`)}, // ADR-008: a custom key is never in any text, with or without the registry
 }
 
 type exact struct {

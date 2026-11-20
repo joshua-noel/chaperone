@@ -216,6 +216,12 @@ ops:
     surface: op
     summary: Change a repository setting after approval (CRITICAL).
     usage: chap request op repo.settings --reason <why>
+  keys.issue:
+    class: high
+    reversibility: compensable
+    surface: op
+    summary: Give a script or an agent a key after approval (HIGH).
+    usage: chap key create --project <p> --holder <name> --ops <op,op> [--repo owner/name] [--ttl 24h]
   secrets.write:
     class: critical
     reversibility: compensable

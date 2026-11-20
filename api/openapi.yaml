@@ -206,6 +206,7 @@ tags:
   - name: ops
   - name: approvals
   - name: runs
+  - name: keys
   - name: catalog
   - name: ledger
   - name: host
@@ -574,6 +575,92 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthError"
         "404": { $ref: "#/components/responses/NotFound" }
+  /v0/keys:
+    get:
+      tags: [keys]
+      operationId: listKeys
+      summary: "`chap key list`: every key (orchestrator token), or only the caller's own (a key)."
+      responses:
+        "200":
+          description: The keys, newest first. No token and no hash.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Key" }
+                required: [items]
+                additionalProperties: false
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/keys/{id}:
+    parameters:
+      - $ref: "#/components/parameters/KeyIdParam"
+    get:
+      tags: [keys]
+      operationId: getKey
+      summary: "`chap key show`: one key; the id `self` is the key making the call. A key may read only itself."
+      responses:
+        "200":
+          description: The key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/keys/{id}/claim:
+    parameters:
+      - $ref: "#/components/parameters/KeyIdParam"
+    post:
+      tags: [keys]
+      operationId: claimKey
+      summary: "`chap key claim <key>`: take a granted key, once (the caller that asked for it)."
+      description: |
+        The key is made here and only its SHA-256 is kept. It is in this one
+        response body and nowhere else: not in a header, a log line, a ledger
+        event, an op result or an error. A second claim, a claim by another
+        caller, or a claim after the claim deadline (one hour after approval)
+        gets nothing; a key not claimed by its deadline is revoked.
+      responses:
+        "200":
+          description: The key, once.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyClaim"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v0/keys/{id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/KeyIdParam"
+    post:
+      tags: [keys]
+      operationId: revokeKey
+      summary: "`chap key revoke <key>`: revoke at once (orchestrator token: any key, a human act; a key: itself)."
+      description: |
+        Removes authority, so it needs no approval. The key's pending cards and
+        waiting ops are cancelled in the same transaction. A human revoke of an
+        agent's key stops the agent: no key can be issued for it again until its
+        owner resumes it. A key revoking itself does not stop its agent.
+      responses:
+        "200":
+          description: The key, revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v0/runs/{id}/revoke:
     parameters:
       - $ref: "#/components/parameters/RunId"
@@ -985,6 +1072,11 @@ components:
       in: path
       required: true
       schema: { type: string, pattern: "^q-[0-9a-z]{6,32}$" }
+    KeyIdParam:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^(k-[0-9a-f]{16}|self)$" }
     RunId:
       name: id
       in: path
@@ -1308,6 +1400,15 @@ components:
             kind: { const: orchestrator }
             orchestrator_id: { type: string, pattern: "^[a-z][a-z0-9._-]{0,62}$" }
           required: [kind, orchestrator_id]
+          additionalProperties: false
+        - type: object
+          description: "A custom key (ADR-008): the key, the owner it acts for and what holds it. In the ledger a key is the orchestrator `key.<id>`; here it is a key."
+          properties:
+            kind: { const: key }
+            key_id: { $ref: "#/components/schemas/KeyId" }
+            owner: { type: string, minLength: 1, maxLength: 63 }
+            holder: { type: string, minLength: 1, maxLength: 63 }
+          required: [kind, key_id, owner]
           additionalProperties: false
     ApprovalSummary:
       description: What the requester may see of an approval. Never the card text, nonce or challenge.
@@ -1645,6 +1746,59 @@ components:
       type: object
       additionalProperties: false
     # END generated: connector github
+    ParamsKeysIssue:
+      description: "Target is `{adapter: chaperone, ref: \"key:<holder>\"}`. Class high: every key is a card the operator signs with Windows Hello, so the request is made with `POST /v0/approvals`. Orchestrator only; a key never issues a key. `ops` are routine ops, or risky ones the key holds ask-only (every use raises its own card); never a critical op and never an op that decides, issues or administers. `ops` and `units` are sorted, lower case and without repeats, and both numbers are required: what is signed is what is granted. `units` are the repositories (needed for pull-request ops). At most 30 days, and at most 7 days for a key with a risky op. The result holds `key_id`, `expires_at`, `claim_deadline` and the next step; it never holds the key."
+      type: object
+      properties:
+        holder: { type: string, pattern: "^[a-z][a-z0-9._-]{0,62}$" }
+        holder_kind: { enum: [person, agent] }
+        ops: { type: array, minItems: 1, maxItems: 16, items: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$" } }
+        units: { type: array, maxItems: 8, items: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,99}/[a-z0-9._-]{1,100}$" } }
+        ttl_hours: { type: integer, minimum: 1, maximum: 720 }
+        rate_per_hour: { type: integer, minimum: 1, maximum: 300 }
+      required: [holder, holder_kind, ops, ttl_hours, rate_per_hour]
+      additionalProperties: false
+    KeyId:
+      type: string
+      pattern: "^k-[0-9a-f]{16}$"
+    Key:
+      description: "A custom key as the API shows it. Never the token and never its hash."
+      type: object
+      properties:
+        id: { $ref: "#/components/schemas/KeyId" }
+        state: { enum: [granted, live, expired, revoked] }
+        project: { type: string }
+        owner: { type: string }
+        holder_kind: { enum: [person, agent] }
+        holder: { type: string }
+        ops: { type: array, items: { type: string } }
+        units: { type: array, items: { type: string } }
+        sensitive: { type: boolean }
+        rate_per_hour: { type: integer, minimum: 1, maximum: 300 }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        claim_deadline: { type: string, format: date-time }
+        claimed_at: { type: string, format: date-time }
+        fingerprint: { type: string, description: "First 8 hex of the token's SHA-256" }
+        granted_by: { type: string }
+        approval_id: { type: string }
+        request_id: { type: string }
+        revoked_at: { type: string, format: date-time }
+        revoked_by: { type: string }
+        revoke_reason: { type: string }
+        stopped_by_human: { type: boolean, description: "A human revoked this agent's key, so the agent stays stopped until its owner resumes it" }
+        last_used_at: { type: string, format: date-time }
+        uses: { type: integer }
+      required: [id, state, project, owner, holder_kind, holder, ops, units, sensitive, rate_per_hour, issued_at, expires_at, granted_by, approval_id, request_id, uses]
+      additionalProperties: false
+    KeyClaim:
+      description: "The one answer that carries a key. Sent with Cache-Control no-store. Only the caller that asked for the key gets it, once."
+      type: object
+      properties:
+        token: { type: string, pattern: "^chap_key_[A-Za-z0-9_-]{43}$" }
+        key: { $ref: "#/components/schemas/Key" }
+      required: [token, key]
+      additionalProperties: false
     ParamsHealth:
       type: object
       additionalProperties: false

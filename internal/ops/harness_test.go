@@ -172,6 +172,7 @@ func (a *fakeAdapter) executions() []string {
 type fakeVerifier struct {
 	runs  map[string]*Caller
 	orchs map[string]*Caller
+	keys  map[string]*Caller
 	errs  map[string]error
 }
 
@@ -195,6 +196,17 @@ func (v *fakeVerifier) VerifyOrch(_ context.Context, b string) (*Caller, error) 
 		return &cp, nil
 	}
 	return nil, &VerifyError{Code: CodeTokenInvalid, Detail: "unknown token"}
+}
+
+func (v *fakeVerifier) VerifyKey(_ context.Context, b string) (*Caller, error) {
+	if err := v.errs[b]; err != nil {
+		return nil, err
+	}
+	if c, ok := v.keys[b]; ok {
+		cp := *c
+		return &cp, nil
+	}
+	return nil, &VerifyError{Code: CodeTokenInvalid, Detail: "unknown key"}
 }
 
 // ---- rig -------------------------------------------------------------------
@@ -356,9 +368,10 @@ func newRig(t *testing.T, o rigOpts) *rig {
 			Kind: KindOrchestrator, OrchID: "main", Fingerprint: "0a1b2c3d", Projects: []string{"acme-shop"},
 			ScopeOps: []string{"pr.merge", "pr.open", "deploy", "health", "repo.settings"}, MintInterim: true,
 		}},
+		keys: map[string]*Caller{},
 		errs: map[string]error{},
 	}
-	g.srv = NewServer(ServerConfig{Svc: g.svc, Auth: &Auth{Run: g.ver, Orch: g.ver, Svc: g.svc}, Version: "test", Git: o.git})
+	g.srv = NewServer(ServerConfig{Svc: g.svc, Auth: &Auth{Run: g.ver, Orch: g.ver, Key: g.ver, Svc: g.svc}, Version: "test", Git: o.git})
 	g.http = httptest.NewServer(g.srv)
 	g.srv.cfg.Hosts = []string{strings.TrimPrefix(g.http.URL, "http://")}
 	t.Cleanup(g.http.Close)

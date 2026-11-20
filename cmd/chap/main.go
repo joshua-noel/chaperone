@@ -127,6 +127,7 @@ func commands() []*command {
 	all = append(all, opCommands()...)
 	all = append(all, kitCommands(declaredOps())...)
 	all = append(all, otherCommands()...)
+	all = append(all, keyCommands()...)
 	sort.Slice(all, func(i, j int) bool { return all[i].path < all[j].path })
 	return all
 }
@@ -191,7 +192,7 @@ func (a *app) usage(w io.Writer) {
 		fmt.Fprintf(&b, "  %-18s %s\n", c.path, c.summary)
 	}
 	b.WriteString("\ncommands that call chapd take --json (the server's JSON, nothing else on stdout).\n")
-	b.WriteString("token: CHAP_RUN_TOKEN, else the orchestrator token file. chapd: CHAP_URL (default http://127.0.0.1:55398).\n")
+	b.WriteString("token: CHAP_RUN_TOKEN, else the key file CHAP_KEY_FILE, else the orchestrator token file. chapd: CHAP_URL (default http://127.0.0.1:55398).\n")
 	b.WriteString("exit: 0 ok, 2 usage, 3 denied, 4 auth, 5 op not ok, 6 chapd unavailable, 7 pending, 8 not found or conflict, 1 other.\n")
 	io.WriteString(w, a.scrub(b.String()))
 }

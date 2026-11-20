@@ -11,6 +11,9 @@ import (
 // OrchPrefix routes a bearer token to the orchestrator verifier (ADR-007).
 const OrchPrefix = "chap_orch_"
 
+// KeyPrefix routes a bearer token to the key verifier (ADR-008).
+const KeyPrefix = "chap_key_"
+
 // VerifyError is a token verifier's refusal. Code is a denial cause code
 // (TOKEN_INVALID, TOKEN_EXPIRED, TOKEN_REVOKED, OP_NOT_IN_TOKEN, SCOPE_BRANCH).
 // When the verifier knew who the token was (a valid signature on an expired
@@ -23,6 +26,7 @@ type VerifyError struct {
 
 	// Identity, when the token was recognised.
 	Run     *Caller // kind run: RunID, Project, Profile set
+	Key     *Caller // kind key: KeyID, Project, KeyOwner set
 	OrchID  string
 	Project string // for an orchestrator denial: the project to name, if known
 }
@@ -37,6 +41,11 @@ type RunVerifier interface {
 // OrchVerifier verifies an orchestrator token (internal/runtoken, ADR-007).
 type OrchVerifier interface {
 	VerifyOrch(ctx context.Context, bearer string) (*Caller, error)
+}
+
+// KeyVerifier verifies a key (internal/keys, ADR-008).
+type KeyVerifier interface {
+	VerifyKey(ctx context.Context, bearer string) (*Caller, error)
 }
 
 type ctxKey int
@@ -64,6 +73,7 @@ func CallerFrom(ctx context.Context) *Caller {
 type Auth struct {
 	Run  RunVerifier
 	Orch OrchVerifier
+	Key  KeyVerifier
 	Svc  *Service
 	Now  func() time.Time
 }
@@ -98,28 +108,42 @@ func (a *Auth) Authenticate(r *http.Request) (*Caller, error) {
 	if !ok || token == "" {
 		return nil, &authError{"the Authorization header must be exactly \"Bearer <token>\""}
 	}
-	isOrch := strings.HasPrefix(token, OrchPrefix)
-	if isOrch && strings.HasPrefix(r.URL.Path, "/git/") {
-		return nil, &authError{"the orchestrator token is not accepted on the git proxy"}
+	kind := tokenKind(token)
+	if (kind == KindOrchestrator || kind == KindKey) && strings.HasPrefix(r.URL.Path, "/git/") {
+		return nil, &authError{"the " + kind + " token is not accepted on the git proxy"}
 	}
 
 	var c *Caller
 	var err error
 	switch {
-	case isOrch && a.Orch != nil:
+	case kind == KindOrchestrator && a.Orch != nil:
 		c, err = a.Orch.VerifyOrch(r.Context(), token)
-	case !isOrch && a.Run != nil:
+	case kind == KindKey && a.Key != nil:
+		c, err = a.Key.VerifyKey(r.Context(), token)
+	case kind == KindRun && a.Run != nil:
 		c, err = a.Run.VerifyRun(r.Context(), token)
 	default:
 		return nil, &authError{"no verifier for this kind of token"}
 	}
 	if err != nil {
-		return nil, a.refused(r.Context(), err, isOrch, r)
+		return nil, a.refused(r.Context(), err, r)
 	}
-	if c == nil || (isOrch && c.Kind != KindOrchestrator) || (!isOrch && c.Kind != KindRun) {
+	if c == nil || c.Kind != kind {
 		return nil, &authError{"the token verifier returned the wrong kind of caller"}
 	}
 	return c, nil
+}
+
+// tokenKind routes a bearer value by its prefix: one token, one verifier, one
+// caller kind. Anything that is not an orchestrator or a key is a run token.
+func tokenKind(token string) string {
+	switch {
+	case strings.HasPrefix(token, OrchPrefix):
+		return KindOrchestrator
+	case strings.HasPrefix(token, KeyPrefix):
+		return KindKey
+	}
+	return KindRun
 }
 
 func bearerToken(h string) (string, bool) {
@@ -173,7 +197,7 @@ func requestBearer(r *http.Request) (string, error) {
 
 // refused turns a verifier error into the right body: a structured denial when
 // the token was recognised, else an unidentified-caller error.
-func (a *Auth) refused(ctx context.Context, err error, isOrch bool, r *http.Request) error {
+func (a *Auth) refused(ctx context.Context, err error, r *http.Request) error {
 	var ve *VerifyError
 	if !errors.As(err, &ve) {
 		// A verifier fault is not the caller's doing and not an identity.
@@ -185,6 +209,10 @@ func (a *Auth) refused(ctx context.Context, err error, isOrch bool, r *http.Requ
 	case ve.Run != nil:
 		c = ve.Run
 		c.Kind = KindRun
+		project = c.Project
+	case ve.Key != nil:
+		c = ve.Key
+		c.Kind = KindKey
 		project = c.Project
 	case ve.OrchID != "":
 		c = &Caller{Kind: KindOrchestrator, OrchID: ve.OrchID}

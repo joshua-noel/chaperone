@@ -237,6 +237,13 @@ func (s *Service) Submit(ctx context.Context, c *Caller, sub *Submission, mode M
 			d.Status, d.RetryAfter = 429, retry
 			return nil, s.deny(ctx, c, d)
 		}
+		if retry, err := s.keyHourLimited(ctx, c); err != nil {
+			return nil, s.unavailable("could not check the rate limit", err)
+		} else if retry > 0 {
+			d := deny(CodePolicyRefused, fmt.Sprintf("rate limit: this key allows %d calls per hour; retry in %d s", keyRate(c), retry))
+			d.Status, d.RetryAfter = 429, retry
+			return nil, s.deny(ctx, c, d)
+		}
 	}
 
 	req := &Request{
@@ -296,8 +303,9 @@ func (s *Service) refusal(ctx context.Context, c *Caller, sub *Submission, proje
 	return nil, s.denyWithOp(ctx, c, sub, project, entry, eff, d)
 }
 
-// resolveProject applies the "never from the request" rule: a run's project is
-// its token's; the orchestrator must name one inside its scope.
+// resolveProject applies the "never from the request" rule: a run's or a key's
+// project is its token's; the orchestrator must name one inside its scope. A
+// caller of a kind nobody handles is refused (never taken for an orchestrator).
 func (s *Service) resolveProject(c *Caller, sub *Submission) (string, *denial) {
 	fallback := c.Project
 	if c.Kind == KindOrchestrator {
@@ -305,38 +313,39 @@ func (s *Service) resolveProject(c *Caller, sub *Submission) (string, *denial) {
 		if len(c.Projects) > 0 {
 			fallback = c.Projects[0]
 		}
-	}
-	if sub.Project != "" && validProject(sub.Project) {
-		if c.Kind == KindOrchestrator {
+		if sub.Project != "" && validProject(sub.Project) {
 			fallback = sub.Project
 		}
 	}
 	bad := func(code, why string) (string, *denial) {
 		return fallback, &denial{Project: fallback, Verb: sub.Op, Target: sub.Target.Ref, Code: code, Why: why}
 	}
-	if c.Kind == KindRun {
+	switch c.Kind {
+	case KindRun, KindKey:
 		if sub.Project != "" && sub.Project != c.Project {
-			return bad(CodeParamsInvalid, "project in the body differs from the run token's project")
+			return bad(CodeParamsInvalid, "project in the body differs from the "+c.kindNoun()+"'s project")
 		}
 		return c.Project, nil
+	case KindOrchestrator:
+		if sub.Project == "" {
+			return bad(CodeParamsInvalid, "the orchestrator must name a project: add --project <name> to the chap command")
+		}
+		return sub.Project, nil
 	}
-	if sub.Project == "" {
-		return bad(CodeParamsInvalid, "the orchestrator must name a project: add --project <name> to the chap command")
-	}
-	return sub.Project, nil
+	return bad(CodeTokenInvalid, "the caller is of a kind this chapd does not handle")
 }
 
 // notInToken returns the reason an op is outside the caller's scope, or "".
 func (s *Service) notInToken(c *Caller, eff *policy.Effective, project, op string) string {
-	if c.Kind == KindOrchestrator {
-		if !containsString(c.Projects, project) {
-			return "project " + project + " is not in this orchestrator token's scope"
-		}
-	}
 	if !spec.OpAllowed(op, c.opPatterns()) {
 		return op + " is not in this token's scope"
 	}
-	if c.Kind == KindRun {
+	switch c.Kind {
+	case KindOrchestrator:
+		if !containsString(c.Projects, project) {
+			return "project " + project + " is not in this orchestrator token's scope"
+		}
+	case KindRun:
 		ceiling, ok := eff.ProfileCeiling(c.Profile)
 		if !ok {
 			return "profile " + c.Profile + " has no op ceiling in policy"
@@ -344,6 +353,35 @@ func (s *Service) notInToken(c *Caller, eff *policy.Effective, project, op strin
 		if !containsString(ceiling, op) {
 			return op + " is not allowed for profile " + c.Profile
 		}
+	case KindKey:
+		if project != c.Project {
+			return "project " + project + " is not this key's project"
+		}
+		if why := s.keyCeiling(op); why != "" {
+			return why
+		}
+	default:
+		return "this caller's kind is not handled, so it holds no op"
+	}
+	return ""
+}
+
+// keyCeiling is the defence in depth of ADR-008 rule R1: whatever a key row
+// says, a critical op, an op on the never-in-key list and an op the policy
+// catalog does not know are not a key's to hold.
+func (s *Service) keyCeiling(op string) string {
+	if NeverInKey(op) {
+		return op + " can never be in a key"
+	}
+	entry, ok := s.policy.Catalog().Lookup(op)
+	if !ok {
+		return op + " is not an op this chapd knows"
+	}
+	if entry.Class == policy.ClassCritical {
+		return op + " is critical, and a critical op is never in a key"
+	}
+	if _, ok := KeyUnitKind(op); !ok {
+		return op + " names no unit a key could be bound to, so a key cannot hold it"
 	}
 	return ""
 }
@@ -448,21 +486,38 @@ func (s *Service) newRecord(c *Caller, sub *Submission, project string, entry po
 		Reason: sub.Reason, Traceparent: sub.Traceparent,
 		RequestedAt: now, ExpiresAt: now.Add(time.Duration(eff.TTL(sub.Op)) * time.Minute), UpdatedAt: now,
 	}
-	if c.Kind == KindRun {
+	switch c.Kind {
+	case KindRun:
 		r.RunID, r.Profile, r.TokenJTI = c.RunID, c.Profile, c.JTI
 		r.ScopeJSON = scopeJSON(c)
-	} else {
+	case KindOrchestrator:
 		r.OrchID = c.OrchID
+	case KindKey:
+		r.KeyID, r.OwnerID = c.KeyID, c.KeyOwner
+		r.ScopeJSON = scopeJSON(c)
 	}
 	return r
 }
 
+// event is a ledger event of this op. The requester attributes are the spec's:
+// a key is written as the orchestrator "key.<id>" (see spec.KeyRequester) and
+// the owner and holder go in the body of the events that carry one.
 func (r *record) event(name string, attrs map[string]any, body string) Event {
-	attrs["factory.requester.kind"] = r.RequesterKind
-	if r.RequesterKind == KindOrchestrator {
-		attrs["factory.orchestrator.id"] = r.OrchID
+	sr := requesterOf(r.RequesterKind, r.RunID, r.TokenJTI, r.Profile, r.OrchID, r.KeyID)
+	attrs["factory.requester.kind"] = sr.Kind
+	if sr.Kind == KindOrchestrator {
+		attrs["factory.orchestrator.id"] = sr.ID
 	}
 	return Event{Name: name, RunID: r.RunID, Project: r.Project, Attributes: attrs, Body: body}
+}
+
+// actorNote names, for a key's call, the key, the person it acts for and what holds it: the spec has no key
+// requester yet, so the owner and the holder are written in the event's body (ADR-006 amendment 8).
+func (r *record) actorNote() string {
+	if r.RequesterKind != KindKey {
+		return ""
+	}
+	return " (key " + r.KeyID + ", owner " + r.OwnerID + ", holder " + r.caller().KeyHolder + ")"
 }
 
 // requestEvent is the op.request event of r. Critical ops are logged loudly.
@@ -472,7 +527,7 @@ func (r *record) requestEvent() Event {
 		"factory.op":            r.Op,
 		"factory.op_hash":       r.OpHash,
 		"factory.reversibility": r.Reversibility,
-	}, clamp(r.Op+" "+r.TargetAdapter+":"+r.TargetRef, 1000))
+	}, clamp(r.Op+" "+r.TargetAdapter+":"+r.TargetRef+r.actorNote(), 1000))
 	if r.Class == string(policy.ClassCritical) {
 		e.Severity = "WARN"
 	}
@@ -578,11 +633,28 @@ func (s *Service) hourLimited(ctx context.Context, c *Caller, op string, eff *po
 	return s.rateWindow(ctx, c, op, limit, 3600)
 }
 
+// DefaultKeyRatePerHour is how many calls an hour a key may make, over all its
+// ops, when its row names no lower number (operator decision, 3 Nov 2026).
+const DefaultKeyRatePerHour = 300
+
+// keyHourLimited is the per-key rate: the seconds to wait when the key has
+// made its hourly number of calls, else 0. It is 0 for every other kind.
+func (s *Service) keyHourLimited(ctx context.Context, c *Caller) (int, error) {
+	if c.Kind != KindKey {
+		return 0, nil
+	}
+	limit := c.KeyRate
+	if limit < 1 {
+		limit = DefaultKeyRatePerHour
+	}
+	return s.rateWindow(ctx, c, "", limit, 3600)
+}
+
 func (s *Service) rateWindow(ctx context.Context, c *Caller, op string, limit, window int) (int, error) {
 	now := s.now().Unix()
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT requested_at FROM ops
-        WHERE requester_key = ? AND op = ? AND state <> 'denied' AND requested_at > ?
-        ORDER BY requested_at ASC`, c.Key(), op, now-int64(window))
+        WHERE requester_key = ? AND (? = '' OR op = ?) AND state <> 'denied' AND requested_at > ?
+        ORDER BY requested_at ASC`, c.Key(), op, op, now-int64(window))
 	if err != nil {
 		return 0, err
 	}
@@ -850,3 +922,10 @@ func (s *Service) finish(ctx context.Context, rec *record, wait time.Duration) (
 
 // shortID is for log lines only.
 func shortID(s string) string { return clamp(s, 12) }
+
+func keyRate(c *Caller) int {
+	if c.KeyRate < 1 {
+		return DefaultKeyRatePerHour
+	}
+	return c.KeyRate
+}

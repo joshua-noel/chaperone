@@ -37,6 +37,27 @@ type requesterView struct {
 	RunID          string `json:"run_id,omitempty"`
 	Profile        string `json:"profile,omitempty"`
 	OrchestratorID string `json:"orchestrator_id,omitempty"`
+	KeyID          string `json:"key_id,omitempty"`
+	Owner          string `json:"owner,omitempty"`
+	Holder         string `json:"holder,omitempty"`
+}
+
+// requesterViewOf is the API's requester object. Unlike the ledger it names a
+// key as a key: the projection onto the spec is for spec documents only.
+func requesterViewOf(kind, runID, profile, orchID, keyID, owner, holder string) requesterView {
+	switch kind {
+	case KindRun:
+		return requesterView{Kind: KindRun, RunID: runID, Profile: profile}
+	case KindOrchestrator:
+		return requesterView{Kind: KindOrchestrator, OrchestratorID: orchID}
+	case KindKey:
+		return requesterView{Kind: KindKey, KeyID: keyID, Owner: owner, Holder: holder}
+	}
+	return requesterView{}
+}
+
+func (c *Caller) requesterView() requesterView {
+	return requesterViewOf(c.Kind, c.RunID, c.Profile, c.OrchID, c.KeyID, c.KeyOwner, c.KeyHolder)
 }
 
 // approvalView is components.schemas.ApprovalSummary.
@@ -75,11 +96,11 @@ func (r *record) view(appr *ApprovalInfo) opView {
 		Reason: r.Reason, RequestedAt: ts(r.RequestedAt), ExpiresAt: ts(r.ExpiresAt), UpdatedAt: ts(r.UpdatedAt),
 		ExecutionID: r.ExecutionID, Outcome: r.Outcome, ExternalRef: r.ExternalRef, Checks: r.checks(),
 	}
-	if r.RequesterKind == KindRun {
-		v.Requester = requesterView{Kind: KindRun, RunID: r.RunID, Profile: r.Profile}
-	} else {
-		v.Requester = requesterView{Kind: KindOrchestrator, OrchestratorID: r.OrchID}
+	holder := ""
+	if r.RequesterKind == KindKey {
+		holder = r.caller().KeyHolder
 	}
+	v.Requester = requesterViewOf(r.RequesterKind, r.RunID, r.Profile, r.OrchID, r.KeyID, r.OwnerID, holder)
 	if r.ResultJSON != "" {
 		v.Result = json.RawMessage(r.ResultJSON)
 	}

@@ -73,7 +73,7 @@ func (a *app) tokenFilePath() string {
 }
 
 // loadToken returns the credential: CHAP_RUN_TOKEN first (ADR-007 item 6),
-// else the orchestrator token file. No flag takes a token. Error text never
+// else the key file named by CHAP_KEY_FILE (ADR-008), else the orchestrator token file. No flag takes a token. Error text never
 // contains token bytes.
 func (a *app) loadToken() (string, error) {
 	a.tokMu.Lock()
@@ -82,6 +82,17 @@ func (a *app) loadToken() (string, error) {
 		return a.token, nil
 	}
 	tok, from := strings.TrimSpace(a.getenv("CHAP_RUN_TOKEN")), "CHAP_RUN_TOKEN"
+	if kf := strings.TrimSpace(a.getenv("CHAP_KEY_FILE")); tok == "" && kf != "" {
+		// A key (ADR-008) comes before the orchestrator file: a script or an agent holds a key and nothing else.
+		data, err := a.readFile(kf)
+		if err != nil {
+			return "", failure(exitAuth, "no token: CHAP_KEY_FILE names %s, which cannot be read", clean(kf))
+		}
+		tok, from = strings.TrimSpace(string(data)), "the key file "+kf
+		if tok == "" {
+			return "", failure(exitAuth, "no token: the key file %s is empty", clean(kf))
+		}
+	}
 	if tok == "" {
 		path := a.tokenFilePath()
 		data, err := a.readFile(path)

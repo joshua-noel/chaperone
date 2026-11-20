@@ -21,6 +21,7 @@ const (
 	causeCancelled   = "CANCELLED_BY_REQUESTER"
 	causeRunEnded    = "RUN_ENDED"
 	causeOrchRevoked = "ORCHESTRATOR_REVOKED"
+	causeKeyRevoked  = "KEY_REVOKED"
 	causeExpired     = "OP_APPROVAL_EXPIRED"
 	causeRestart     = "CHAPD_RESTARTED"
 	causePolicyMoved = "OP_POLICY_REFUSED"
@@ -548,6 +549,13 @@ func (s *Service) CancelOrchOps(ctx context.Context, tx *store.Tx, orchID string
 	return s.cancelOpsOf(ctx, tx, "orchestrator:"+orchID, "orchestrator revoked", causeOrchRevoked)
 }
 
+// CancelKeyOps is the keys store's revoke hook (ADR-008): revoking a key
+// cancels its pending approvals and waiting ops in the revoke transaction,
+// each with an op.result of refused and cause KEY_REVOKED.
+func (s *Service) CancelKeyOps(ctx context.Context, tx *store.Tx, keyID string) error {
+	return s.cancelOpsOf(ctx, tx, "key:"+keyID, "key revoked", causeKeyRevoked)
+}
+
 func (s *Service) cancelOpsOf(ctx context.Context, tx *store.Tx, requesterKey, reason, cause string) error {
 	rows, err := tx.QueryContext(ctx, `SELECT `+recordColumns+` FROM ops WHERE requester_key = ? AND state IN ('pending_approval','allowed')`, requesterKey)
 	if err != nil {
@@ -706,10 +714,6 @@ func (r *record) specRequest() spec.Request {
 		RequestedAt: r.RequestedAt.Format(time.RFC3339), ExpiresAt: r.ExpiresAt.Format(time.RFC3339),
 		Traceparent: r.Traceparent,
 	}
-	if r.RequesterKind == KindRun {
-		req.Requester = spec.Requester{Kind: KindRun, RunID: r.RunID, TokenJTI: r.TokenJTI, Profile: r.Profile}
-	} else {
-		req.Requester = spec.Requester{Kind: KindOrchestrator, ID: r.OrchID}
-	}
+	req.Requester = requesterOf(r.RequesterKind, r.RunID, r.TokenJTI, r.Profile, r.OrchID, r.KeyID)
 	return req
 }

@@ -53,8 +53,8 @@ func (e *Engine) ConsumeTx(ctx context.Context, tx *store.Tx, in ConsumeInput) (
 		return Effects{}, &Refusal{Code: CodeParamsInvalid, ApprovalID: a.ID, Why: "the request cannot be hashed: " + err.Error()}
 	}
 	req := in.Request
-	key, run, kerr := requesterOf(req.Requester)
-	if hash != a.OpHash || req.RequestID != a.RequestID || kerr != nil || req.Requester.Kind != a.RequesterKind ||
+	kind, key, run, kerr := requesterOf(req.Requester)
+	if hash != a.OpHash || req.RequestID != a.RequestID || kerr != nil || kind != a.RequesterKind ||
 		key != a.RequesterKey || run != a.RunID {
 		return Effects{}, &Refusal{Code: CodeHashMismatch, ApprovalID: a.ID,
 			Why: "this approval does not apply to this request: its op hash, request or requester differs"}

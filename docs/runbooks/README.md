@@ -10,6 +10,7 @@ One page per procedure. Each says who runs it, where, and what was **executed** 
 | [orchestrator-token](orchestrator-token.md) | Issue, rotate or revoke the orchestrator's token | you, elevated for `chapd orch` | [log](logs/orchestrator-token.log) |
 | [issue-ops](issue-ops.md) | Let a monitoring job file GitHub issues: grant the App the Issues permission, issue the job's token | you, in GitHub, then elevated for `chapd orch` | not run yet, see the page |
 | [pr-read-ops](pr-read-ops.md) | Use `pr.view`, `pr.diff`, `pr.checks`, `pr.files` (read a pull request through Chaperone) | you, review one policy change, then reinstall `chapd` | not run yet, see the page |
+| [custom-keys](custom-keys.md) | Give a script or an agent its own key: turn `keys.issue` on, build the key, sign the card, claim it, revoke it | you, in a policy change and the console | tested against fakes only; no real passkey, see the page |
 | [vault-recovery](vault-recovery.md) | The vault will not open; you hold the offline identity | you, elevated, then as `svc-chaperone` for one command | [log](logs/vault-recovery.log) |
 | [github-app-key](github-app-key.md) | Rotate the App's private key | you, in the console | not completed, see the page |
 | [ci-report](ci-report.md) | A project's `pr.merge` should accept a local CI result: approve the App's `checks: write`, enable `ci.report`, add `pr.local_ci` | you, in the GitHub UI, then two policy changes | GitHub UI and a real post not executed, see the page |

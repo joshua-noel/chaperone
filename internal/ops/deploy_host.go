@@ -291,10 +291,13 @@ func (b *HostBus) sign(ctx context.Context, job HostJob) (*hostJob, error) {
 		Args:  map[string]string{"sha": job.SHA},
 		Nonce: nonce, IssuedAt: now.Unix(), ExpiresAt: now.Add(b.cfg.TTL).Unix(),
 	}
-	if job.Caller.Kind == KindRun {
-		g.RunID = job.Caller.RunID
-	} else {
-		g.OrchestratorID = job.Caller.OrchID
+	switch sr := job.Caller.specRequester(); sr.Kind {
+	case KindRun:
+		g.RunID = sr.RunID
+	case KindOrchestrator:
+		g.OrchestratorID = sr.ID // a key is the orchestrator "key.<id>" to the host
+	default:
+		return nil, fmt.Errorf("ops: no grant for a caller of kind %q", job.Caller.Kind)
 	}
 	token, err := b.cfg.Signer.SignGrant(ctx, g)
 	if err != nil {

@@ -147,13 +147,23 @@ func (a *PRReadAdapter) perms() map[string]string {
 // parse validates the request. A failure is a *Refusal.
 func (a *PRReadAdapter) parse(req *Request) (prReadParams, error) {
 	c := req.Caller
-	if c == nil || c.Kind != KindOrchestrator {
+	switch {
+	case c == nil:
+		return prReadParams{}, &Refusal{Code: CodePolicyRefused, Surface: "scope", Why: a.op + " needs a caller"}
+	case c.Kind == KindOrchestrator, c.Kind == KindKey:
+	default:
 		return prReadParams{}, &Refusal{Code: CodePolicyRefused, Surface: "scope",
-			Why: a.op + " is for the orchestrator token only, never for a run"}
+			Why: a.op + " is for the orchestrator token and for keys only, never for a run"}
 	}
 	repo, n, err := targetPR(req, false)
 	if err != nil {
 		return prReadParams{}, err
+	}
+	// A key is bound to the repositories it was granted (ADR-008 unit binding): refused
+	// here, before any call to GitHub, by the repository's name as chapd normalised it.
+	if c.Kind == KindKey && !containsFold(c.KeyUnits, repo.String()) {
+		return prReadParams{}, &Refusal{Code: CodeScopePath, Surface: "scope",
+			Why: "this key covers " + clamp(strings.Join(c.KeyUnits, ", "), 100) + " only, not " + clamp(repo.String(), 100)}
 	}
 	p := prReadParams{repo: repo, number: n}
 	if err := onlyParams(req.Params, prReadKeys[a.op]...); err != nil {

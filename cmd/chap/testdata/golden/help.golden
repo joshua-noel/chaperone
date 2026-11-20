@@ -29,6 +29,11 @@ commands:
   issue move         move a Linear issue to a state the policy lists
   issue open         open an issue labelled source:error-watcher
   issue reopen       reopen an issue labelled source:error-watcher
+  key claim          take a granted key into --out, once (only the caller that asked for it)
+  key create         build a key for a script or an agent: a card you sign in the console, then the key goes to --out (orchestrator only)
+  key list           list keys: holder, state, ops, repositories, expiry, uses (orchestrator only)
+  key revoke         revoke a key at once; an agent's key also stops the agent (orchestrator only)
+  key show           show the key this process holds: what it can do and until when (a key only)
   ledger verify      walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only)
   logs               read recent log lines from a fixed source
   mail send          send one email to allowlisted recipients (needs approval)
@@ -49,6 +54,6 @@ commands:
   vault status       vault state: names and counts, never a value (orchestrator only)
 
 commands that call chapd take --json (the server's JSON, nothing else on stdout).
-token: CHAP_RUN_TOKEN, else the orchestrator token file. chapd: CHAP_URL (default http://127.0.0.1:55398).
+token: CHAP_RUN_TOKEN, else the key file CHAP_KEY_FILE, else the orchestrator token file. chapd: CHAP_URL (default http://127.0.0.1:55398).
 exit: 0 ok, 2 usage, 3 denied, 4 auth, 5 op not ok, 6 chapd unavailable, 7 pending, 8 not found or conflict, 1 other.
 --- stderr

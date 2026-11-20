@@ -267,8 +267,11 @@ func stopRaiser(l *ledger.Ledger, newID func() string) func(context.Context, *st
 			halts, action = "dependents", "quarantine"
 		}
 		body := s.Why
-		if s.RequesterKind == "orchestrator" {
+		switch s.RequesterKind {
+		case "orchestrator":
 			body = "orchestrator=" + s.RequesterKey + " " + body
+		case "key":
+			body = "key=" + s.RequesterKey + " " + body
 		}
 		if len(body) > 1000 {
 			body = body[:1000]
@@ -402,11 +405,19 @@ func (a *App) pendingCount(ctx context.Context) int {
 // tokenHolder names the holder of a bearer token that reached an approvals
 // route, so the POLICY_BREACH stop is raised against the right run or
 // orchestrator. It only reads: a token never decides anything.
-func tokenHolder(v *runtoken.Verifier, o *runtoken.Orchestrators) func(context.Context, string) (approvals.Actor, bool) {
+func tokenHolder(v *runtoken.Verifier, o *runtoken.Orchestrators, k ops.KeyVerifier) func(context.Context, string) (approvals.Actor, bool) {
 	return func(ctx context.Context, bearer string) (approvals.Actor, bool) {
 		if strings.HasPrefix(bearer, "chap_orch_") {
 			if p, err := o.Verify(ctx, bearer); err == nil {
 				return approvals.Actor{Kind: approvals.ActorOrchestrator, ID: p.ID}, true
+			}
+			return approvals.Actor{}, false
+		}
+		if strings.HasPrefix(bearer, ops.KeyPrefix) {
+			if k != nil {
+				if c, err := k.VerifyKey(ctx, bearer); err == nil {
+					return approvals.Actor{Kind: approvals.ActorKey, ID: c.KeyID}, true
+				}
 			}
 			return approvals.Actor{}, false
 		}

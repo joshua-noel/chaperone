@@ -44,23 +44,31 @@ func (s State) Terminal() bool {
 	return false
 }
 
-// Requester kinds, as in the spec's operation request.
+// Caller kinds. KindRun and KindOrchestrator are the spec's requester kinds;
+// KindKey is Chaperone's own (a custom key, ADR-008) and reaches the spec only
+// through [spec.KeyRequester].
 const (
 	KindRun          = "run"
 	KindOrchestrator = "orchestrator"
+	KindKey          = "key"
 )
+
+// CallerKinds lists every caller kind. A test calls each per-kind method for
+// each entry, so a kind added here and not handled in every switch fails
+// closed in CI instead of being taken for an orchestrator in production.
+func CallerKinds() []string { return []string{KindRun, KindOrchestrator, KindKey} }
 
 // Caller is who is asking, as the token verifiers established it. Nothing in a
 // request body can change it.
 type Caller struct {
-	Kind string // KindRun or KindOrchestrator
+	Kind string // KindRun, KindOrchestrator or KindKey
 
 	// Run callers.
 	RunID    string
 	JTI      string
 	Profile  string // a profile kind or "host-interim"
 	Interim  bool
-	Project  string // the run's project
+	Project  string // the run's project; for a key, the one project it is bound to
 	Repo     string
 	Base     string
 	Branch   string
@@ -69,29 +77,86 @@ type Caller struct {
 
 	// Orchestrator callers.
 	OrchID      string
-	Fingerprint string
+	Fingerprint string   // orchestrator and key tokens: first 8 hex of the token's SHA-256
 	Projects    []string // scope.projects
 	MintInterim bool
+
+	// Key callers (ADR-008). Owner is who the key acts for, Holder what carries it.
+	KeyID     string
+	KeyOwner  string
+	KeyHolder string
+	KeyOps    []string // the key's frozen op list, already cut down to what a key may ever hold
+	KeyUnits  []string // repositories (lower case owner/name) the key is bound to; empty means none
+	KeyRate   int      // calls an hour, 0 for the policy default
 
 	ScopeOps []string // orchestrator scope.ops
 	Expires  time.Time
 }
 
+// unknownKey names a caller whose kind no switch handles. It never matches a
+// stored requester key, a rate bucket or an approval owner.
+const unknownKey = "unknown:"
+
 // Key is the stable name of the caller used for rate limits, thrash and
-// ownership ("run:<id>" or "orchestrator:<id>").
+// ownership ("run:<id>", "orchestrator:<id>" or "key:<id>").
 func (c *Caller) Key() string {
-	if c.Kind == KindRun {
+	switch c.Kind {
+	case KindRun:
 		return "run:" + c.RunID
+	case KindOrchestrator:
+		return "orchestrator:" + c.OrchID
+	case KindKey:
+		return "key:" + c.KeyID
 	}
-	return "orchestrator:" + c.OrchID
+	return unknownKey
 }
 
-// opPatterns returns the op patterns the caller's token grants.
+// opPatterns returns the op patterns the caller's token grants. An unknown
+// kind holds none.
 func (c *Caller) opPatterns() []string {
-	if c.Kind == KindRun {
+	switch c.Kind {
+	case KindRun:
 		return c.TokenOps
+	case KindOrchestrator:
+		return c.ScopeOps
+	case KindKey:
+		return c.KeyOps
 	}
-	return c.ScopeOps
+	return nil
+}
+
+// kindNoun is what refusal text calls the caller's credential.
+func (c *Caller) kindNoun() string {
+	switch c.Kind {
+	case KindRun:
+		return "run token"
+	case KindOrchestrator:
+		return "orchestrator token"
+	case KindKey:
+		return "key"
+	}
+	return "caller"
+}
+
+// specRequester is the caller as the spec's requester. It is the only place a
+// caller becomes a spec requester; a kind it does not know yields a zero
+// requester, which no spec schema accepts (fail closed).
+func (c *Caller) specRequester() spec.Requester {
+	return requesterOf(c.Kind, c.RunID, c.JTI, c.Profile, c.OrchID, c.KeyID)
+}
+
+// requesterOf builds the spec requester from the identity columns, for a live
+// caller and for a stored op row alike.
+func requesterOf(kind, runID, jti, profile, orchID, keyID string) spec.Requester {
+	switch kind {
+	case KindRun:
+		return spec.Requester{Kind: KindRun, RunID: runID, TokenJTI: jti, Profile: profile}
+	case KindOrchestrator:
+		return spec.Requester{Kind: KindOrchestrator, ID: orchID}
+	case KindKey:
+		return spec.KeyRequester(keyID)
+	}
+	return spec.Requester{}
 }
 
 // Request is what an adapter is handed: the op as chapd stored it.

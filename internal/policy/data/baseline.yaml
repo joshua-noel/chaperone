@@ -59,6 +59,7 @@ ops:
   pr.push.workflow:     { enabled: false, rate_per_minute: 3 }
   repo.settings:        { enabled: false, rate_per_minute: 3 }
   secrets.write:        { enabled: false, rate_per_minute: 3 }
+  keys.issue:           { enabled: false, rate_per_minute: 3 }    # ADR-008: a key for a script or an agent; every key is a card signed with Hello; off until a policy PR turns it on
   host.scripts.refresh: { enabled: false, rate_per_minute: 3 }
   approvers.enroll:     { enabled: false, rate_per_minute: 3 }
   policy.activate:      { enabled: false, rate_per_minute: 3 }

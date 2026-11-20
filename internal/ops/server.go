@@ -140,6 +140,7 @@ type ServerConfig struct {
 	Ledger  LedgerBackend  // optional
 	Vault   VaultBackend   // optional
 	Git     GitHandler     // optional: /git/ is unmounted when nil (the git proxy, L1-09)
+	Keys    KeyAdmin       // optional: /v0/keys routes are unmounted when nil
 	Host    http.Handler   // optional: /v0/host/ is unmounted when nil (chap-host's routes, [HostBus.Handler])
 }
 
@@ -184,6 +185,12 @@ func NewServer(cfg ServerConfig) *Server {
 		m.HandleFunc("GET /v0/runs/{id}", s.runStatus)
 		m.Handle("POST /v0/runs/{id}/revoke", auth(s.revokeRun))
 		m.Handle("POST /v0/runs/revoke-all", auth(s.revokeAllRuns))
+	}
+	if cfg.Keys != nil {
+		m.Handle("GET /v0/keys", auth(s.listKeys))
+		m.Handle("GET /v0/keys/{id}", auth(s.getKey))
+		m.Handle("POST /v0/keys/{id}/claim", auth(s.claimKey))
+		m.Handle("POST /v0/keys/{id}/revoke", auth(s.revokeKey))
 	}
 	if cfg.Interim != nil {
 		m.Handle("POST /v0/dev-tokens", auth(s.mintInterim))
@@ -294,11 +301,13 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, status int, body [
 }
 
 func (s *Server) projectOf(c *Caller) string {
-	if c.Kind == KindRun {
+	switch c.Kind {
+	case KindRun, KindKey:
 		return c.Project
-	}
-	if len(c.Projects) > 0 {
-		return c.Projects[0]
+	case KindOrchestrator:
+		if len(c.Projects) > 0 {
+			return c.Projects[0]
+		}
 	}
 	return "unknown"
 }
@@ -496,7 +505,7 @@ func parseSubmission(data []byte, c *Caller, approval bool) (*Submission, string
 
 	// The hash covers the project chapd resolves, never one the body invented.
 	project := sub.Project
-	if c.Kind == KindRun {
+	if c.Kind == KindRun || c.Kind == KindKey {
 		project = c.Project
 	}
 	sent := sub.OpHash
@@ -689,10 +698,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request, c *Caller) {
 	if s.cfg.AllowInterim != nil {
 		allow = s.cfg.AllowInterim()
 	}
-	req := requesterView{Kind: KindOrchestrator, OrchestratorID: c.OrchID}
-	if c.Kind == KindRun {
-		req = requesterView{Kind: KindRun, RunID: c.RunID, Profile: c.Profile}
-	}
+	req := c.requesterView()
 	appr := "unavailable"
 	if s.cfg.Svc.ApprovalsAvailable() {
 		appr = "available"
@@ -724,7 +730,8 @@ func (s *Server) catalog(w http.ResponseWriter, r *http.Request, c *Caller) {
 	cat := svc.policy.Catalog()
 
 	project := s.projectOf(c)
-	if c.Kind == KindOrchestrator {
+	switch c.Kind {
+	case KindOrchestrator:
 		if p := q.Get("project"); p != "" {
 			if !containsString(c.Projects, p) {
 				s.fail(w, r, svc.deny(r.Context(), c, denial{Project: project, Verb: "request", Target: "catalog", Code: CodeOpNotInToken, Why: "project " + p + " is not in this orchestrator token's scope"}))
@@ -732,8 +739,13 @@ func (s *Server) catalog(w http.ResponseWriter, r *http.Request, c *Caller) {
 			}
 			project = p
 		}
-	} else if p := q.Get("project"); p != "" && p != c.Project {
-		s.paramsInvalid(w, r, c, "project differs from the run token's project")
+	case KindRun, KindKey:
+		if p := q.Get("project"); p != "" && p != c.Project {
+			s.paramsInvalid(w, r, c, "project differs from the "+c.kindNoun()+"'s project")
+			return
+		}
+	default:
+		s.fail(w, r, svc.deny(r.Context(), c, denial{Project: project, Verb: "request", Target: "catalog", Code: CodeOpNotInToken, Why: "this caller's kind is not handled"}))
 		return
 	}
 	all := q.Get("all") == "true"
@@ -760,8 +772,13 @@ func (s *Server) catalog(w http.ResponseWriter, r *http.Request, c *Caller) {
 			if !spec.OpAllowed(op, c.opPatterns()) {
 				continue
 			}
-			if c.Kind == KindRun {
+			switch c.Kind {
+			case KindRun:
 				if ceiling, ok := eff.ProfileCeiling(c.Profile); !ok || !containsString(ceiling, op) {
+					continue
+				}
+			case KindKey:
+				if svc.keyCeiling(op) != "" {
 					continue
 				}
 			}
@@ -964,12 +981,17 @@ func (s *Server) mintInterim(w http.ResponseWriter, r *http.Request, c *Caller) 
 func (s *Server) queryLedger(w http.ResponseWriter, r *http.Request, c *Caller) {
 	q := r.URL.Query()
 	lq := LedgerQuery{RunID: q.Get("run_id"), RequestID: q.Get("request_id"), EventName: q.Get("event_name")}
-	if c.Kind == KindRun {
+	switch c.Kind {
+	case KindRun:
 		if lq.RunID != "" && lq.RunID != c.RunID {
 			s.fail(w, r, s.cfg.Svc.deny(r.Context(), c, denial{Project: c.Project, Verb: "read", Target: "ledger", Code: CodeOpNotInToken, Why: "a run may read only its own ledger events"}))
 			return
 		}
 		lq.RunID = c.RunID
+	case KindOrchestrator:
+	default:
+		s.fail(w, r, s.cfg.Svc.deny(r.Context(), c, denial{Project: s.projectOf(c), Verb: "read", Target: "ledger", Code: CodeOpNotInToken, Why: "only the orchestrator and a run (its own events) may read the ledger"}))
+		return
 	}
 	for k, dst := range map[string]*time.Time{"from": &lq.From, "to": &lq.To} {
 		if v := q.Get(k); v != "" {

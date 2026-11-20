@@ -239,8 +239,8 @@ type IssueResult struct {
 // token is added to the redaction sink before the row commits. The events are
 // the operator-only ops orchestrator.issue (op.request, op.result).
 func (o *Orchestrators) Issue(ctx context.Context, p IssueParams) (IssueResult, error) {
-	if !orchIDRe.MatchString(p.ID) {
-		return IssueResult{}, invalid("orchestrator id %q must match %s", p.ID, orchIDRe)
+	if !orchIDRe.MatchString(p.ID) || strings.HasPrefix(p.ID, spec.KeyRequesterPrefix) {
+		return IssueResult{}, invalid("orchestrator id %q must match %s and must not start with %q (reserved for keys)", p.ID, orchIDRe, spec.KeyRequesterPrefix)
 	}
 	if err := p.Scope.check(); err != nil {
 		return IssueResult{}, err

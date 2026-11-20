@@ -11,8 +11,7 @@ These records explain the main design decisions behind Chaperone. Each ADR ends 
 | [005](005-run-token.md) | Run token and revocation | Separate agent account; orchestrator token; tagged spec release; order of revocation checks |
 | [006](006-ledger.md) | Ledger | Orchestrator events; critical ops; storage layer (`internal/store`); anchors |
 | [007](007-orchestrator-token.md) | The orchestrator authenticates with an orchestrator token | New; account split |
+| [008](008-custom-keys.md) | Custom keys: a Chaperone token for a script or an agent | New |
 | [009](009-local-mcp-front-end.md) | A local MCP front end (`chap mcp`) | New; hand-written server (ADR-001 amendment 7) |
-
-ADR-008 is reserved for custom keys. It is not written yet.
 
 A new third-party module needs a line in `../dependencies.allow` and an addendum to ADR-001.

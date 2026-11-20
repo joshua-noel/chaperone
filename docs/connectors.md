@@ -239,6 +239,7 @@ The first run of the suite found four gaps in the shipped connectors. Each was r
 
 ## What is not covered yet
 
+- **Operations of chapd itself are not declared.** `keys.issue` (custom keys, [ADR-008](adr/008-custom-keys.md)), `secrets.write`, `policy.activate` and `approvers.enroll` are not a connector's operations: they act on Chaperone, not on a service. Their catalog entries stay hand-written, and `unprofiledOps` in `internal/policy/profile_test.go` lists them.
 - **Google is not migrated.** Its operations are declared by hand in the old places.
 - **The kit cannot express a surface other than `op`.** `branch.push` and `pr.push.workflow` (the git proxy) have no declaration.
 - **The kit cannot express a default that the schema does not have.** `pr merge --base main` and `pr open --base main` are command defaults and not schema defaults, so those two commands stay custom. The same holds for a param that is read from git (`pr open --branch`).

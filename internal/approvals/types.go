@@ -61,6 +61,7 @@ func PhaseOneCatalog() StaticCatalog {
 		"drive.share":          ClassHigh,
 		"data.apply":           ClassHigh,
 		"pr.push.workflow":     ClassHigh,
+		"keys.issue":           ClassHigh, // ADR-008: every key is a card signed with Hello
 		"secrets.write":        ClassCritical,
 		"repo.settings":        ClassCritical,
 		"host.scripts.refresh": ClassCritical,
@@ -95,8 +96,8 @@ const (
 type Approval struct {
 	ID            string
 	RequestID     string
-	RequesterKind string // "run" or "orchestrator"
-	RequesterKey  string // the run id or the orchestrator id
+	RequesterKind string // "run", "orchestrator" or "key"
+	RequesterKey  string // the run id, the orchestrator id or the key id
 	RunID         string // empty for the orchestrator
 	Project       string
 	Op            string
@@ -148,6 +149,7 @@ const (
 	ActorApprover     ActorKind = "approver"
 	ActorRun          ActorKind = "run"
 	ActorOrchestrator ActorKind = "orchestrator"
+	ActorKey          ActorKind = "key"
 )
 
 // Actor is the authenticated caller of a decision entry point.
@@ -159,7 +161,8 @@ type Actor struct {
 	ApproverID  string
 	// RunID names the run a ActorRun token belongs to, when known.
 	RunID string
-	// ID names the orchestrator of an ActorOrchestrator token, when known.
+	// ID names the orchestrator of an ActorOrchestrator token or the key of an
+	// ActorKey token, when known.
 	ID string
 }
 

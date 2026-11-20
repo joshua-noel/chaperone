@@ -185,6 +185,12 @@ var cardTemplates = map[string]cardTemplate{
 	"secrets.write":        {target: "Secret"},
 	"repo.settings":        {target: "Repository"},
 	"host.scripts.refresh": {target: "Host"},
+	// ADR-008: the grant card. Every field of the key is here, so none can be left off what the operator signs.
+	"keys.issue": {target: "Key for", fields: []field{
+		{"holder_kind", "Holder is a", kIdent}, {"holder", "Holder", kIdent},
+		{"ops", "The key can do exactly these", kIdents}, {"units", "Repositories", kIdents},
+		{"ttl_hours", "Lasts (hours, from approval)", kIdent}, {"rate_per_hour", "Calls an hour at most", kIdent},
+	}},
 	"approvers.enroll": {target: "For", fields: []field{
 		{"label", "Device name", kText}, {"origin", "Address", kIdent},
 	}},

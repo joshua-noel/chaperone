@@ -70,6 +70,7 @@ The op catalog (`api/manual.yaml`). Whether an op is switched on is policy, per 
 | `issue.move` | routine | reversible | op | Move an issue to a state the policy lists. | `chap issue move <AGT-12> --state <name> [--dry-run]` |
 | `issue.open` | routine | reversible | op | Open an issue labelled source:error-watcher. | `chap issue open --title <t> --label source:error-watcher [--body <b>]` |
 | `issue.reopen` | routine | reversible | op | Reopen an issue labelled source:error-watcher. | `chap issue reopen <n>` |
+| `keys.issue` | high | compensable | op | Give a script or an agent a key after approval (HIGH). | `chap key create --project <p> --holder <name> --ops <op,op> [--repo owner/name] [--ttl 24h]` |
 | `logs` | routine | reversible | op | Read recent log lines from a fixed source. | `chap logs <web\|worker\|db\|tunnel> [--lines <n>]` |
 | `mail.send` | high | irreversible | op | Send one email to allowlisted recipients after approval. | `chap mail send --from <account> --to <a> --subject <s> --body-file <f>` |
 | `notion.write` | high | compensable | op | Write one Notion page after approval. | `chap request op notion.write --reason <why>` |
@@ -114,6 +115,11 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap issue move` | move a Linear issue to a state the policy lists |
 | `chap issue open` | open an issue labelled source:error-watcher |
 | `chap issue reopen` | reopen an issue labelled source:error-watcher |
+| `chap key claim` | take a granted key into --out, once (only the caller that asked for it) |
+| `chap key create` | build a key for a script or an agent: a card you sign in the console, then the key goes to --out (orchestrator only) |
+| `chap key list` | list keys: holder, state, ops, repositories, expiry, uses (orchestrator only) |
+| `chap key revoke` | revoke a key at once; an agent's key also stops the agent (orchestrator only) |
+| `chap key show` | show the key this process holds: what it can do and until when (a key only) |
 | `chap ledger verify` | walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only) |
 | `chap logs` | read recent log lines from a fixed source |
 | `chap mail send` | send one email to allowlisted recipients (needs approval) |
@@ -498,6 +504,78 @@ chap issue reopen <n> [--repo owner/name]
 | `--repo <string>` | owner/name (default: from the git remote origin) |
 | `--request` | create the approval card for this exact op instead of running it (needs --reason) |
 | `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap key claim`
+
+take a granted key into --out, once (only the caller that asked for it)
+
+```
+chap key claim <k-id> --out <file>
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+| `--out <string>` | the new file the key is written to (it is not printed) |
+
+### `chap key create`
+
+build a key for a script or an agent: a card you sign in the console, then the key goes to --out (orchestrator only)
+
+```
+chap key create --project <p> --holder <name> (--agent | --person) --ops <op,op> [--repo owner/name] [--ttl 24h|7d] [--rate <n>] --out <file> [--wait <s>] [--reason <why>]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--agent` | the holder is an agent (a human revoke stops it) |
+| `--holder <string>` | the name of the script, person or agent that will hold the key |
+| `--json` | print chapd's JSON reply instead of text |
+| `--ops <string>` | comma-separated ops the key may use; routine ops, and risky ones that still ask each time |
+| `--out <string>` | the new file the key is written to (it is not printed) |
+| `--person` | the holder is a person or a script |
+| `--project <string>` | the project the key is bound to |
+| `--rate <int>` | calls an hour, at most 300 (default 300) |
+| `--reason <string>` | why the key is needed (shown on the card) |
+| `--repo <string>` | owner/name the key is bound to (needed for pull-request ops) |
+| `--ttl <string>` | how long it lasts: 24h by default, at most 30d, 7d for a key with a risky op (default "24h") |
+| `--wait <int>` | seconds to wait for the card to be signed, 0 to not wait (default 300) |
+
+### `chap key list`
+
+list keys: holder, state, ops, repositories, expiry, uses (orchestrator only)
+
+```
+chap key list
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+
+### `chap key revoke`
+
+revoke a key at once; an agent's key also stops the agent (orchestrator only)
+
+```
+chap key revoke <k-id>
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+
+### `chap key show`
+
+show the key this process holds: what it can do and until when (a key only)
+
+```
+chap key show
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
 
 ### `chap ledger verify`
 

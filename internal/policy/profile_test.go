@@ -55,7 +55,7 @@ func TestC1CatalogNamesMatchTheOpPattern(t *testing.T) {
 // new op must have a profile (C19: "adding an op without a profile entry, or the
 // reverse, fails CI").
 var unprofiledOps = []string{
-	"approvers.enroll", "data.apply", "deploy", "drive.share", "health", "host.scripts.refresh",
+	"approvers.enroll", "data.apply", "deploy", "drive.share", "health", "host.scripts.refresh", "keys.issue",
 	"logs", "mail.send", "notion.write", "policy.activate", "secrets.write",
 }
 
