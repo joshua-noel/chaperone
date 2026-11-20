@@ -2,7 +2,7 @@
 
 A connector lets Chaperone act on one service for an agent, so the agent never holds a credential for it. This page says how a connector is put together, what rules it must follow, and how to add one operation.
 
-Status: the connector kit covers the Linear connector and the GitHub operations. Google still uses the older layout. See [What is covered](#github-what-is-covered-and-what-stays-custom) and [What is not covered yet](#what-is-not-covered-yet). To add a connector, follow [Write a connector](write-a-connector.md). That page starts from a scaffold and ends at a passing conformance suite.
+Status: the connector kit covers the Linear connector (the intake operations and the issue operations) and the GitHub operations. Google still uses the older layout. See [What is covered](#github-what-is-covered-and-what-stays-custom) and [What is not covered yet](#what-is-not-covered-yet). To add a connector, follow [Write a connector](write-a-connector.md). That page starts from a scaffold and ends at a passing conformance suite.
 
 ## The seam
 
@@ -198,6 +198,22 @@ Take a new read operation, `pr.commits`, that lists the commits of a PR for the 
 
 Without a declaration the new adapter is refused as well: `kit.Bind` stops `chapd` at start-up when a declared operation has no adapter, or an adapter has no declaration.
 
+## Linear: the issue operations, and a name that two connectors share
+
+The Linear connector declares ten operations in `internal/connectors/linear/linearspec/spec.go`: the four `intake.*` operations for the operator board, and the generic issue operations `issue.get`, `issue.list`, `issue.label`, `issue.move` and `issue.link`, which work in a second team (`linear.issues.team` of the project's policy) and never touch the operator board. All of them are routine. The issue operations are off in the baseline, and their adapters refuse every project whose policy file has no `linear.issues` block. Rule 7 above ("refuse what you do not know") has one special case here, the exclusion of the operator board: an issue in the intake team, or with the intake label, is refused by every issue operation, in `Check` and again in `Execute`, and no field of the policy lifts that. `internal/connectors/linear/issue_test.go` proves it for each operation, and the conformance samples of the connector include it.
+
+| Operation | Class | Catalog entry, params schema, adapter binding | `chap` command |
+| --- | --- | --- | --- |
+| `issue.get`, `issue.list`, `issue.move`, `issue.link` | routine | generated | generated (`--dry-run` too) |
+| `issue.label` | routine | generated | **custom**: the command refuses a call with both `--add` and `--remove`, or neither, and the kit has no way to say "exactly one of" |
+| `issue.comment` | routine | generated **from the GitHub declaration** | **custom**: a bare number is a GitHub issue and `AGT-12` is a Linear one |
+
+**One name, two connectors.** `issue.comment` is an operation of the GitHub connector (the error watcher uses it) and of the Linear connector. The catalog, the params schema, the baseline rule and the policy's view of a name are per name, so there is one catalog entry, generated from `githubspec.IssueComment`, whose description names both targets. The Linear declaration of the same name is `linearspec.IssueComment`. It is not in `linearspec.Connector` (it would be generated a second time), and it is in `linearspec.Served`, which is `Connector` plus that one operation. `linear.Adapters` binds its adapters to `Served`, and the conformance test of the connector runs over `Served`, so Linear's side of `issue.comment` passes the same seven checks. `chapd` puts the two adapters behind `ops.ByTarget`, which picks by `target.adapter` and refuses a target no connector serves. `TestTheSharedIssueCommentAgreesAcrossConnectors` (`internal/connectors/declared`) fails when the two declarations differ in class, reversibility, summary, usage or rate, or when the catalog description stops naming both body limits. The pin table has one entry for the name.
+
+**What the schema does not say.** The kit cannot declare an enum or a one-of (see [What is not covered yet](#what-is-not-covered-yet)). `issue.list` states `state` as a string with a pattern that lists the six state types, which refuses the same values. `issue.label` states `add` and `remove` as two optional strings; the adapter refuses a request with both or neither, and the description says so.
+
+**The connector profiles.** `connectors/github.yaml` and `connectors/linear.yaml` (embedded by package `connectors`) list, for each built operation, what the catalog cannot hold: the unit it acts on, the conditions an adapter enforces, whether the orchestrator's token alone may hold it, and the name the connector standard gives the capability. `internal/policy/profile_test.go` ties each profile to `api/manual.yaml`, the baseline and the `chap` usage lines, so the three cannot drift apart: a new operation needs a profile entry, or a place in `unprofiledOps`. It also requires `intake_label_excluded` on every issue operation of the Linear profile. The profiles are data for review. `chapd` does not read them, and they enable nothing.
+
 ## The conformance suite
 
 `internal/connectors/conformance` is a test that a connector's own test calls with `conformance.Run`. It drives the real adapters against a fake service and runs seven checks for every declared operation:
@@ -210,7 +226,7 @@ Without a declaration the new adapter is refused as well: `kit.Bind` stops `chap
 6. Text from the service is cleaned of control and format characters and capped (`CleanedText`), and for an operation of the strict kind it is also marked `untrusted_text` and an item that looks like a secret is withheld (`ServiceText`). Or the operation declares that it returns none, and the suite checks that it echoes none.
 7. The declared class and reversibility equal the pin.
 
-The tests that call it are `internal/connectors/linear/conformance_test.go` and `internal/connectors/github/conformance_test.go`. `internal/connectors/conformance/conformance_test.go` tests the suite itself: a small connector passes, and each defect (a write in `Check`, a repeat, a credential in a result in several encodings, a bad code, a missing limit, uncleaned text, and more), switched on one at a time, fails the check that is meant to catch it. [Write a connector](write-a-connector.md) says how to use it, and what it does not prove. A check that is a known gap is listed with `Known` (a reason and the text of the known problem; any other problem is an error), and `NotRepeatable` shows as a skip with its reason.
+The tests that call it are `internal/connectors/linear/conformance_test.go` (ten operations, none with a `Known` entry or a `NotRepeatable` declaration) and `internal/connectors/github/conformance_test.go`. `internal/connectors/conformance/conformance_test.go` tests the suite itself: a small connector passes, and each defect (a write in `Check`, a repeat, a credential in a result in several encodings, a bad code, a missing limit, uncleaned text, and more), switched on one at a time, fails the check that is meant to catch it. [Write a connector](write-a-connector.md) says how to use it, and what it does not prove. A check that is a known gap is listed with `Known` (a reason and the text of the known problem; any other problem is an error), and `NotRepeatable` shows as a skip with its reason.
 
 ### What the conformance suite found
 
@@ -226,7 +242,8 @@ The first run of the suite found four gaps in the shipped connectors. Each was r
 - **Google is not migrated.** Its operations are declared by hand in the old places.
 - **The kit cannot express a surface other than `op`.** `branch.push` and `pr.push.workflow` (the git proxy) have no declaration.
 - **The kit cannot express a default that the schema does not have.** `pr merge --base main` and `pr open --base main` are command defaults and not schema defaults, so those two commands stay custom. The same holds for a param that is read from git (`pr open --branch`).
-- **The kit cannot express an enum, a one-of or a nested object** in a params schema.
+- **The kit cannot express an enum, a one-of or a nested object** in a params schema. `issue.list` (`state`) and `issue.label` (`add` or `remove`) are the two places it shows: the first uses a pattern, the second says "exactly one" in its description and in the adapter.
+- **One catalog entry per name, one target adapter per connector.** `issue.comment` is served by two connectors. Its second declaration (`linearspec.IssueComment`) is kept equal to the first by a test and is not generated from.
 - **The kit declares the per-minute rate only.** The baseline also has per-hour rates for the GitHub reads and issues, and no test compares them with the declaration.
 - **`Unbounded` strings.** The schemas of `head` and `base` in `pr.open` and `base` in `pr.merge` have no `maxLength`, as before; `pr.open` caps them in the adapter (250 bytes), and `pr.merge` bounds `base` because it must equal the policy's base. The declaration says `Unbounded` so the gap shows. Adding a `maxLength` is a change of the contract and was not made here.
 - **The command line is stricter than the schema for a sha.** The reads accept a 40 or a 64 character sha in the schema; the command accepts the 40 character one (`Param.CLIPattern`). That is how it was.

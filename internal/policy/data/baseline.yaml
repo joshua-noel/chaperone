@@ -28,6 +28,15 @@ ops:
   issue.open:           { enabled: true,  rate_per_minute: 6,  rate_per_hour: 20 }
   issue.comment:        { enabled: true,  rate_per_minute: 6,  rate_per_hour: 20 }
   issue.reopen:         { enabled: true,  rate_per_minute: 6,  rate_per_hour: 20 }
+  # `issue.comment` above is one name for two connectors (GitHub's, for the error watcher, and Linear's). The Linear
+  # adapter refuses every project whose policy file has no `linear.issues` block, so the name being on does not turn
+  # Linear on. The five Linear issue ops below are OFF until a policy change flips them: reads of and writes to the
+  # issue team only, never the operator board (`intake_label_excluded`). `issue.open` and `issue.update` are not built.
+  issue.get:            { enabled: false, rate_per_minute: 12 }
+  issue.list:           { enabled: false, rate_per_minute: 12 }
+  issue.label:          { enabled: false, rate_per_minute: 6 }
+  issue.move:           { enabled: false, rate_per_minute: 6 }
+  issue.link:           { enabled: false, rate_per_minute: 6,  rate_per_hour: 30 }
   # Read-only PR views (ADR-002 amendment 12): on since the operator's policy PR. For the orchestrator token only (no profile lists them);
   # the repository is the project's `pr.repo`. The caps bound the load on GitHub: one to three API calls and one token per call.
   pr.view:              { enabled: true,  rate_per_minute: 30, rate_per_hour: 600 }

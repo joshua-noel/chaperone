@@ -67,6 +67,12 @@ func conformanceRig(t testing.TB, canary string) *conformance.Rig {
 	logs := &syncBuf{}
 	board := NewBoard(BoardConfig{Client: client, Now: clk.Now, Log: slog.New(slog.NewTextHandler(logs, nil))})
 	pol := &policy.Linear{Team: "SHOP", Label: "claude", States: []string{"Handed to engineering", "In Progress", "Blocked", "Completed"}}
+	// The generic issue ops work in team AGT, on issues labelled agent; the
+	// operator board (team SHOP, label claude) is out of their reach.
+	pol.Issues = &policy.LinearIssues{
+		Team: "AGT", Label: "agent", States: []string{"In Progress", "Done"},
+		Labels: []string{"bug", "triaged"}, LinkHosts: []string{"github.com"},
+	}
 	ads, err := Adapters(Config{
 		Client: client, Board: board, Redactor: reg, Now: clk.Now,
 		Policy: func(p string) *policy.Linear {
@@ -82,6 +88,12 @@ func conformanceRig(t testing.TB, canary string) *conformance.Rig {
 	fake.AddIssue(lineartest.Issue{Identifier: "SHOP-1", Title: "Order market signs", Description: "Three A-frame signs.", Labels: []string{"claude", "signs"}})
 	fake.AddIssue(lineartest.Issue{Identifier: "SHOP-3", Title: "Not for the orchestrator", Labels: []string{"personal"}})
 	fake.AddIssue(lineartest.Issue{Identifier: "ENG-1", Title: "Mirror of a GitHub issue", TeamKey: "ENG", Labels: []string{"claude"}})
+	// The issue team: AGT-1 is the agent's issue, AGT-2 has no provenance label,
+	// AGT-3 carries the operator-board label.
+	fake.AddIssue(lineartest.Issue{Identifier: "AGT-1", Title: "Fix the cart total", Description: "Rounds wrong.", TeamKey: "AGT", State: "In Progress", Labels: []string{"agent", "bug"}})
+	fake.AddIssue(lineartest.Issue{Identifier: "AGT-2", Title: "A person's issue", TeamKey: "AGT", Labels: []string{"bug"}})
+	fake.AddIssue(lineartest.Issue{Identifier: "AGT-3", Title: "An operator request that landed here", TeamKey: "AGT", Labels: []string{"agent", "claude"}})
+	fake.DefineLabel("triaged", "")
 
 	isWrite := func(r lineartest.Request) bool { return strings.HasPrefix(strings.TrimSpace(r.Query), "mutation") }
 	return &conformance.Rig{
@@ -102,7 +114,7 @@ func conformanceRig(t testing.TB, canary string) *conformance.Rig {
 					n++
 				}
 			}
-			return n
+			return n - fake.NoOps() // a link the issue already had is accepted and changes nothing
 		},
 		Secrets: func() []string {
 			// What the service was sent: the client secret in the token request, and
@@ -144,6 +156,27 @@ func plantState(r *conformance.Rig, p conformance.Planted) {
 	})
 }
 
+// plantAGT puts the planted text in the title and description of AGT-1.
+func plantAGT(r *conformance.Rig, p conformance.Planted) {
+	r.World.(*lineartest.Server).Edit("AGT-1", func(i *lineartest.Issue) {
+		i.Title = orDefault(p.Control, "Plain title")
+		i.Description = strings.TrimSpace(p.Long + " " + p.Secret)
+	})
+}
+
+// plantAGTState gives AGT-1 a workflow state named with the planted text, and
+// the team the state, so the name is read back by every op that shows a state.
+func plantAGTState(r *conformance.Rig, p conformance.Planted) {
+	name := strings.TrimSpace(strings.Join([]string{p.Control, p.Long, p.Secret}, " "))
+	fake := r.World.(*lineartest.Server)
+	fake.AddState("AGT", lineartest.State{ID: "st-agt-planted", Name: name, Type: "started"})
+	fake.Edit("AGT-1", func(i *lineartest.Issue) {
+		i.State = name
+		i.Title = orDefault(p.Control, "Plain title")
+		i.Description = strings.TrimSpace(p.Long + " " + p.Secret)
+	})
+}
+
 func sample(name, op, ref string, params map[string]any) conformance.Sample {
 	return conformance.Sample{Name: name, Req: func(*conformance.Rig) *ops.Request { return req(op, ref, params) }}
 }
@@ -167,7 +200,7 @@ func notLinear(q *ops.Request)    { q.Target.Adapter = "github" }
 func TestConformance(t *testing.T) {
 	secretBody := "token ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
 	conformance.Run(t, conformance.Connector{
-		Declared: linearspec.Connector,
+		Declared: linearspec.Served,
 		Pins:     pintable.Pins,
 		NewRig:   conformanceRig,
 		Ops: map[string]conformance.Op{
@@ -208,6 +241,96 @@ func TestConformance(t *testing.T) {
 					refused("a body with an invisible character", ops.CodeParamsInvalid, OpComment, "SHOP-1", map[string]any{"body": "a\u202eb"}, nil),
 				},
 				Text: conformance.NoServiceText, Plant: plantState,
+			},
+			OpIssueGet: {
+				Valid: []conformance.Sample{sample("an issue of the issue team", OpIssueGet, "AGT-1", nil)},
+				Invalid: []conformance.Sample{
+					refused("an operator-board issue (the intake team)", ops.CodePolicyRefused, OpIssueGet, "SHOP-1", nil, nil),
+					refused("an issue of another team", ops.CodeScopePath, OpIssueGet, "ENG-1", nil, nil),
+					refused("not an identifier", ops.CodeParamsInvalid, OpIssueGet, "agt-1", nil, nil),
+					refused("a project with no linear.issues block", ops.CodePolicyRefused, OpIssueGet, "AGT-1", nil, otherProject),
+					refused("another adapter", ops.CodeParamsInvalid, OpIssueGet, "AGT-1", nil, notLinear),
+					refused("no caller", ops.CodePolicyRefused, OpIssueGet, "AGT-1", nil, func(q *ops.Request) { q.Caller = nil }),
+				},
+				ReadOnly: true, Text: conformance.ServiceText, Plant: plantAGT,
+			},
+			OpIssueList: {
+				Valid: []conformance.Sample{
+					sample("the issue team by word, with every filter", OpIssueList, IssueTeamRef, map[string]any{"state": "started", "label": "bug", "cursor": "abc123"}),
+					sample("the issue team by key", OpIssueList, "AGT", nil),
+				},
+				Invalid: []conformance.Sample{
+					refused("the intake team", ops.CodePolicyRefused, OpIssueList, "SHOP", nil, nil),
+					refused("another team", ops.CodeScopePath, OpIssueList, "ENG", nil, nil),
+					refused("not a team key", ops.CodeParamsInvalid, OpIssueList, "agt", nil, nil),
+					refused("a state type that does not exist", ops.CodeParamsInvalid, OpIssueList, IssueTeamRef, map[string]any{"state": "Todo"}, nil),
+					refused("the operator-board label", ops.CodePolicyRefused, OpIssueList, IssueTeamRef, map[string]any{"label": "Claude"}, nil),
+					refused("a cursor chapd never returned", ops.CodeParamsInvalid, OpIssueList, IssueTeamRef, map[string]any{"cursor": "a b"}, nil),
+					refused("a project with no linear.issues block", ops.CodePolicyRefused, OpIssueList, IssueTeamRef, nil, otherProject),
+					refused("another adapter", ops.CodeParamsInvalid, OpIssueList, IssueTeamRef, nil, notLinear),
+				},
+				ReadOnly: true, Text: conformance.ServiceText, Plant: plantAGT,
+			},
+			OpIssueComment: {
+				Valid: []conformance.Sample{sample("comment", OpIssueComment, "AGT-1", map[string]any{"body": "Looking at it."})},
+				Invalid: []conformance.Sample{
+					refused("an operator-board issue (the intake team)", ops.CodePolicyRefused, OpIssueComment, "SHOP-1", map[string]any{"body": "x"}, nil),
+					refused("an issue with the operator-board label", ops.CodePolicyRefused, OpIssueComment, "AGT-3", map[string]any{"body": "x"}, nil),
+					refused("an issue without the provenance label", ops.CodePolicyRefused, OpIssueComment, "AGT-2", map[string]any{"body": "x"}, nil),
+					refused("an issue of another team", ops.CodeScopePath, OpIssueComment, "ENG-1", map[string]any{"body": "x"}, nil),
+					refused("an issue that does not exist", ops.CodeParamsInvalid, OpIssueComment, "AGT-99", map[string]any{"body": "x"}, nil),
+					refused("not an identifier", ops.CodeParamsInvalid, OpIssueComment, "agt-1", map[string]any{"body": "x"}, nil),
+					refused("a body that looks like a secret", ops.CodeRedactionBlocked, OpIssueComment, "AGT-1", map[string]any{"body": secretBody}, nil),
+					refused("a body with an invisible character", ops.CodeParamsInvalid, OpIssueComment, "AGT-1", map[string]any{"body": "a\u202eb"}, nil),
+					refused("a mention the policy does not allow", ops.CodePolicyRefused, OpIssueComment, "AGT-1", map[string]any{"body": "thanks @alice"}, nil),
+					refused("a project with no linear.issues block", ops.CodePolicyRefused, OpIssueComment, "AGT-1", map[string]any{"body": "x"}, otherProject),
+				},
+				Text: conformance.NoServiceText, Plant: plantAGTState,
+			},
+			OpIssueLabel: {
+				Valid: []conformance.Sample{
+					sample("add a label", OpIssueLabel, "AGT-1", map[string]any{"add": "triaged"}),
+					sample("remove a label", OpIssueLabel, "AGT-1", map[string]any{"remove": "bug"}),
+				},
+				Invalid: []conformance.Sample{
+					refused("both add and remove", ops.CodeParamsInvalid, OpIssueLabel, "AGT-1", map[string]any{"add": "bug", "remove": "triaged"}, nil),
+					refused("neither add nor remove", ops.CodeParamsInvalid, OpIssueLabel, "AGT-1", nil, nil),
+					refused("the operator-board label", ops.CodePolicyRefused, OpIssueLabel, "AGT-1", map[string]any{"add": "Claude"}, nil),
+					refused("the provenance label", ops.CodePolicyRefused, OpIssueLabel, "AGT-1", map[string]any{"remove": "agent"}, nil),
+					refused("a label the policy does not list", ops.CodePolicyRefused, OpIssueLabel, "AGT-1", map[string]any{"add": "urgent"}, nil),
+					refused("an operator-board issue (the intake team)", ops.CodePolicyRefused, OpIssueLabel, "SHOP-1", map[string]any{"add": "bug"}, nil),
+					refused("an issue with the operator-board label", ops.CodePolicyRefused, OpIssueLabel, "AGT-3", map[string]any{"add": "bug"}, nil),
+					refused("an issue without the provenance label", ops.CodePolicyRefused, OpIssueLabel, "AGT-2", map[string]any{"add": "bug"}, nil),
+					refused("an issue of another team", ops.CodeScopePath, OpIssueLabel, "ENG-1", map[string]any{"add": "bug"}, nil),
+				},
+				Text: conformance.NoServiceText, Plant: plantAGTState,
+			},
+			OpIssueMove: {
+				Valid: []conformance.Sample{sample("move", OpIssueMove, "AGT-1", map[string]any{"state": "Done"})},
+				Invalid: []conformance.Sample{
+					refused("a state the policy does not list", ops.CodePolicyRefused, OpIssueMove, "AGT-1", map[string]any{"state": "Backlog"}, nil),
+					refused("an operator-board issue (the intake team)", ops.CodePolicyRefused, OpIssueMove, "SHOP-1", map[string]any{"state": "Done"}, nil),
+					refused("an issue with the operator-board label", ops.CodePolicyRefused, OpIssueMove, "AGT-3", map[string]any{"state": "Done"}, nil),
+					refused("an issue without the provenance label", ops.CodePolicyRefused, OpIssueMove, "AGT-2", map[string]any{"state": "Done"}, nil),
+					refused("an issue of another team", ops.CodeScopePath, OpIssueMove, "ENG-1", map[string]any{"state": "Done"}, nil),
+					refused("not an identifier", ops.CodeParamsInvalid, OpIssueMove, "agt-1", map[string]any{"state": "Done"}, nil),
+				},
+				Text: conformance.CleanedText, Plant: plantAGTState,
+			},
+			OpIssueLink: {
+				Valid: []conformance.Sample{sample("link", OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/example-org/storefront/pull/12", "title": "The fix"})},
+				Invalid: []conformance.Sample{
+					refused("a host the policy does not list", ops.CodePolicyRefused, OpIssueLink, "AGT-1", map[string]any{"url": "https://example.net/x"}, nil),
+					refused("not https", ops.CodeParamsInvalid, OpIssueLink, "AGT-1", map[string]any{"url": "http://github.com/x"}, nil),
+					refused("a port", ops.CodeParamsInvalid, OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com:8443/x"}, nil),
+					refused("a user name", ops.CodeParamsInvalid, OpIssueLink, "AGT-1", map[string]any{"url": "https://alice@github.com/x"}, nil),
+					refused("an operator-board issue (the intake team)", ops.CodePolicyRefused, OpIssueLink, "SHOP-1", map[string]any{"url": "https://github.com/x"}, nil),
+					refused("an issue with the operator-board label", ops.CodePolicyRefused, OpIssueLink, "AGT-3", map[string]any{"url": "https://github.com/x"}, nil),
+					refused("an issue without the provenance label", ops.CodePolicyRefused, OpIssueLink, "AGT-2", map[string]any{"url": "https://github.com/x"}, nil),
+					refused("a title with an invisible character", ops.CodeParamsInvalid, OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/x", "title": "a\u202eb"}, nil),
+					refused("a title that looks like a secret", ops.CodeRedactionBlocked, OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/x", "title": secretBody}, nil),
+				},
+				Text: conformance.NoServiceText, Plant: plantAGTState,
 			},
 			OpMove: {
 				Valid: []conformance.Sample{sample("move", OpMove, "SHOP-1", map[string]any{"state": "In Progress"})},

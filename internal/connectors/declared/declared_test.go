@@ -9,6 +9,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/joshua-noel/chaperone/api"
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/connectors/kit"
 	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
 	"github.com/joshua-noel/chaperone/internal/connectors/pintable"
@@ -312,6 +313,34 @@ func TestNonRoutineOpsPinTheirParams(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("paramPins lists %s, which no connector declares", name)
+		}
+	}
+}
+
+// issue.comment is one name for two connectors, and the catalog has one entry
+// for a name, generated from the GitHub declaration. Linear's declaration of the
+// same name (linearspec.IssueComment) is not generated from, so it must agree
+// with the GitHub one in everything the catalog states, and the catalog's
+// params schema must say what Linear's side takes too.
+func TestTheSharedIssueCommentAgreesAcrossConnectors(t *testing.T) {
+	gh, ln := githubspec.IssueComment, linearspec.IssueComment
+	if gh.Name != ln.Name || gh.Class != ln.Class || gh.Reversibility != ln.Reversibility ||
+		gh.Summary != ln.Summary || gh.Usage != ln.Usage || gh.RatePerMinute != ln.RatePerMinute {
+		t.Errorf("the two declarations of %s disagree on what the catalog states:\n github %+v\n linear %+v", gh.Name, gh, ln)
+	}
+	if !strings.Contains(gh.Doc, "`target.adapter`") || !strings.Contains(gh.Doc, "adapter: linear") || !strings.Contains(gh.Doc, "adapter: github") {
+		t.Errorf("the catalog's description of %s must name both connectors and say that target.adapter picks one: %q", gh.Name, gh.Doc)
+	}
+	if !strings.Contains(gh.Doc, fmt.Sprintf("%d bytes", linearspec.MaxCommentBytes)) || !strings.Contains(gh.Doc, fmt.Sprint(githubspec.IssueBodyMax)) {
+		t.Errorf("the catalog's description of %s must state both body limits (%d and %d): %q", gh.Name, githubspec.IssueBodyMax, linearspec.MaxCommentBytes, gh.Doc)
+	}
+	// The pin is one entry, so the Linear side is bound by the same class.
+	if p, ok := pins[ln.Name]; !ok || p.Class != ln.Class || p.Reversibility != ln.Reversibility {
+		t.Errorf("the pin of %s is %+v", ln.Name, p)
+	}
+	for _, o := range linearspec.Connector.Ops {
+		if o.Name == ln.Name {
+			t.Errorf("%s is in linearspec.Connector: it would be generated twice", o.Name)
 		}
 	}
 }

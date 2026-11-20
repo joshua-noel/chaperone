@@ -62,7 +62,12 @@ The op catalog (`api/manual.yaml`). Whether an op is switched on is policy, per 
 | `intake.list` | routine | reversible | op | List open board items labelled for the orchestrator. | `chap intake list [--refresh] [--closed]` |
 | `intake.move` | routine | reversible | op | Move a labelled operator-board item to a listed state. | `chap intake move <SHOP-12> --state <name>` |
 | `intake.states` | routine | reversible | op | List the board team's states and the policy's. | `chap intake states` |
-| `issue.comment` | routine | compensable | op | Comment on an issue labelled source:error-watcher. | `chap issue comment <n> --body <b>` |
+| `issue.comment` | routine | compensable | op | Comment on an issue the policy allows. | `chap issue comment <n\|AGT-12> [--body <b> \| --body-file <f>]` |
+| `issue.get` | routine | reversible | op | Read one issue of the project's issue team. | `chap issue get <AGT-12> [--dry-run]` |
+| `issue.label` | routine | reversible | op | Add or remove one label from the policy's list. | `chap issue label <AGT-12> --add <l> \| --remove <l>` |
+| `issue.link` | routine | reversible | op | Attach a link, from a listed host, to an issue. | `chap issue link <AGT-12> --url <u> [--title <t>] [--dry-run]` |
+| `issue.list` | routine | reversible | op | List issues of the issue team, one page at a time. | `chap issue list [--state <type>] [--label <l>] [--cursor <c>] [--team <key>] [--dry-run]` |
+| `issue.move` | routine | reversible | op | Move an issue to a state the policy lists. | `chap issue move <AGT-12> --state <name> [--dry-run]` |
 | `issue.open` | routine | reversible | op | Open an issue labelled source:error-watcher. | `chap issue open --title <t> --label source:error-watcher [--body <b>]` |
 | `issue.reopen` | routine | reversible | op | Reopen an issue labelled source:error-watcher. | `chap issue reopen <n>` |
 | `logs` | routine | reversible | op | Read recent log lines from a fixed source. | `chap logs <web\|worker\|db\|tunnel> [--lines <n>]` |
@@ -101,7 +106,12 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap intake list` | list the board items labelled for the orchestrator |
 | `chap intake move` | move a labelled operator-board item to a listed state |
 | `chap intake states` | list the board team's states and which a move may use |
-| `chap issue comment` | comment on an issue labelled source:error-watcher |
+| `chap issue comment` | comment on an issue (GitHub: labelled source:error-watcher; Linear: policy) |
+| `chap issue get` | read one Linear issue of the project's issue team |
+| `chap issue label` | add or remove one label from the policy's list |
+| `chap issue link` | attach a link from a listed host to a Linear issue |
+| `chap issue list` | list Linear issues of the issue team, one page at a time |
+| `chap issue move` | move a Linear issue to a state the policy lists |
 | `chap issue open` | open an issue labelled source:error-watcher |
 | `chap issue reopen` | reopen an issue labelled source:error-watcher |
 | `chap ledger verify` | walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only) |
@@ -332,10 +342,10 @@ chap intake states [--team <key>]
 
 ### `chap issue comment`
 
-comment on an issue labelled source:error-watcher
+comment on an issue (GitHub: labelled source:error-watcher; Linear: policy)
 
 ```
-chap issue comment <n> [--body <b> | --body-file <f>] [--repo owner/name]
+chap issue comment <n|AGT-12> [--body <b> | --body-file <f>] [--repo owner/name]
 ```
 
 | Flag | Meaning |
@@ -348,6 +358,105 @@ chap issue comment <n> [--body <b> | --body-file <f>] [--repo owner/name]
 | `--reason <string>` | why (shown on the approval card, never used for authorization) |
 | `--repo <string>` | owner/name (default: from the git remote origin) |
 | `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue get`
+
+read one Linear issue of the project's issue team
+
+```
+chap issue get <AGT-12> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue label`
+
+add or remove one label from the policy's list
+
+```
+chap issue label <AGT-12> --add <l> | --remove <l> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--add <string>` | a label to add (one of the policy's list) |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--remove <string>` | a label to remove (one of the policy's list) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue link`
+
+attach a link from a listed host to a Linear issue
+
+```
+chap issue link <AGT-12> --url <u> [--title <t>] [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--title <string>` | the link's title (optional) |
+| `--url <string>` | an https URL on one of the policy's hosts (required) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue list`
+
+list Linear issues of the issue team, one page at a time
+
+```
+chap issue list [--state <type>] [--label <l>] [--cursor <c>] [--team <key>] [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--cursor <string>` | the next_cursor of the previous page |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--label <string>` | only issues with this label |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--state <string>` | a workflow state type: triage, backlog, unstarted, started, completed or canceled |
+| `--team <string>` | team key (default: the project's linear issue team) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue move`
+
+move a Linear issue to a state the policy lists
+
+```
+chap issue move <AGT-12> --state <name> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--state <string>` | the state's name (one of the policy's list) (required) |
 | `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
 
 ### `chap issue open`

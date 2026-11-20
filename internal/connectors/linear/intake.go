@@ -102,7 +102,7 @@ func (a *listAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outcome,
 
 // itemResult is one item as the caller gets it. The text is Linear's: it is
 // cleaned and capped, and withheld whole when it looks like a secret.
-func (a *listAdapter) itemResult(it Item) map[string]any {
+func (a base) itemResult(it Item) map[string]any {
 	m := map[string]any{
 		"identifier": untrusted.Clean(it.Identifier, maxName),
 		"url":        untrusted.Clean(it.URL, maxURL),
@@ -146,7 +146,7 @@ func (a *listAdapter) itemResult(it Item) map[string]any {
 // looksSecret reports whether any of the item's text would trip the redaction
 // check. The op result is scanned again as a whole; one item with a secret
 // would otherwise block the whole board.
-func (a *listAdapter) looksSecret(title, desc string, it Item) bool {
+func (a base) looksSecret(title, desc string, it Item) bool {
 	if a.cfg.Redactor == nil {
 		return false
 	}

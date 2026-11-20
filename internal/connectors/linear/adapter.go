@@ -27,7 +27,7 @@ const (
 )
 
 // Ops lists the op kinds of the connector.
-var Ops = linearspec.Connector.Names()
+var Ops = linearspec.Served.Names()
 
 // AdapterName is the target adapter every intake op names.
 const AdapterName = linearspec.Adapter
@@ -78,20 +78,30 @@ func (c Config) check() error {
 	return nil
 }
 
-// Adapters returns the adapters by op kind. [kit.Bind] refuses to return them
-// when an operation of [linearspec.Connector] has no adapter here, or an
-// adapter here has no declaration.
+// Adapters returns the adapters by op kind: the four operator-board intake ops
+// and the generic issue ops. [kit.Bind] refuses to return them when an
+// operation of [linearspec.Served] has no adapter here, or an adapter here has
+// no declaration.
+//
+// issue.comment is one name for two connectors (GitHub's, for the error
+// watcher, and Linear's). The adapter returned for it is Linear's side only;
+// the caller wires the two behind one dispatcher that picks by target.adapter
+// (ops.ByTarget), as cmd/chapd does.
 func Adapters(cfg Config) (map[string]ops.Adapter, error) {
 	if err := cfg.check(); err != nil {
 		return nil, err
 	}
 	b := base{cfg: cfg}
-	return kit.Bind(linearspec.Connector, map[string]ops.Adapter{
+	set := map[string]ops.Adapter{
 		OpList:    &listAdapter{base: b},
 		OpComment: &commentAdapter{base: b},
 		OpMove:    &moveAdapter{base: b},
 		OpStates:  &statesAdapter{base: b},
-	})
+	}
+	for op, ad := range issueAdapters(b) {
+		set[op] = ad
+	}
+	return kit.Bind(linearspec.Served, set)
 }
 
 type base struct{ cfg Config }

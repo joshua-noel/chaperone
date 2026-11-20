@@ -142,3 +142,31 @@ Try the mistakes as well: a state that is not in the policy (`OP_POLICY_REFUSED`
 - **Rotate the secret:** in Linear, *Rotate secret* on the app (this ends every token `chapd` holds; the next call makes a new one after you import the new value in the console).
 - **Switch the connector off at once:** a policy change that sets the four ops back to `enabled: false`, or delete the two secrets, or delete the app in Linear.
 - **Rules about GitHub:** the orchestrator never writes `Fixes`, `Closes` or `Resolves` with a Linear identifier in a PR title, body or branch name: Linear would move the item by itself, outside this policy.
+
+## The generic issue ops (optional, off; ADR-003 amendment 7)
+
+Six more ops use the same two vault secrets and the same Linear app: `issue.get`, `issue.list`, `issue.comment`, `issue.label`, `issue.move` and `issue.link`. They are for a key holder's agent (and the orchestrator) and they are **separate from the operator board**: they work in one other Linear team and never touch an item that is in the intake team or carries the intake label. Nothing about the operator board above changes. **Nothing in Linear was tried: the first real run is a live test on a scratch workspace, before the policy change below.**
+
+| What | Where |
+| --- | --- |
+| Off by default | `issue.get`, `issue.list`, `issue.label`, `issue.move`, `issue.link` are `enabled: false` in the baseline. `issue.comment` is one name for two connectors (the GitHub error watcher, ADR-002 amendment 11, and this one), so the name is on; the Linear side is off for every project whose policy file has no `linear.issues` block |
+| Turn on | A policy change flips the five names in `internal/policy/data/baseline.yaml` (and `shippedEnabled` in the policy test), and the project's file gets the block below |
+| Never | Opening or editing an issue (`issue.open`, `issue.update` are not built: they wait for the operator's yes), assigning, archiving, deleting, another team, an operator-board item |
+
+The project file's block (inside `linear:`; all of it is checked when the file loads, and a mistake refuses the whole file):
+
+```yaml
+linear:
+  team: SHOP           # the operator board (unchanged)
+  label: agent         # the operator board (unchanged)
+  states: [In Progress, Waiting/Blocked, Done]
+  issues:
+    team: AGT          # the one team the issue ops work in; must not be the board's team
+    label: ai-ok       # a write acts only on an issue that carries this label now; must not be the board's label
+    states: [In Progress, Done]   # what issue.move may set
+    labels: [bug, triaged]        # what issue.label may add or remove (not the two labels above)
+    link_hosts: [github.com]      # issue.link: exact host names, https only
+    max_mentions: 0               # people a comment may mention
+```
+
+How to see it work (after the policy change, with a token that holds `issue.*`): `chap issue list --project <p>`, `chap issue get AGT-12`, `chap issue move AGT-12 --state Done`. An item of the operator board comes back refused with `intake_label_excluded` in the reason.

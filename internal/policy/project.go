@@ -68,6 +68,16 @@ type narrowFile struct {
 		Team   string   `yaml:"team"`
 		Label  string   `yaml:"label"`
 		States []string `yaml:"states"`
+		// Issues is the optional block of the generic issue ops (never the
+		// operator board; see LinearIssues).
+		Issues *struct {
+			Team        string   `yaml:"team"`
+			Label       string   `yaml:"label"`
+			States      []string `yaml:"states"`
+			Labels      []string `yaml:"labels"`
+			LinkHosts   []string `yaml:"link_hosts"`
+			MaxMentions int      `yaml:"max_mentions"`
+		} `yaml:"issues"`
 	} `yaml:"linear"`
 }
 
@@ -183,6 +193,12 @@ func (p *Pack) LoadProject(project string, data []byte, cat *Catalog) (*Effectiv
 	}
 	if f.Linear != nil {
 		l := &Linear{Team: f.Linear.Team, Label: f.Linear.Label, States: slices.Clone(f.Linear.States)}
+		if in := f.Linear.Issues; in != nil {
+			l.Issues = &LinearIssues{
+				Team: in.Team, Label: in.Label, States: slices.Clone(in.States), Labels: slices.Clone(in.Labels),
+				LinkHosts: slices.Clone(in.LinkHosts), MaxMentions: in.MaxMentions,
+			}
+		}
 		if err := l.validate(); err != nil {
 			return nil, fmt.Errorf("policy: project %s: linear: %w", project, err)
 		}

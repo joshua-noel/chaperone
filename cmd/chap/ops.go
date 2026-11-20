@@ -269,7 +269,7 @@ func (l *listFlag) Set(v string) error {
 // opCommands are the op commands that are written by hand. The commands of
 // the operations the connectors declare with the kit are built from their
 // declarations (kitcmd.go), except the ones whose declaration says
-// CLI.Custom: pr open, pr merge and issue open, here.
+// CLI.Custom: pr open, pr merge, issue open, issue comment and issue label, here.
 func opCommands() []*command {
 	return []*command{
 		{path: "pr open", usage: "chap pr open --title <t> [--body <b> | --body-file <f>] [--draft] [--branch <b>] [--base <b>] [--repo owner/name]",
@@ -278,6 +278,10 @@ func opCommands() []*command {
 			summary: "merge a PR when verify is green on its exact head", run: cmdPrMerge},
 		{path: "issue open", usage: "chap issue open --title <t> --label source:error-watcher [--label <l>] [--body <b> | --body-file <f>] [--repo owner/name]",
 			summary: "open an issue labelled source:error-watcher", run: cmdIssueOpen},
+		{path: "issue comment", usage: "chap issue comment <n|AGT-12> [--body <b> | --body-file <f>] [--repo owner/name]",
+			summary: "comment on an issue (GitHub: labelled source:error-watcher; Linear: policy)", run: cmdIssueComment},
+		{path: "issue label", usage: "chap issue label <AGT-12> --add <l> | --remove <l> [--dry-run]",
+			summary: "add or remove one label from the policy's list", run: cmdIssueLabel},
 		{path: "health", usage: "chap health",
 			summary: "read the pilot's readiness status", run: cmdHealth},
 		{path: "logs", usage: "chap logs <web|worker|db|tunnel> [--lines <n>]",

@@ -83,8 +83,8 @@ ops:
     class: routine
     reversibility: compensable
     surface: op
-    summary: Comment on an issue labelled source:error-watcher.
-    usage: chap issue comment <n> --body <b>
+    summary: Comment on an issue the policy allows.
+    usage: chap issue comment <n|AGT-12> [--body <b> | --body-file <f>]
   issue.reopen:
     class: routine
     reversibility: reversible
@@ -167,6 +167,36 @@ ops:
     surface: op
     summary: List the board team's states and the policy's.
     usage: chap intake states
+  issue.get:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read one issue of the project's issue team.
+    usage: chap issue get <AGT-12> [--dry-run]
+  issue.list:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: List issues of the issue team, one page at a time.
+    usage: chap issue list [--state <type>] [--label <l>] [--cursor <c>] [--team <key>] [--dry-run]
+  issue.label:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Add or remove one label from the policy's list.
+    usage: chap issue label <AGT-12> --add <l> | --remove <l>
+  issue.move:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Move an issue to a state the policy lists.
+    usage: chap issue move <AGT-12> --state <name> [--dry-run]
+  issue.link:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Attach a link, from a listed host, to an issue.
+    usage: chap issue link <AGT-12> --url <u> [--title <t>] [--dry-run]
   # END generated: connector linear
   notion.write:
     class: high

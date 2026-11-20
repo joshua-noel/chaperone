@@ -1634,7 +1634,7 @@ components:
       required: [title, labels]
       additionalProperties: false
     ParamsIssueComment:
-      description: "Phase 1 shape for `issue.comment`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`."
+      description: "Phase 1 shape for `issue.comment`. One name for two connectors, picked by `target.adapter`. GitHub: target `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`; `body` up to 10000. Linear: target `{adapter: linear, ref: \"<issue identifier>\"}`, for example `AGT-12`; the issue must be in the project's `linear.issues.team`, carry `linear.issues.label` when the comment is posted, and never be an operator-board item (`intake_label_excluded`); `body` up to 4000 bytes."
       type: object
       properties:
         body: { type: string, minLength: 1, maxLength: 10000 }
@@ -1690,6 +1690,40 @@ components:
     ParamsIntakeStates:
       description: "Phase 1 shape for `intake.states`. Target is `{adapter: linear, ref: \"<team key>\"}`. No params."
       type: object
+      additionalProperties: false
+    ParamsIssueGet:
+      description: "`issue.get` on Linear. Target is `{adapter: linear, ref: \"<issue identifier>\"}` in the project's `linear.issues.team`. No params. Read-only. An operator-board item (the intake team or label) is refused. The result is untrusted text (`untrusted_text: true`): title, description and comments are capped and withheld if they look like a secret."
+      type: object
+      additionalProperties: false
+    ParamsIssueList:
+      description: "`issue.list` on Linear. Target is `{adapter: linear, ref: \"<team key>\"}`, or `team` for the project's `linear.issues.team`. One page of at most 25 issues, newest change first, with `next_cursor` when there is more. Operator-board items never appear. `state` is a workflow state type (triage, backlog, unstarted, started, completed or canceled); `label` must not be the operator-board label. Text in the result is untrusted."
+      type: object
+      properties:
+        state: { type: string, pattern: "^(triage|backlog|unstarted|started|completed|canceled)$" }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        cursor: { type: string, pattern: "^[A-Za-z0-9+/=_.:-]{1,200}$" }
+      additionalProperties: false
+    ParamsIssueLabel:
+      description: "`issue.label` on Linear. Target is `{adapter: linear, ref: \"<issue identifier>\"}`. Exactly one of `add` and `remove`: a name from the project's `linear.issues.labels`. The provenance label and the operator-board label are never added or removed. Linear adds or removes that one label; other labels are not touched."
+      type: object
+      properties:
+        add: { type: string, minLength: 1, maxLength: 80 }
+        remove: { type: string, minLength: 1, maxLength: 80 }
+      additionalProperties: false
+    ParamsIssueMove:
+      description: "`issue.move` on Linear. Target is `{adapter: linear, ref: \"<issue identifier>\"}`. `state` must be one of the project's `linear.issues.states` and a state of the issue's team."
+      type: object
+      properties:
+        state: { type: string, minLength: 1, maxLength: 80 }
+      required: [state]
+      additionalProperties: false
+    ParamsIssueLink:
+      description: "`issue.link` on Linear. Target is `{adapter: linear, ref: \"<issue identifier>\"}`. `url` is an https URL whose host is in the project's `linear.issues.link_hosts` (exact match, no port, no user name); one attachment per issue and URL."
+      type: object
+      properties:
+        url: { type: string, minLength: 1, maxLength: 300 }
+        title: { type: string, minLength: 1, maxLength: 120 }
+      required: [url]
       additionalProperties: false
     # END generated: connector linear
     ParamsDeploy:

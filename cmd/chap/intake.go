@@ -30,6 +30,10 @@ func renderIntake(b *strings.Builder, opName string, raw json.RawMessage) bool {
 		return renderIntakeList(b, raw)
 	case linearspec.NameStates:
 		return renderIntakeStates(b, raw)
+	case "issue.get":
+		return renderIssueGet(b, raw)
+	case "issue.list":
+		return renderIssueList(b, raw)
 	}
 	return false
 }

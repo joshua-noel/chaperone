@@ -5,4 +5,4 @@ exit: 2
 --- stdout
 --- stderr
 chap: the issue number must be a positive integer
-usage: chap issue comment <n> [--body <b> | --body-file <f>] [--repo owner/name]
+usage: chap issue comment <n|AGT-12> [--body <b> | --body-file <f>] [--repo owner/name]

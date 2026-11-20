@@ -28,6 +28,120 @@ type Linear struct {
 	// exactly as the team spells them (`chap intake states` lists them). An
 	// empty list means `intake.move` refuses every request.
 	States []string
+	// Issues is the optional `linear.issues:` block: where the key-facing
+	// `issue.*` ops (the generic issue family) may work. It is
+	// nil when the file has none, and then every `issue.*` request for Linear
+	// is refused. It can never reach the operator board: see [LinearIssues].
+	Issues *LinearIssues
+}
+
+// LinearIssues is the policy of the generic `issue.get|list|comment|label|move|
+// link` ops on Linear. They are for a key holder's agent (and the orchestrator), and they
+// are fenced away from the operator board: the intake team and the intake label
+// (the enclosing [Linear] Team and Label) are never reachable through them,
+// whatever this block says (`intake_label_excluded`, the security review's P1).
+// validate refuses a block that names either; the adapters check again on
+// every read and write, so the exclusion does not rest on this file alone.
+type LinearIssues struct {
+	// Team is the one team key the issue ops work in. It must differ from the
+	// intake team and must not be an Engineering mirror team.
+	Team string
+	// Label is the provenance label: a write (comment, label, move, link) acts
+	// only on an issue that carries it now. It must differ from the intake label.
+	Label string
+	// States are the workflow state names `issue.move` may set. Empty means
+	// `issue.move` refuses every request.
+	States []string
+	// Labels are the label names `issue.label` may add or remove. Empty means
+	// `issue.label` refuses every request. Neither the provenance label nor the
+	// intake label may be listed.
+	Labels []string
+	// LinkHosts are the host names `issue.link` may link to (lower case, exact
+	// match, no port). Empty means `issue.link` refuses every request.
+	LinkHosts []string
+	// MaxMentions is the most people a comment may mention; zero (the default)
+	// refuses any mention.
+	MaxMentions int
+}
+
+// Limits of the issues block.
+const (
+	LinearMaxIssueLabels = 20
+	LinearMaxLinkHosts   = 20
+	LinearMaxMentions    = 5
+)
+
+var linearHostRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+func (i *LinearIssues) validate(intake *Linear) error {
+	if !linearTeamRE.MatchString(i.Team) {
+		return errors.New("issues.team must be a Linear team key: capital letters and digits, 2 to 10 characters")
+	}
+	if linearForbiddenTeams[i.Team] {
+		return fmt.Errorf("issues.team %s is the Engineering mirror; the issue ops never write there", i.Team)
+	}
+	if i.Team == intake.Team {
+		return fmt.Errorf("issues.team %s is the operator-board intake team; the issue ops never work there (intake_label_excluded)", i.Team)
+	}
+	if err := linearName("issues.label", i.Label, LinearMaxLabel); err != nil {
+		return err
+	}
+	if strings.EqualFold(i.Label, intake.Label) {
+		return fmt.Errorf("issues.label %q is the operator-board intake label; the issue ops never touch it (intake_label_excluded)", i.Label)
+	}
+	if len(i.States) > LinearMaxStates {
+		return fmt.Errorf("issues.states lists %d names; at most %d", len(i.States), LinearMaxStates)
+	}
+	if err := distinctNames("issues.states entry", i.States, LinearMaxState); err != nil {
+		return err
+	}
+	if len(i.Labels) > LinearMaxIssueLabels {
+		return fmt.Errorf("issues.labels lists %d names; at most %d", len(i.Labels), LinearMaxIssueLabels)
+	}
+	if err := distinctNames("issues.labels entry", i.Labels, LinearMaxLabel); err != nil {
+		return err
+	}
+	for _, l := range i.Labels {
+		switch {
+		case strings.EqualFold(l, intake.Label):
+			return fmt.Errorf("issues.labels lists %q, the operator-board intake label (intake_label_excluded)", l)
+		case strings.EqualFold(l, i.Label):
+			return fmt.Errorf("issues.labels lists %q, the provenance label, which issue.label never adds or removes", l)
+		}
+	}
+	if len(i.LinkHosts) > LinearMaxLinkHosts {
+		return fmt.Errorf("issues.link_hosts lists %d hosts; at most %d", len(i.LinkHosts), LinearMaxLinkHosts)
+	}
+	seen := map[string]bool{}
+	for _, h := range i.LinkHosts {
+		if !linearHostRE.MatchString(h) || len(h) > 253 {
+			return fmt.Errorf("issues.link_hosts entry %q must be a lower-case host name such as github.com", h)
+		}
+		if seen[h] {
+			return fmt.Errorf("issues.link_hosts lists %q twice", h)
+		}
+		seen[h] = true
+	}
+	if i.MaxMentions < 0 || i.MaxMentions > LinearMaxMentions {
+		return fmt.Errorf("issues.max_mentions %d is outside 0..%d", i.MaxMentions, LinearMaxMentions)
+	}
+	return nil
+}
+
+// distinctNames checks a list of names: each valid, none repeated (ignoring case).
+func distinctNames(what string, names []string, max int) error {
+	seen := map[string]bool{}
+	for _, s := range names {
+		if err := linearName(what, s, max); err != nil {
+			return err
+		}
+		k := strings.ToLower(s)
+		if seen[k] {
+			return fmt.Errorf("%s %q is listed twice", what, s)
+		}
+		seen[k] = true
+	}
+	return nil
 }
 
 var (
@@ -70,6 +184,11 @@ func (l *Linear) validate() error {
 		}
 		seen[k] = true
 	}
+	if l.Issues != nil {
+		if err := l.Issues.validate(l); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -94,6 +213,49 @@ func linearName(what, s string, max int) error {
 // without regard to case, and whether the policy lists it.
 func (l *Linear) StateAllowed(s string) (string, bool) {
 	for _, a := range l.States {
+		if strings.EqualFold(a, s) {
+			return a, true
+		}
+	}
+	return "", false
+}
+
+// IntakeItem reports whether an issue with this team key and these label names
+// is on the operator board: it is in the intake team or carries the intake
+// label (compared without regard to case). The issue ops refuse such an item
+// on every read and write; no field of [LinearIssues] can switch this off.
+func (l *Linear) IntakeItem(teamKey string, labels []string) bool {
+	if teamKey == l.Team {
+		return true
+	}
+	for _, x := range labels {
+		if strings.EqualFold(x, l.Label) {
+			return true
+		}
+	}
+	return false
+}
+
+// StateAllowed returns the block's spelling of the state name s, compared
+// without regard to case, and whether `issue.move` may set it.
+func (i *LinearIssues) StateAllowed(s string) (string, bool) { return foldFind(i.States, s) }
+
+// LabelAllowed returns the block's spelling of the label name s and whether
+// `issue.label` may add or remove it.
+func (i *LinearIssues) LabelAllowed(s string) (string, bool) { return foldFind(i.Labels, s) }
+
+// HostAllowed reports whether `issue.link` may link to the host.
+func (i *LinearIssues) HostAllowed(host string) bool {
+	for _, h := range i.LinkHosts {
+		if h == host {
+			return true
+		}
+	}
+	return false
+}
+
+func foldFind(list []string, s string) (string, bool) {
+	for _, a := range list {
 		if strings.EqualFold(a, s) {
 			return a, true
 		}

@@ -1,0 +1,38 @@
+# GitHub: the ops Chaperone has built. The full research profile belongs to the connector standard,
+# a design document outside this repository.
+#
+# This file is tied to api/manual.yaml, the baseline pack and the `chap` usage by the C19 test
+# (internal/policy/profile_test.go). Adding an op to either side without the other fails CI.
+#
+# Names. Op names are frozen because they appear in signed tokens, so a built op keeps its name even
+# where the standard names the capability differently. The four read ops (ADR-002 amendment 12) are
+# on in the baseline and the orchestrator's token holds them, so they are frozen too:
+#   pr.view   the standard calls this capability `pr.get`: the profile records it as `standard_name`
+#             (a mapping, not a second op; a key preset or a second forge adapter uses the standard's
+#             name when it is built).
+#   pr.checks already the standard's name.
+#   pr.diff, pr.files   not in the standard: kept as additions, and listed in `extensions`.
+# `pr.list` (the standard's) is not built; it is in `standard_not_built`.
+profile_version: 1
+connector: github
+standard: v1.1
+
+ops:
+  - {name: pr.open,          class: routine,  reversibility: reversible,  surface: op,  unit: repo, enabled_default: true,  chap: pr open}
+  - {name: pr.update,        class: routine,  reversibility: reversible,  surface: op,  unit: repo, enabled_default: true,  chap: pr update}
+  - {name: pr.merge,         class: gated,    reversibility: compensable, surface: op,  unit: repo, enabled_default: true,  chap: pr merge}
+  - {name: pr.view,          class: routine,  reversibility: reversible,  surface: op,  unit: repo, enabled_default: true,  chap: pr view,   standard_name: pr.get}
+  - {name: pr.diff,          class: routine,  reversibility: reversible,  surface: op,  unit: repo, enabled_default: true,  chap: pr diff,   extension: true}
+  - {name: pr.checks,        class: routine,  reversibility: reversible,  surface: op,  unit: repo, enabled_default: true,  chap: pr checks}
+  - {name: pr.files,         class: routine,  reversibility: reversible,  surface: op,  unit: repo, enabled_default: true,  chap: pr files,  extension: true}
+  - {name: issue.open,       class: routine,  reversibility: reversible,  surface: op,  unit: repo, enabled_default: true,  chap: issue open,    orchestrator_only: true}
+  # One name for two connectors (GitHub's, for the error watcher, and Linear's): see connectors/linear.yaml.
+  - {name: issue.comment,    class: routine,  reversibility: compensable, surface: op,  unit: repo, enabled_default: true,  chap: issue comment, orchestrator_only: true}
+  - {name: issue.reopen,     class: routine,  reversibility: reversible,  surface: op,  unit: repo, enabled_default: true,  chap: issue reopen,  orchestrator_only: true}
+  - {name: branch.push,      class: routine,  reversibility: reversible,  surface: git, unit: repo, enabled_default: true}
+  - {name: pr.push.workflow, class: high,     reversibility: reversible,  surface: git, unit: repo, enabled_default: false}
+  - {name: repo.settings,    class: critical, reversibility: compensable, surface: op,  unit: repo, enabled_default: false}
+  - {name: ci.report,        class: routine,  reversibility: reversible,  surface: op,  unit: repo, enabled_default: true,  chap: ci report,     orchestrator_only: true}
+
+# What the standard's first GitHub slice still needs: names the profile does not yet implement.
+standard_not_built: [pr.list, pr.comment, pr.close, issue.get, issue.list, file.get]

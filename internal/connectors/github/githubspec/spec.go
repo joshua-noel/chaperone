@@ -260,20 +260,26 @@ var IssueOpen = kit.Op{
 	CLI: kit.CLI{Custom: true},
 }
 
-// IssueComment is issue.comment.
+// IssueComment is issue.comment on GitHub, and the declaration the catalog
+// entry of the name is generated from: the name is also served by the Linear
+// connector (linearspec.IssueComment).
 var IssueComment = kit.Op{
 	Name:          NameIssueComment,
 	Class:         kit.Routine,
 	Reversibility: kit.Compensable,
-	Summary:       "Comment on an issue labelled source:error-watcher.",
-	Usage:         "chap issue comment <n> --body <b>",
+	Summary:       "Comment on an issue the policy allows.",
+	Usage:         "chap issue comment <n|AGT-12> [--body <b> | --body-file <f>]",
 	RatePerMinute: 6,
-	Doc:           "Phase 1 shape for `issue.comment`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`.",
+	Doc:           "Phase 1 shape for `issue.comment`. One name for two connectors, picked by `target.adapter`. GitHub: target `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`; `body` up to 10000. Linear: target `{adapter: linear, ref: \"<issue identifier>\"}`, for example `AGT-12`; the issue must be in the project's `linear.issues.team`, carry `linear.issues.label` when the comment is posted, and never be an operator-board item (`intake_label_excluded`); `body` up to 4000 bytes.",
 	Target:        issueTarget,
 	Params: []kit.Param{
 		{Name: "body", Kind: kit.Text, Required: true, MinLength: 1, MaxLength: IssueBodyMax},
 	},
-	CLI: kit.CLI{Summary: "comment on an issue labelled source:error-watcher"},
+	// Custom: the command also takes a Linear identifier (AGT-12) and then
+	// names the Linear connector. The Linear side is declared in linearspec
+	// (linearspec.IssueComment); this declaration is the one the catalog is
+	// generated from.
+	CLI: kit.CLI{Custom: true},
 }
 
 // IssueReopen is issue.reopen.

@@ -45,7 +45,7 @@ Chaperone takes a different route. The agent never has the credential. It has on
 | `chap-host` | A small helper in the operator's own session. It shows a notification when approvals are waiting and runs a fixed list of host scripts, such as deploy and health, when `chapd` gives it a signed grant. |
 | `chap mcp` | A local MCP server, part of `chap`. It lets an MCP client on the same machine use Chaperone's operations. It cannot approve either. See [`docs/runbooks/mcp.md`](docs/runbooks/mcp.md). |
 | GitHub connector | A GitHub App. Push to a task branch through a git proxy, open and update pull requests, read pull requests, file issues, and merge only when CI is green on the exact commit. |
-| Linear connector | Read an intake board and write back a comment or a state change. Limited by policy to one team, one label and a list of states. |
+| Linear connector | Read an intake board and write back a comment or a state change. Limited by policy to one team, one label and a list of states. Five more operations (get, list, label, move, link) and Linear's side of `issue.comment` work on a second team, never on the intake board, and are off until a policy change turns them on. |
 | Google connector | Send mail and share a Drive file, with a recipient allowlist. Off until a policy change turns it on. |
 | Console | A web page on `localhost` for approvals, runs, the list of operations, the ledger and secrets. It never shows a secret or a token. |
 | Phone approvals | The same approval card on a phone, with a passkey and number matching. A push message only wakes the phone and holds no details. |

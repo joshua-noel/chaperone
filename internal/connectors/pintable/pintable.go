@@ -24,6 +24,15 @@ var Pins = map[string]kit.Pin{
 	"intake.move":    {Class: kit.Routine, Reversibility: kit.Reversible},
 	"intake.states":  {Class: kit.Routine, Reversibility: kit.Reversible},
 
+	// The generic issue operations of Linear. issue.comment is one name for two
+	// connectors and is pinned once, in the GitHub block below: the two
+	// declarations must agree on it.
+	"issue.get":   {Class: kit.Routine, Reversibility: kit.Reversible},
+	"issue.list":  {Class: kit.Routine, Reversibility: kit.Reversible},
+	"issue.label": {Class: kit.Routine, Reversibility: kit.Reversible},
+	"issue.move":  {Class: kit.Routine, Reversibility: kit.Reversible},
+	"issue.link":  {Class: kit.Routine, Reversibility: kit.Reversible},
+
 	// GitHub. pr.merge is the one gated operation: it merges on its own when
 	// verify is green on the exact head, and a merge is undone only by a revert
 	// commit, hence compensable. Do not loosen it to routine.
