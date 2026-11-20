@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -90,4 +91,43 @@ func (e *Engine) broken(project string, err error) *Effective {
 	eff.Version = e.base.Version + "+invalid"
 	eff.Invalid = fmt.Errorf("policy for project %s is invalid: %w", project, err)
 	return eff
+}
+
+// Problem is a project file the engine cannot use as written, found by [Engine.Problems].
+type Problem struct {
+	Project string
+	File    string // the file name in the policy folder, <project>.yaml
+	// Block is "" when the whole project is refused (an invalid file), or the part that is off: "pr" for a bad tier
+	// glob, which turns off pr.merge and pr.update only.
+	Block string
+	Err   error
+}
+
+// Problems reads every project file in the policy folder and returns the ones that are invalid, or whose pr block is
+// unusable. chapd logs them once at start. It reads through [Engine.For], so it fills the cache and a file that
+// changes later is still picked up on the next call.
+func (e *Engine) Problems() []Problem {
+	if e.dir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(e.dir)
+	if err != nil {
+		return nil
+	}
+	var out []Problem
+	for _, ent := range entries {
+		name := ent.Name()
+		project, ok := strings.CutSuffix(name, ".yaml")
+		if !ok || ent.IsDir() || !projectRe.MatchString(project) {
+			continue
+		}
+		eff := e.For(project)
+		switch {
+		case eff.Invalid != nil:
+			out = append(out, Problem{Project: project, File: name, Err: eff.Invalid})
+		case eff.PR != nil && eff.PR.Invalid != nil:
+			out = append(out, Problem{Project: project, File: name, Block: "pr", Err: eff.PR.Invalid})
+		}
+	}
+	return out
 }

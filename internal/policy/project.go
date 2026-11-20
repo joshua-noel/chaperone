@@ -169,6 +169,8 @@ func (p *Pack) LoadProject(project string, data []byte, cat *Catalog) (*Effectiv
 		if err := pr.validate(); err != nil {
 			return nil, fmt.Errorf("policy: project %s: pr: %w", project, err)
 		}
+		// A bad tier glob turns off the merge ops only, not the project: the rest of the file is fine.
+		pr.Invalid = pr.tierProblem(project)
 		eff.PR = pr
 	}
 	if f.Google != nil {

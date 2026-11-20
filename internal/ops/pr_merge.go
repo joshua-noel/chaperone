@@ -92,6 +92,10 @@ type PRPolicy struct {
 	ExtraChecks []string
 	// Tiers adds to the baseline path classifier.
 	Tiers PRTierGlobs
+	// Invalid, when set, says that the policy file's tier globs cannot be used: pr.merge and pr.update refuse with it (cause
+	// OP_POLICY_REFUSED, the operator's fault and not the agent's) and every other op of the project is unaffected. The
+	// policy engine sets it when the file loads; projectPR also checks Tiers itself, for a policy built by hand.
+	Invalid error
 	// LocalCI makes pr.merge read the result of a local CI run, posted by Chaperone's own App, as a required check
 	// (ADR-002 amendment 10). Nil: `verify` from GitHub Actions and the extra checks, nothing else.
 	LocalCI *PRLocalCI
