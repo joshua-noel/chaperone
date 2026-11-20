@@ -107,12 +107,20 @@ func allowedRoots() ([]string, error) {
 	return append([]string{home}, quickstartTestRoots...), nil
 }
 
-// checkAncestors decides whether dir (already resolved) may be made or used, as far as WHERE it is goes. It
+// checkAncestors decides whether dir may be made or used, as far as WHERE it is goes. It
 // must lie strictly inside an allowed root, by path text and by file identity (walking its ancestors with
 // os.SameFile until one is the root). Every ancestor from the root down to dir's parent that exists must be a
 // real folder (no link or junction below the root) and must pass ancestorSafe: nobody else may be able to
 // rename a folder out of it or into it. Folders that do not exist yet are made by this program, private.
 func checkAncestors(dir string) error {
+	// The roots are compared RESOLVED, so dir must be too. checkQuickstartDir passes a resolved path, but
+	// prepareQuickstartFolder can be called with a path as the user wrote it (on macOS the temp folder is reached through
+	// /var -> /private/var): resolving an already resolved path changes nothing, and an unresolved one is no longer
+	// judged outside the root merely because one side went through a link.
+	dir, err := resolveExisting(dir)
+	if err != nil {
+		return err
+	}
 	roots, err := allowedRoots()
 	if err != nil {
 		return err
