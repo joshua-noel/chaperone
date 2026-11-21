@@ -34,7 +34,7 @@ import (
 // command run as the account that runs chapd: it writes no ledger event of its
 // own (the spec has no event for it; docs/runbooks/github-app-setup.md says so).
 
-const githubConnectUsage = `usage: chapd connect github [-org ORG] [-with GROUPS] [-timeout D]   create your own GitHub App, keep its key in the vault
+const githubConnectUsage = `usage: chapd connect github (-org ORG | -user LOGIN) [-with GROUPS] [-timeout D]   create your own GitHub App, keep its key in the vault
        chapd connect github status                                         what is saved, then ask GitHub who the App is and where it is installed
        (both take [-db PATH] [-vault-dir D] [-vault-key-dir D] [-vault-wrapper NAME] [-vault-passphrase-fd N];
         see chapd vault for the key wrappers)
@@ -46,7 +46,7 @@ browser back to a port on this computer; the command takes the App's private key
 from GitHub's answer into the vault. The key is never written to a file, printed
 or logged.
 
-The App is private to your account (or to -org), has no webhook, and asks for the
+The App is private to the account you name, has no webhook, and asks for the
 smallest permissions the shipped GitHub operations need: contents write,
 pull_requests write, checks read, metadata read. -with adds the permissions of
 operations that are off by default, a comma-separated list of:
@@ -185,13 +185,14 @@ func githubConnectCmd(args []string, stdout, stderr io.Writer) int {
 	keyDir := fs.String("vault-key-dir", "", "vault wrapped-key folder (default: vault-keys next to the database)")
 	var wc wrapperChoice
 	wc.register(fs)
-	org := fs.String("org", "", "create the App in this GitHub organization instead of your own account")
+	org := fs.String("org", "", "create the App in this GitHub organization (exactly one of -org and -user is required)")
+	user := fs.String("user", "", "create the App in this personal GitHub account: your login (exactly one of -org and -user is required)")
 	with := fs.String("with", "", "extra permission groups for operations that are off by default: deploy, issues, ci-report (comma-separated)")
 	timeout := fs.Duration("timeout", flowDefaultTimeout, "how long to wait for the browser (at most 30m)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 0 || (action == "status" && (*org != "" || *with != "")) {
+	if fs.NArg() != 0 || (action == "status" && (*org != "" || *user != "" || *with != "")) {
 		fs.Usage()
 		return 2
 	}
@@ -206,9 +207,18 @@ func githubConnectCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "chapd: -with: %v (known: %s, %s, %s)\n", err, gh.ExtraDeploy, gh.ExtraIssues, gh.ExtraCIReport)
 		return 2
 	}
-	if *org != "" && !orgRE.MatchString(*org) {
-		fmt.Fprintln(stderr, "chapd: -org is not a GitHub organization name")
-		return 2
+	if action == "setup" {
+		switch {
+		case (*org == "") == (*user == ""):
+			fmt.Fprintln(stderr, "chapd: give exactly one of -org ORG or -user LOGIN. The command must know whose App it is making: it refuses an App that GitHub made under any other account, and it can only do that if you say which account is yours")
+			return 2
+		case *org != "" && !orgRE.MatchString(*org):
+			fmt.Fprintln(stderr, "chapd: -org is not a GitHub organization name")
+			return 2
+		case *user != "" && !orgRE.MatchString(*user):
+			fmt.Fprintln(stderr, "chapd: -user is not a GitHub account name")
+			return 2
+		}
 	}
 	if *timeout <= 0 || *timeout > flowMaxTimeout {
 		fmt.Fprintf(stderr, "chapd: -timeout must be more than 0 and at most %s\n", flowMaxTimeout)
@@ -259,7 +269,7 @@ func githubConnectCmd(args []string, stdout, stderr io.Writer) int {
 	if action == "status" {
 		return githubStatus(ctx, v, *db, stdout, stderr)
 	}
-	return githubSetup(ctx, v, *db, *org, perms, *timeout, stdout, stderr)
+	return githubSetup(ctx, v, *db, *org, *user, perms, *timeout, stdout, stderr)
 }
 
 // dbFlag is the flag text that points a command the operator runs next at the same database.
@@ -270,23 +280,23 @@ func dbFlag(db string) string {
 	return " -db " + db
 }
 
-func githubSetup(ctx context.Context, v *vault.Vault, db, org string, perms map[string]string, timeout time.Duration, stdout, stderr io.Writer) int {
+func githubSetup(ctx context.Context, v *vault.Vault, db, org, user string, perms map[string]string, timeout time.Duration, stdout, stderr io.Writer) int {
 	// Before anything starts: this command makes a first setup and replaces nothing.
 	switch _, err := v.Info(ctx, gh.AppKeySecretID); {
 	case err == nil:
-		fmt.Fprintf(stderr, "chapd: the vault already holds %s. This command only makes a first setup. To replace the key, see docs/runbooks/github-app-key.md; to check the App, run `chapd connect github status`\n", gh.AppKeySecretID)
+		fmt.Fprintf(stderr, "chapd: the vault already holds %s. This command only makes a first setup. To check the App, run `chapd connect github status`. To replace the key, see docs/runbooks/github-app-key.md. To start over from nothing, both of these must go: the vault secret %s and the file %s (see docs/runbooks/github-app-setup.md, \"Starting over\")\n", gh.AppKeySecretID, gh.AppKeySecretID, githubAppPath(db))
 		return 1
 	case !errors.Is(err, vault.ErrNotFound):
 		fmt.Fprintf(stderr, "chapd: %v\n", err)
 		return 1
 	}
 	if rec, err := readGitHubAppRecord(db); rec != nil || err != nil {
-		fmt.Fprintf(stderr, "chapd: %s already exists. Delete it only if you are sure that App is not in use, then run this again\n", githubAppPath(db))
+		fmt.Fprintf(stderr, "chapd: %s already exists. To start over from nothing, both of these must go: that file and the vault secret %s (see docs/runbooks/github-app-setup.md, \"Starting over\")\n", githubAppPath(db), gh.AppKeySecretID)
 		return 1
 	}
 
 	flow, err := startManifestFlow(flowConfig{
-		WebBase: githubWebBase, Org: org, Permissions: perms, Timeout: timeout,
+		WebBase: githubWebBase, Org: org, User: user, Permissions: perms, Timeout: timeout,
 		Note: func(reason string) { fmt.Fprintf(stderr, "chapd: refused a request to the setup page (%s)\n", reason) },
 	})
 	if err != nil {
@@ -294,9 +304,13 @@ func githubSetup(ctx context.Context, v *vault.Vault, db, org string, perms map[
 		return 1
 	}
 	spec := flow.Spec()
-	account := "your own GitHub account"
+	account := "the GitHub account " + user
+	appsSettings := githubWebBase + "/settings/apps"
+	owner := user
 	if org != "" {
 		account = "the GitHub organization " + org
+		appsSettings = githubWebBase + "/organizations/" + url.PathEscape(org) + "/settings/apps"
+		owner = org
 	}
 	fmt.Fprintf(stdout, "Chaperone will ask GitHub to create an App in %s. The App is private to it and has no webhook.\nIt asks for these permissions and no others:\n", account)
 	names := make([]string, 0, len(perms))
@@ -311,7 +325,7 @@ func githubSetup(ctx context.Context, v *vault.Vault, db, org string, perms map[
 
 	code, err := flow.Wait(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "chapd: %v. Nothing was stored. If GitHub already created an App, delete it at %s/settings/apps\n", err, githubWebBase)
+		fmt.Fprintf(stderr, "chapd: %v. Nothing was stored. If GitHub already created an App, delete it at %s\n", err, appsSettings)
 		return 1
 	}
 
@@ -322,23 +336,25 @@ func githubSetup(ctx context.Context, v *vault.Vault, db, org string, perms map[
 	}
 	app, err := conv.ConvertManifest(ctx, code)
 	if err != nil {
-		fmt.Fprintf(stderr, "chapd: GitHub did not give the App over: %v\nNothing was stored. If GitHub created an App, delete it at %s/settings/apps and run this again\n", err, githubWebBase)
+		fmt.Fprintf(stderr, "chapd: GitHub did not give the App over: %v\nNothing was stored. If GitHub created an App, delete it at %s and run this again\n", err, appsSettings)
 		return 1
 	}
 	defer app.Wipe()
-	deleteHint := githubWebBase + "/settings/apps/" + app.Slug + "/advanced"
-	if org != "" {
-		deleteHint = githubWebBase + "/organizations/" + url.PathEscape(org) + "/settings/apps/" + app.Slug + "/advanced"
-	}
+	deleteHint := appsSettings + "/" + app.Slug + "/advanced"
 	refuse := func(why string) int {
-		fmt.Fprintf(stderr, "chapd: %s. Nothing was stored. The App %s exists on GitHub: delete it at %s, then run this again\n", why, cleanText(app.Slug), deleteHint)
+		fmt.Fprintf(stderr, "chapd: %s. Nothing was stored.\nIf that App is in your account, delete it at %s. If it belongs to somebody else you cannot delete it, and there is nothing to clean up here. Then run this again.\n", why, deleteHint)
+		return 1
+	}
+	// The owner is checked before anything is stored: whose App this is must be known, not read off GitHub afterwards.
+	if !strings.EqualFold(app.OwnerLogin, owner) {
+		fmt.Fprintf(stderr, "chapd: the App GitHub made belongs to the account %s, not to %s, the account you named. Nothing was stored.\n"+
+			"You cannot delete an App that belongs to somebody else, and there is nothing to clean up here. "+
+			"If you did press \"Create GitHub App\" while signed in as another account, delete the App there at %s, then run this again.\n",
+			cleanText(app.OwnerLogin), owner, deleteHint)
 		return 1
 	}
 	if err := app.Check(spec); err != nil {
 		return refuse(err.Error())
-	}
-	if org != "" && !strings.EqualFold(app.OwnerLogin, org) {
-		return refuse("the App belongs to " + cleanText(app.OwnerLogin) + ", not to " + org)
 	}
 	if _, err := gh.ParsePrivateKeyPEM(app.PEM); err != nil {
 		return refuse("the private key GitHub sent is not a usable RSA key")
@@ -351,11 +367,8 @@ func githubSetup(ctx context.Context, v *vault.Vault, db, org string, perms map[
 		fmt.Fprintf(stderr, "chapd: the vault did not take the key: %v\nThe App %s exists on GitHub and its key is lost. Delete the App at %s and run this again\n", err, cleanText(app.Slug), deleteHint)
 		return 1
 	}
-	fmt.Fprintf(stdout, "\nGitHub created the App %s for %s (App id %d).\nIts private key is in the vault as %s (fingerprint %s). It was not written to a file.\n",
+	fmt.Fprintf(stdout, "\nGitHub created the App %s for %s (App id %d), the account you named.\nIts private key is in the vault as %s (fingerprint %s). It was not written to a file.\n",
 		cleanText(app.Slug), cleanText(app.OwnerLogin), app.ID, gh.AppKeySecretID, info.Fingerprint)
-	if app.OwnerLogin != "" && org == "" {
-		fmt.Fprintf(stdout, "Check that %s is your account. If it is not, delete the App at %s and do not install it.\n", cleanText(app.OwnerLogin), deleteHint)
-	}
 
 	rec := githubAppRecord{Version: 1, AppID: app.ID, ClientID: app.ClientID, Slug: app.Slug, Owner: app.OwnerLogin, Created: time.Now().UTC().Format(time.RFC3339)}
 	if err := writeGitHubAppRecord(db, rec); err != nil {

@@ -111,7 +111,7 @@ const connectUsage = `usage: chapd connect google [-client-file F [-delete]] [-d
        chapd connect google revoke                                                 tell Google to forget the sign-in
        (all take [-db PATH] [-vault-dir D] [-vault-key-dir D] [-vault-wrapper NAME] [-vault-passphrase-fd N];
         see chapd vault for the key wrappers)
-       chapd connect github [-org ORG] [-with GROUPS] | status   create your own GitHub App (chapd connect github -h)
+       chapd connect github (-org ORG | -user LOGIN) [-with GROUPS] | status   create your own GitHub App (chapd connect github -h)
 
 Run as the account that runs chapd, like 'chapd vault import' (ADR-003): the vault
 keys are bound to that account. Sign-in opens nothing by itself: it prints an

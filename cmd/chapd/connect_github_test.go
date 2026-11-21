@@ -72,9 +72,20 @@ var startAddrRE = regexp.MustCompile(`http://localhost:(\d+)/start/\S+`)
 // connect starts `chapd connect github` in the background.
 func (e *ghEnv) connect(args ...string) *connectRun {
 	r := &connectRun{out: &syncBuf{}, err: &syncBuf{}, done: make(chan int, 1)}
-	full := append([]string{"connect", "github", "-db", e.db}, args...)
+	full := append([]string{"connect", "github", "-db", e.db}, withOwner(args)...)
 	go func() { r.done <- run(full, r.out, r.err) }()
 	return r
+}
+
+// withOwner adds the account the command needs to know, unless the test names one. The case differs from the fake's
+// login on purpose: the owner is compared without regard to case.
+func withOwner(args []string) []string {
+	for _, a := range args {
+		if a == "-org" || a == "-user" {
+			return args
+		}
+	}
+	return append([]string{"-user", "Example-User"}, args...)
 }
 
 // startURL waits for the address the command prints.
@@ -117,7 +128,7 @@ func (r *connectRun) both() string { return r.out.String() + "\n" + r.err.String
 // runConnect runs the command to its end with no browser (refusals before the flow starts).
 func (e *ghEnv) runConnect(args ...string) (code int, stdout, stderr string) {
 	var out, errb bytes.Buffer
-	code = run(append([]string{"connect", "github", "-db", e.db}, args...), &out, &errb)
+	code = run(append([]string{"connect", "github", "-db", e.db}, withOwner(args)...), &out, &errb)
 	return code, out.String(), errb.String()
 }
 
@@ -496,11 +507,12 @@ func TestConnectGitHubStoresNothingFromAnAppThatIsNotWhatWasAsked(t *testing.T) 
 		"a higher level":     {nil, func(a map[string]any) { a["permissions"].(map[string]string)["checks"] = "write" }, "permissions are not the ones"},
 		"a missing one":      {nil, func(a map[string]any) { delete(a["permissions"].(map[string]string), "checks") }, "permissions are not the ones"},
 		"an event":           {nil, func(a map[string]any) { a["events"] = []string{"push"} }, "subscribes to events"},
-		"another owner":      {[]string{"-org", "my-org"}, func(a map[string]any) { a["owner"] = map[string]any{"login": "someone-else"} }, "belongs to someone-else, not to my-org"},
+		"another owner":      {[]string{"-org", "my-org"}, func(a map[string]any) { a["owner"] = map[string]any{"login": "someone-else"} }, "belongs to the account someone-else, not to my-org"},
 		"a key that is not RSA": {nil, func(a map[string]any) {
 			a["pem"] = "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n"
 		}, "not a usable RSA key"},
-		"no description of ours": {nil, func(a map[string]any) { a["description"] = nil }, "not made from the manifest"},
+		"an owner with no login (an Enterprise)": {nil, func(a map[string]any) { a["owner"] = map[string]any{"name": "Some Enterprise"} }, "owner of an unexpected shape"},
+		"no description of ours":                 {nil, func(a map[string]any) { a["description"] = nil }, "not made from the manifest"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -514,7 +526,7 @@ func TestConnectGitHubStoresNothingFromAnAppThatIsNotWhatWasAsked(t *testing.T) 
 			if code := r.wait(t); code != 1 {
 				t.Fatalf("exit %d, want 1:\n%s", code, r.both())
 			}
-			if !strings.Contains(r.err.String(), c.wantErr) || !strings.Contains(r.err.String(), "Nothing was stored") || !strings.Contains(r.err.String(), "/settings/apps/") {
+			if !strings.Contains(r.err.String(), c.wantErr) || !strings.Contains(r.err.String(), "Nothing was stored") || !strings.Contains(r.err.String(), "/settings/apps") {
 				t.Errorf("stderr:\n%s", r.err.String())
 			}
 			if e.hasKey() || e.hasRecord() {
@@ -808,4 +820,139 @@ func TestQuickstartFolderMovesToTheRealGitHub(t *testing.T) {
 		t.Errorf("status: %d %q %q", code, so.String(), se.String())
 	}
 	assertNoSecretsOnDisk(t, dir, secrets) // the database, the ledger and the log folder included
+}
+
+// ---- whose App is it ----
+
+func TestConnectGitHubNeedsToKnowWhoseAppItMakes(t *testing.T) {
+	e := newGHEnv(t)
+	for name, args := range map[string][]string{
+		"neither":          nil,
+		"both":             {"-org", "my-org", "-user", "me"},
+		"a bad user":       {"-user", "a/b"},
+		"a bad user again": {"-user", "not a user!"},
+	} {
+		var out, errb bytes.Buffer
+		code := run(append([]string{"connect", "github", "-db", e.db}, args...), &out, &errb)
+		if code != 2 || strings.Contains(out.String(), "/start/") {
+			t.Errorf("%s: exit %d, out %q", name, code, out.String())
+		}
+		if name == "neither" || name == "both" {
+			if !strings.Contains(errb.String(), "exactly one of -org ORG or -user LOGIN") || !strings.Contains(errb.String(), "whose App") {
+				t.Errorf("%s: the message does not say why: %q", name, errb.String())
+			}
+		}
+	}
+	var out, errb bytes.Buffer
+	if code := run([]string{"connect", "github", "status", "-user", "me", "-db", e.db}, &out, &errb); code != 2 {
+		t.Errorf("status with -user: %d", code)
+	}
+	if n := len(e.fake.ManifestRequests()) + len(e.fake.Apps()); n != 0 {
+		t.Errorf("GitHub was asked for %d things", n)
+	}
+}
+
+// The reviewer's experiment. Somebody who has seen the start page posts the same manifest, with the same state, from
+// THEIR account, and sends the code to the callback. The owner GitHub reports is not the account the operator named,
+// so nothing is stored, and the message does not tell the operator to delete an App they cannot delete.
+func TestConnectGitHubRefusesAnAppMadeInSomebodyElsesAccount(t *testing.T) {
+	e := newGHEnv(t)
+	r := e.connect("-user", "example-user")
+	u := r.startURL(t)
+	b := newBrowser(t)
+	action, manifest := b.openStart(u)
+	state := mustQuery(t, action, "state")
+
+	e.fake.SetWebUser("mallory")
+	loc := b.postManifest(action, manifest) // the attacker posts the very same form from their own account
+	cb := strings.Split(u, "/start/")[0] + "/callback?code=" + mustQuery(t, loc, "code") + "&state=" + state
+	if st, _, _ := b.get(cb, browserCallback); st != 200 {
+		t.Fatalf("callback %d", st)
+	}
+	if code := r.wait(t); code != 1 {
+		t.Fatalf("exit %d, want 1:\n%s", code, r.both())
+	}
+	for _, want := range []string{"belongs to the account mallory, not to example-user", "Nothing was stored", "cannot delete"} {
+		if !strings.Contains(r.err.String(), want) {
+			t.Errorf("stderr lacks %q:\n%s", want, r.err.String())
+		}
+	}
+	if strings.Contains(r.both(), "Check that") || strings.Contains(r.out.String(), "GitHub created the App") {
+		t.Errorf("the command spoke as if it had stored the App:\n%s", r.both())
+	}
+	if e.hasKey() || e.hasRecord() {
+		t.Error("something was stored")
+	}
+	app := e.fake.Apps()[0]
+	assertNoSecrets(t, "the output", r.both(), secretsOf(app))
+	assertNoSecretsOnDisk(t, e.dir, secretsOf(app))
+}
+
+func TestConnectGitHubOwnerIsComparedWithoutRegardToCase(t *testing.T) {
+	e := newGHEnv(t)
+	r := e.connect("-user", "EXAMPLE-user")
+	if st, _ := newBrowser(t).operator(r.startURL(t)); st != 200 || r.wait(t) != 0 {
+		t.Fatalf("exit %d:\n%s", r.code, r.both())
+	}
+	if !e.hasKey() {
+		t.Error("nothing stored")
+	}
+}
+
+// The addresses the messages point to are the organization's own when -org is given.
+func TestConnectGitHubMessagesPointToTheRightSettingsPage(t *testing.T) {
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"user": {[]string{"-user", "example-user"}, "/settings/apps"},
+		"org":  {[]string{"-org", "my-org"}, "/organizations/my-org/settings/apps"},
+	} {
+		t.Run(name+" timeout", func(t *testing.T) {
+			e := newGHEnv(t)
+			r := e.connect(append(c.args, "-timeout", "300ms")...)
+			r.startURL(t)
+			if r.wait(t) != 1 {
+				t.Fatal(r.both())
+			}
+			want := e.fake.URL() + c.want
+			if !strings.Contains(r.err.String(), want+"\n") || (name == "org" && strings.Contains(r.err.String(), e.fake.URL()+"/settings/apps")) {
+				t.Errorf("want %q (and no other settings page):\n%s", want, r.err.String())
+			}
+		})
+		t.Run(name+" exchange failure", func(t *testing.T) {
+			e := newGHEnv(t)
+			e.fake.Inject("POST", "/conversions", ghtest.Fault{Status: 404, Message: "Not Found"})
+			r := e.connect(c.args...)
+			if st, _ := newBrowser(t).operator(r.startURL(t)); st != 200 || r.wait(t) != 1 {
+				t.Fatal(r.both())
+			}
+			want := e.fake.URL() + c.want + " and run this again"
+			if !strings.Contains(r.err.String(), want) || (name == "org" && strings.Contains(r.err.String(), e.fake.URL()+"/settings/apps")) {
+				t.Errorf("want %q:\n%s", want, r.err.String())
+			}
+		})
+	}
+}
+
+// Starting over needs two things to go, and the refusals name both.
+func TestConnectGitHubRefusalsNameWhatToRemoveToStartOver(t *testing.T) {
+	e := newGHEnv(t)
+	r := e.connect("-user", "example-user")
+	if st, _ := newBrowser(t).operator(r.startURL(t)); st != 200 || r.wait(t) != 0 {
+		t.Fatal(r.both())
+	}
+	code, _, stderr := e.runConnect()
+	for _, want := range []string{gh.AppKeySecretID, githubAppFile, "start over", "Starting over"} {
+		if code != 1 || !strings.Contains(stderr, want) {
+			t.Errorf("the refusal (exit %d) lacks %q: %s", code, want, stderr)
+		}
+	}
+	// Only the vault secret is left: the record case.
+	if err := os.Remove(githubAppPath(e.db)); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := e.runConnect(); code != 1 || !strings.Contains(stderr, gh.AppKeySecretID) {
+		t.Errorf("exit %d: %s", code, stderr)
+	}
 }

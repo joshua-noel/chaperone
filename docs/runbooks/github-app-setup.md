@@ -52,10 +52,10 @@ Three operations are off or opt-in, so their permissions are **not** in the defa
 
    Keep the recovery identity offline. On Linux with no keyring, add `-vault-wrapper age-passphrase` to every `chapd vault` and `chapd connect` command and to `chapd run` (see [running-chapd.md](../running-chapd.md)).
 
-2. **Run the command.** Use the same `-db` (and `-vault-dir`, `-vault-key-dir`, `-vault-wrapper`) that `chapd run` uses. For an organization add `-org <name>`.
+2. **Run the command.** Use the same `-db` (and `-vault-dir`, `-vault-key-dir`, `-vault-wrapper`) that `chapd run` uses. You must say whose App this is, with exactly one of `-user <your GitHub login>` (a personal account) or `-org <name>` (an organization). The command refuses to start without one: it compares the owner GitHub reports with that name and stores nothing when they differ, and it can only do that if you say which account is yours.
 
    ```powershell
-   chapd connect github -db <path of state.db>
+   chapd connect github -user <your login> -db <path of state.db>
    ```
 
    It refuses to run when the vault already holds `github-app-key` or `github-app.json` exists next to the database: this is a first setup, and a key is replaced only by the rotation in [github-app-key.md](github-app-key.md). It prints the permissions it will ask for and **one address**:
@@ -64,11 +64,11 @@ Three operations are off or opt-in, so their permissions are **not** in the defa
    http://localhost:51234/start/<random>
    ```
 
-3. **Open that address** in your browser, on this computer. Paste it into the address bar. (A link clicked on another web page is refused, on purpose.) The page says which account will own the App and lists the permissions. Press **Continue to GitHub**.
+3. **Open that address** in your browser, on this computer. Paste it into the address bar. (A link clicked on another web page is refused, on purpose.) The page says which account will own the App and lists the permissions. Press **Continue to GitHub**. On GitHub's page check the **account** and the **permissions** shown there, not only the name. If either differs from what the start page said, do not press the button.
 
 4. **On GitHub:** check the App's name (you may change it; names are unique on GitHub) and press **Create GitHub App**. GitHub sends the browser back to the port on this computer. The tab says you can close it.
 
-5. **Read the terminal.** It says which App GitHub made, **for which account**, and the App id. **Check that the account is yours.** If it is not, delete the App at the address it prints, and do not install it. It also says that the key is in the vault (with its fingerprint), that `github-app.json` was written next to the database, and whether GitHub accepted the stored key.
+5. **Read the terminal.** The command has already compared the App's owner with the account you named, before it stored anything. It says which App GitHub made, for which account, and the App id. It also says that the key is in the vault (with its fingerprint), that `github-app.json` was written next to the database, and whether GitHub accepted the stored key.
 
 6. **Install the App on the repositories you choose.** The terminal prints the address, `https://github.com/apps/<slug>/installations/new`. Choose **Only select repositories**, pick them, press **Install**. Install it on only what Chaperone should reach.
 
@@ -97,11 +97,11 @@ The command runs a small web server for the few minutes it waits.
 - The manifest is built when the command starts. Nothing in a request can change it. Its `redirect_url` is the same string the Host check uses, so GitHub sends the code only to the address that checks it.
 - Nothing from a request is written into a page or into the terminal. A refused request prints one fixed phrase; at most 20 are shown.
 
-The temporary code travels in the query string of a `GET`, so it stays in your browser's history. It is useless there: GitHub's documentation says the three steps must finish within one hour, and the command uses the code within a second of receiving it and never accepts a second one. [INFERENCE] The documentation does not say in words that a code works only once.
+The temporary code travels in the query string of a `GET`, so it stays in your browser's history. It is useless there: GitHub's documentation says the three steps must finish within one hour, and the command uses the code within a second of receiving it and never accepts a second one. GitHub's documentation does not say that a code works only once; the command treats it as single use anyway.
 
 **What if a hostile page makes you create an App an attacker controls?** The manifest is fixed by the command, and its address holds a one-time key. A page cannot make *this* server send a different manifest or redirect. A page can still send you to GitHub with *its own* manifest, as anyone can; then GitHub shows its own page with the attacker's App name and you must press the button yourself. That is GitHub's protection, not this command's. Read the page GitHub shows.
 
-**What if an attacker's code is fed to the callback?** It needs the state, which only the page of this command shows. If the state leaked anyway, the command still stores nothing unless the App behind the code is the one the manifest described: its description must carry this setup's random value, its permissions must be exactly the ones asked for, it must have no event, and, with `-org`, its owner must be that organization. Otherwise the command stores nothing and prints where to delete the App.
+**What if an attacker's code is fed to the callback?** It needs the state, which only the page of this command shows. If the state leaked anyway, the command still stores nothing unless the App behind the code is the one the manifest described: its description must carry this setup's random value, its permissions must be exactly the ones asked for, it must have no event, and **its owner must be the account you named with `-user` or `-org`**, compared without regard to case (an owner with no login, such as an Enterprise, is refused). The owner is checked before anything is stored. This matters for a personal account: whoever has seen the start page can post the same manifest from their own GitHub account and send the code to the callback, and only the owner check stops the command from storing their App. When the owner differs, the command stores nothing and says so. The App belongs to somebody else, so you cannot delete it and there is nothing to clean up. If you did press "Create GitHub App" while signed in as another account, delete the App there. (The start page's Referrer-Policy is `strict-origin`: see "What was and was not tested".)
 
 ## If something goes wrong
 
@@ -115,7 +115,8 @@ The temporary code travels in the query string of a `GET`, so it stays in your b
 | `the browser did not come back in time` | Nothing was stored. If GitHub already made an App, delete it (the message names the page) and run the command again. |
 | `GitHub did not give the App over` | The code was refused (used, expired, or too many tries). Nothing was stored. Delete any App GitHub made and run again. |
 | `... was not made from the manifest chapd sent`, `permissions are not the ones the manifest asked for` | The App behind the code is not the one this command asked for. Nothing was stored. Delete the App it names. |
-| `the App belongs to X, not to Y` | The App was made under another account than `-org`. Nothing was stored; delete it. |
+| `the App GitHub made belongs to the account X, not to Y` | The App was made under another account than the one you named. Nothing was stored. If you pressed the button while signed in as the wrong account, delete the App from that account. If somebody else made it, you cannot delete it and need do nothing. |
+| `give exactly one of -org ORG or -user LOGIN` | The command must know whose App it makes. Say which. |
 | `the vault did not take the key` | The App exists but its key is lost (GitHub shows a key once). Delete the App and run again. |
 | `the key is stored, but the App could not be recorded` | Start `chapd run` with the `-github-app-id` the message prints instead. |
 | `Could not check the App with GitHub yet` | The key is stored. GitHub may need a minute. Run `chapd connect github status`. |
@@ -131,7 +132,7 @@ The quickstart (`chapd quickstart`) runs a playground: a fake GitHub inside the 
 
    ```powershell
    chapd vault init -db "$qs\state.db"
-   chapd connect github -db "$qs\state.db"
+   chapd connect github -user <your login> -db "$qs\state.db"
    ```
 
    Then do steps 3 to 7 above. The vault goes into `$qs\vault` and `$qs\vault-keys`, and the record into `$qs\github-app.json`.
@@ -185,10 +186,31 @@ The guided path records the Client ID, which GitHub recommends as the `iss` of t
 - the whole command: the address, the page, the manifest posted to the fake, the redirect to the loopback port, the exchange, the key in the vault (it opens and signs as the fake App), the record, the output, `status`, and finding the installation with the stored key and recorded id;
 - the manifest's content (no webhook, no event, private, the exact permissions) and that each shipped operation can mint its token on an App with exactly these permissions;
 - each refusal of the callback: another host, another origin, `null` origin, another site, not a page load, a wrong or missing or repeated start key, a wrong state (and that guesses do not use up the chance), a second callback, a callback before the start page, a bad code, a wrong method, a path, that nothing is reflected, the deadline, interruption, and a port that `[::1]` does not give;
-- a code from another App with the right state, a wider permission, an event, another owner and a key that is not RSA (each stores nothing);
+- a code from another App with the right state, a wider permission, an event, another owner (including the same manifest and state posted from another personal account, an owner in another case, and an owner with no login) and a key that is not RSA (each stores nothing);
 - that the key, the client secret and the webhook secret are not in the output, in `chapd`'s log, in the database, in the ledger, or in any file of the folder in the clear;
 - the quickstart folder going through the command and then `chapd run` configuration and a start of `chapd` on it.
 
 **Not executed:** anything against the real GitHub. In particular: that GitHub accepts the manifest as it is (no `hook_attributes`, an empty `default_events`, `public: false`, a `redirect_url` on `localhost`); that its page and its redirect behave as its documentation says (the exact `Origin` and fetch-metadata headers a real browser sends on the redirect back; if they differ, the command refuses the callback and prints the fixed reason, and the fix is a small change to the checks); that the description, permissions and `events` in its answer match the manifest exactly (a mismatch makes the command refuse and store nothing, after the App was made); that a new App's key is accepted at once; that `GET /app` and `GET /app/installations` answer as documented; how a real organization with an App-creation policy behaves. [INFERENCE] These follow GitHub's documentation ("Registering a GitHub App from a manifest"; "REST API endpoints for GitHub Apps"). The first real run needs you at a browser; do it with a throwaway account or organization first and delete the App after.
 
 **Not tested here either:** the Windows install (see the top of this page), a Linux keyring, macOS Keychain.
+
+## Starting over
+
+The command makes a first setup only. It refuses while either of these exists, so to start over from nothing **both must go**:
+
+1. the file `github-app.json` next to the database (delete it);
+2. the vault secret `github-app-key`. `chapd` has no command that deletes a secret today. The secret is the file `<vault-dir>\github-app-key.age` and one row, with id `github-app-key`, in the table `vault_secrets` of `state.db`. The simple way that needs no edit of the database is a **new database folder with a new vault** (`chapd vault init` there). To replace only the key of an App you still use, rotate it instead: [github-app-key.md](github-app-key.md).
+
+Also delete the App on GitHub, if it is yours, at the address in the message. An App that belongs to somebody else cannot be deleted by you, and the command never stores one.
+
+## Your first real run
+
+No one has run this against the real GitHub yet. Do it once, on purpose, before you rely on it:
+
+1. **Be signed in to GitHub first**, recently, in the browser you will use, before you open the address. A login or password-confirmation step in the middle may lose the form contents. [INFERENCE]
+2. **Read the owner line.** The command checks it, but look: GitHub's page, the terminal and the App's page on GitHub must all show your account. Run without `-org` (`-user <your login>`) the first time.
+3. **Write down exactly what GitHub does.** If it rejects the form post (the Referrer-Policy and `Origin` question below), or the command refuses the redirect back and prints a fixed reason, note the message and the step. Then delete the App at `https://github.com/settings/apps`.
+4. **Compare what GitHub returns with what was asked.** `chapd connect github status` shows the permissions and events GitHub reports. If they differ from the manifest (the command refuses after the App exists), delete the App and report the difference.
+5. **Use throwaway things:** a throwaway database folder, a fresh vault and a throwaway account or organization. Afterwards delete the App, the vault secret and `github-app.json` (see "Starting over"), or the whole folder.
+
+**Referrer-Policy.** The start page sets `strict-origin`, in a header and in a meta tag. With `no-referrer` a browser sends `Origin: null` on the form post to GitHub, which GitHub may refuse; GitHub does not document either way. `strict-origin` sends only `http://localhost:PORT`, never the path, which holds the start key. A test pins the exact policy and that the page holds the key nowhere else. **This is untested against real GitHub.** If GitHub still refuses the post, note exactly what it says (step 3).

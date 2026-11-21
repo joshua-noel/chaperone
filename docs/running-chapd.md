@@ -9,7 +9,7 @@ chapd orch list
 chapd orch revoke -id main
 chapd vault init                                                         # once, as the account that runs chapd; prints the recovery identity once
 chapd vault import --name github-app-key --file <path-to.pem> --delete   # validates the RSA PEM, stores it, prints the fingerprint, then wipes the file
-chapd connect github [-org ORG] [-with deploy,issues,ci-report]          # instead of the line above: makes your own GitHub App through GitHub's manifest flow and stores its key; see runbooks/github-app-setup.md
+chapd connect github (-org ORG | -user LOGIN) [-with deploy,issues,ci-report]  # instead of the line above: makes your own GitHub App through GitHub's manifest flow and stores its key; see runbooks/github-app-setup.md
 chapd connect github status                                              # the App, its permissions and its installations, from GitHub
 chapd vault list
 chapd vault recover                                                      # after the service account was reset: re-keys the vault; the recovery identity comes in on standard input

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -104,7 +105,7 @@ func TestFlowServesTheStartPage(t *testing.T) {
 		t.Error("the page has a script")
 	}
 	for k, want := range map[string]string{
-		"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff",
+		"Cache-Control": "no-store", "Referrer-Policy": "strict-origin", "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff",
 	} {
 		if h.Get(k) != want {
 			t.Errorf("%s: %q, want %q", k, h.Get(k), want)
@@ -488,5 +489,45 @@ func TestFlowManifestDoesNotChangeWithTheRequest(t *testing.T) {
 	}
 	if _, err := f.Spec().JSON(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The start page posts a form to GitHub. With "no-referrer" a browser sends "Origin: null" on that post, which GitHub
+// may refuse (not documented either way), so the page uses "strict-origin": the browser sends http://localhost:PORT
+// and never the path, which holds the start key. [INFERENCE] Not tested against real GitHub.
+func TestFlowStartPageReferrerPolicyNeverCarriesTheStartKey(t *testing.T) {
+	f := newTestFlow(t, func(c *flowConfig) { c.User = "example-user" })
+	_, body, h := f.hit(t, "GET", "/start/"+f.startKey, "", browserStart)
+	if got := h.Get("Referrer-Policy"); got != "strict-origin" {
+		t.Errorf("Referrer-Policy %q, want exactly strict-origin", got)
+	}
+	metas := regexp.MustCompile(`<meta name="referrer" content="([^"]*)">`).FindAllStringSubmatch(body, -1)
+	if len(metas) != 1 || metas[0][1] != "strict-origin" {
+		t.Errorf("referrer meta tags: %v", metas)
+	}
+	// What a browser sends under strict-origin: the origin of the page, nothing of its path.
+	referer := f.origin
+	if strings.Contains(referer, f.startKey) || strings.Contains(referer, "/start") {
+		t.Errorf("the Referer %q carries the path", referer)
+	}
+	// And the page itself holds the key nowhere else a request could carry it: no link, no subresource, no script.
+	for _, bad := range []string{f.startKey, "/start/", "<a ", "<img", "<script", "<link", "src="} {
+		if strings.Contains(body, bad) {
+			t.Errorf("the start page contains %q", bad)
+		}
+	}
+	// Every other answer, the callback's included, keeps no-referrer: nothing there needs an Origin.
+	if _, _, h := f.hit(t, "GET", "/nothing", "", browserStart); h.Get("Referrer-Policy") != "no-referrer" {
+		t.Errorf("other answers: %q", h.Get("Referrer-Policy"))
+	}
+}
+
+func TestFlowStartPageTellsTheOperatorToCheckTheAccountAndThePermissions(t *testing.T) {
+	f := newTestFlow(t, func(c *flowConfig) { c.User = "example-user" })
+	_, body, _ := f.hit(t, "GET", "/start/"+f.startKey, "", browserStart)
+	for _, want := range []string{"Check the ACCOUNT and the PERMISSIONS", "the GitHub account example-user", "contents: write"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the start page lacks %q:\n%s", want, body)
+		}
 	}
 }

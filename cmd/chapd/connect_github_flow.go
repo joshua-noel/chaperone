@@ -65,8 +65,11 @@ var flowCodeRE = regexp.MustCompile(`^[A-Za-z0-9._-]{8,128}$`)
 type flowConfig struct {
 	// WebBase is GitHub's web address, no trailing slash (https://github.com).
 	WebBase string
-	// Org is the organisation that will own the App, empty for the signed-in user.
-	Org string
+	// Org is the organisation that will own the App, empty for a personal account. User is the personal account
+	// that will own it, empty for an organisation. They only decide the address the form posts to and the words on
+	// the page; the command checks the owner GitHub reports.
+	Org  string
+	User string
 	// Permissions are the App's default permissions.
 	Permissions map[string]string
 	// Timeout is how long the flow lives.
@@ -291,13 +294,13 @@ func (f *manifestFlow) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 var startPage = template.Must(template.New("start").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Chaperone: create your GitHub App</title></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="strict-origin"><title>Chaperone: create your GitHub App</title></head>
 <body>
 <h1>Create your GitHub App</h1>
 <p>This creates a GitHub App in {{.Account}}. The App is private to that account. Chaperone uses it to act on GitHub with its own key, which is kept in the vault on this computer.</p>
 <p>The App asks for these permissions and no others. It has no webhook.</p>
 <ul>{{range .Permissions}}<li>{{.}}</li>{{end}}</ul>
-<p>Press the button. GitHub shows its own page: check the name, then press "Create GitHub App". GitHub then sends this browser back to this computer. You can close this tab after that.</p>
+<p>Press the button. GitHub shows its own page. Check the ACCOUNT and the PERMISSIONS shown there, not only the name: the account must be {{.Account}}, and the permissions must be the ones listed above. If either is different, do not press the button. Then press "Create GitHub App". GitHub sends this browser back to this computer, and you can close this tab.</p>
 <form method="post" action="{{.Action}}">
 <input type="hidden" name="manifest" value="{{.Manifest}}">
 <button type="submit">Continue to GitHub</button>
@@ -327,11 +330,15 @@ func (f *manifestFlow) start(w http.ResponseWriter, r *http.Request, key string)
 		perms = append(perms, k+": "+v)
 	}
 	sort.Strings(perms)
-	account := "your own GitHub account"
+	account := "the GitHub account " + f.cfg.User
 	if f.cfg.Org != "" {
 		account = "the GitHub organization " + f.cfg.Org
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// strict-origin, not no-referrer: with no-referrer a browser sends "Origin: null" on the form post, which GitHub
+	// may refuse (not documented either way). strict-origin sends only http://localhost:PORT, never the path with the
+	// start key. [INFERENCE] Not tested against real GitHub.
+	w.Header().Set("Referrer-Policy", "strict-origin")
 	_ = startPage.Execute(w, struct {
 		Account, Action, Manifest string
 		Permissions               []string
