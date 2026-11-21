@@ -284,14 +284,14 @@ func githubSetup(ctx context.Context, v *vault.Vault, db, org, user string, perm
 	// Before anything starts: this command makes a first setup and replaces nothing.
 	switch _, err := v.Info(ctx, gh.AppKeySecretID); {
 	case err == nil:
-		fmt.Fprintf(stderr, "chapd: the vault already holds %s. This command only makes a first setup. To check the App, run `chapd connect github status`. To replace the key, see docs/runbooks/github-app-key.md. To start over from nothing, both of these must go: the vault secret %s and the file %s (see docs/runbooks/github-app-setup.md, \"Starting over\")\n", gh.AppKeySecretID, gh.AppKeySecretID, githubAppPath(db))
+		fmt.Fprintf(stderr, "chapd: the vault already holds %s. This command only makes a first setup. To check the App, run `chapd connect github status`. To replace the key, see docs/runbooks/github-app-key.md. To start over from nothing, both of these must go: the vault secret %s (`chapd vault delete --name %s`) and the file %s (see docs/runbooks/github-app-setup.md, \"Starting over\")\n", gh.AppKeySecretID, gh.AppKeySecretID, gh.AppKeySecretID, githubAppPath(db))
 		return 1
 	case !errors.Is(err, vault.ErrNotFound):
 		fmt.Fprintf(stderr, "chapd: %v\n", err)
 		return 1
 	}
 	if rec, err := readGitHubAppRecord(db); rec != nil || err != nil {
-		fmt.Fprintf(stderr, "chapd: %s already exists. To start over from nothing, both of these must go: that file and the vault secret %s (see docs/runbooks/github-app-setup.md, \"Starting over\")\n", githubAppPath(db), gh.AppKeySecretID)
+		fmt.Fprintf(stderr, "chapd: %s already exists. To start over from nothing, both of these must go: that file and the vault secret %s (`chapd vault delete --name %s`) (see docs/runbooks/github-app-setup.md, \"Starting over\")\n", githubAppPath(db), gh.AppKeySecretID, gh.AppKeySecretID)
 		return 1
 	}
 

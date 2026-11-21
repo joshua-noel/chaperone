@@ -400,6 +400,8 @@ type Vault struct {
 	// mu keeps a Use from reading a file between a rotation's rename and
 	// its index commit. It guards this process only; chapd is the one writer.
 	mu sync.RWMutex
+	// afterDeleteStep is a test hook: see [Vault.Delete]. Nil in the program.
+	afterDeleteStep func(stage string) error
 }
 
 // Open loads the service identity (through cfg.Wrapper) and the fingerprint

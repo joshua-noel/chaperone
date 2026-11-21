@@ -199,7 +199,13 @@ The guided path records the Client ID, which GitHub recommends as the `iss` of t
 The command makes a first setup only. It refuses while either of these exists, so to start over from nothing **both must go**:
 
 1. the file `github-app.json` next to the database (delete it);
-2. the vault secret `github-app-key`. `chapd` has no command that deletes a secret today. The secret is the file `<vault-dir>\github-app-key.age` and one row, with id `github-app-key`, in the table `vault_secrets` of `state.db`. The simple way that needs no edit of the database is a **new database folder with a new vault** (`chapd vault init` there). To replace only the key of an App you still use, rotate it instead: [github-app-key.md](github-app-key.md).
+2. the vault secret `github-app-key`. Delete it with `chapd vault delete --name github-app-key`, run as the account that runs `chapd`, with the same `-db`, `-vault-dir`, `-vault-key-dir` and key wrapper flags as the setup. The command shows the name, the kind and when the secret was imported (never the value), then asks you to type the name. Where there is no terminal (a script) it needs `--yes` instead. It removes the vault file and the index row in one step and writes an `op.request` and `op.result` pair for `vault.delete` to the ledger. It refuses a name the vault does not hold.
+
+   The file is **removed, not overwritten**. On a modern file system an overwrite does not destroy the old blocks, so the command does not pretend to. If the key may have leaked, delete the App on GitHub too (below): that is what makes the old key useless.
+
+   If `chapd` is running, it can no longer use the key from that moment. If the command is interrupted, `chapd` refuses the half-removed secret (and will not start on it); run the same command again to finish.
+
+   To replace only the key of an App you still use, rotate it instead: [github-app-key.md](github-app-key.md).
 
 Also delete the App on GitHub, if it is yours, at the address in the message. An App that belongs to somebody else cannot be deleted by you, and the command never stores one.
 

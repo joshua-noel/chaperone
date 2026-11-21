@@ -18,6 +18,7 @@ import (
 
 const vaultUsage = `usage: chapd vault init   [-db PATH] [-vault-dir D] [-vault-key-dir D] [KEY WRAPPER]
        chapd vault import --name ID --file PATH [--kind K] [--project P] [--delete] [-db PATH] [-vault-dir D] [-vault-key-dir D] [KEY WRAPPER]
+       chapd vault delete --name ID [--yes] [-instance NAME] [-db PATH] [-vault-dir D] [-vault-key-dir D] [KEY WRAPPER]
        chapd vault list   [-db PATH] [-vault-dir D] [-vault-key-dir D] [KEY WRAPPER]
        chapd vault recover [-db PATH] [-vault-dir D] [-vault-key-dir D] [KEY WRAPPER]   (recovery identity on standard input)
 
@@ -41,6 +42,15 @@ For the GitHub App key (--name github-app-key) the file must be an RSA private k
 in PEM form. With --delete the file is overwritten with zeros and removed once the
 import has succeeded; without it the file stays and you must delete it yourself.
 
+delete removes one secret: its file and its index row, in one step. It needs the exact
+name (it refuses a name the vault does not have), shows the name, kind and import time
+(never the value), and asks you to type the name on a terminal; where there is no
+terminal it needs --yes. The file is removed, not overwritten: an overwrite does not
+destroy the old blocks on a modern file system, so none is claimed. The deletion is
+written to the ledger (op vault.delete, by the operator; -instance names the chain,
+default pc). It is the way to undo a mistaken import. If chapd is running it can no
+longer use the secret at once; run the same command again if it is interrupted.
+
 recover re-keys a vault whose service identity cannot be unwrapped any more (the
 account was reset or recreated). It reads the offline recovery identity from
 standard input, decrypts every secret with it, then writes a new service identity,
@@ -62,7 +72,8 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 	var wc wrapperChoice
 	wc.register(fs)
 	var name, file, kind, project string
-	var del bool
+	var del, yes bool
+	instance := "pc"
 	switch sub {
 	case "import":
 		fs.StringVar(&name, "name", "", "secret id (lower-case letters, digits, - and _)")
@@ -70,6 +81,10 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 		fs.StringVar(&kind, "kind", "", `secret kind (default "github-app-key" for --name github-app-key, else required)`)
 		fs.StringVar(&project, "project", "", "project the secret belongs to (optional)")
 		fs.BoolVar(&del, "delete", false, "overwrite and delete --file after a successful import")
+	case "delete":
+		fs.StringVar(&name, "name", "", "the exact id of the secret to delete")
+		fs.BoolVar(&yes, "yes", false, "confirm without being asked (only where standard input is not a terminal)")
+		fs.StringVar(&instance, "instance", "pc", "ledger instance (chain chaperone.<instance>)")
 	case "init", "list", "recover":
 	default:
 		fmt.Fprintf(stderr, "chapd vault: unknown command %q\n%s\n", sub, vaultUsage)
@@ -85,6 +100,22 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 	if sub == "recover" && wc.fdSet && wc.fd == 0 {
 		fmt.Fprintln(stderr, "chapd vault recover: -vault-passphrase-fd 0 is refused: recover reads the recovery identity from standard input. Use another descriptor, or leave the flag out to be asked on the terminal")
 		return 2
+	}
+	terminal := false
+	if sub == "delete" {
+		if name == "" {
+			fmt.Fprintln(stderr, "chapd vault delete: --name is required")
+			return 2
+		}
+		if err := vault.ValidID(name); err != nil {
+			fmt.Fprintf(stderr, "chapd vault delete: --name %q is not a secret id: %v\n", name, err)
+			return 2
+		}
+		terminal = vaultStdinTerminal()
+		if why := deleteConfirmation(terminal, yes); why != "" {
+			fmt.Fprintf(stderr, "chapd vault delete: %s\n", why)
+			return 2
+		}
 	}
 	if sub == "import" {
 		if name == "" || file == "" {
@@ -148,6 +179,9 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 	defer v.Close()
 	if sub == "list" {
 		return vaultList(ctx, v, stdout, stderr)
+	}
+	if sub == "delete" {
+		return vaultDelete(ctx, v, cfg.Dir, d, instance, name, terminal, vaultStdin, stdout, stderr)
 	}
 	return vaultImport(ctx, v, vault.Meta{ID: name, Kind: kind, Project: project, Owner: "chapd vault import"}, file, del, stdout, stderr)
 }
