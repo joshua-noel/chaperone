@@ -432,11 +432,11 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	} else {
 		a.log.Warn("no profile source (-profiles-dir): every runner.* run token will be refused TOKEN_INVALID")
 	}
-	orchTxRevoke, orchTxDrop := orchestratorHooks(svc, keyStore)
+	orchTxRevoke, orchTxReissue := orchestratorHooks(svc, keyStore)
 	orch, err := runtoken.NewOrchestrators(runtoken.OrchConfig{
 		DB: db, Appender: sink, Redact: a.Reg, Now: cfg.now,
 		PolicyVersion: base.BaselineVersion,
-		TxRevoke:      orchTxRevoke, TxDropProjects: orchTxDrop,
+		TxRevoke:      orchTxRevoke, TxReissue: orchTxReissue,
 	})
 	if err != nil {
 		return nil, err

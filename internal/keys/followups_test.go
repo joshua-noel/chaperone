@@ -150,7 +150,99 @@ func TestRefusedStartNotesAreLimitedPerLabelWithAGlobalCap(t *testing.T) {
 			total++
 		}
 	}
-	if total > 2+refusedStartMax {
+	// The cap limits the refusals of labels that hold no slot; a clash on a label that holds one (at most
+	// MaxPendingEnrolments of them) is outside it.
+	if total > 2+refusedStartMax+MaxPendingEnrolments {
 		t.Errorf("%d refusal notes: the global cap of %d a minute did not hold", total, refusedStartMax)
+	}
+}
+
+// H1: a key whose project the new token does not cover, or that holds an op the new token's ops do not allow, is
+// revoked with the re-issue (by chapd, no stop, the reason says what was lost); a key still inside the new scope stays.
+func TestRevokeOwnedBeyondRevokesWhatTheNewScopeNoLongerReaches(t *testing.T) {
+	g := newRig(t)
+	ctx := context.Background()
+	_, both := g.issueAndClaim(nil)                                                                             // pr.diff, pr.view
+	_, diffOnly := g.issueAndClaim(func(x *Grant) { x.Holder, x.Ops = "bot", []string{"pr.diff"} })             // pr.diff
+	_, viewOnly := g.issueAndClaim(func(x *Grant) { x.Holder, x.Ops = "bot3", []string{"pr.view"} })            // pr.view
+	_, health := g.issueAndClaim(func(x *Grant) { x.Holder, x.Ops, x.Units = "bot4", []string{"health"}, nil }) // health
+	run := func(projects, patterns []string) {
+		t.Helper()
+		if err := g.db.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
+			return g.s.RevokeOwnedBeyondTx(ctx, tx, "main", projects, patterns)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := func(id string) string { k, _ := g.s.Get(ctx, id); return k.State }
+	// Everything is still inside the scope: nothing happens (a pattern counts).
+	run([]string{"acme-shop"}, []string{"pr.*", "health", "keys.issue"})
+	for _, id := range []string{both.ID, diffOnly.ID, viewOnly.ID, health.ID} {
+		if state(id) != "live" {
+			t.Fatalf("%s was revoked by a re-issue that kept its project and ops", id)
+		}
+	}
+	// pr.view is dropped: the keys that hold it go, the others stay.
+	run([]string{"acme-shop"}, []string{"pr.diff", "health"})
+	if state(both.ID) != "revoked" || state(viewOnly.ID) != "revoked" || state(diffOnly.ID) != "live" || state(health.ID) != "live" {
+		t.Fatalf("after dropping pr.view: both=%s viewOnly=%s diffOnly=%s health=%s", state(both.ID), state(viewOnly.ID), state(diffOnly.ID), state(health.ID))
+	}
+	k, _ := g.s.Get(ctx, both.ID)
+	if k.StoppedByHuman || k.RevokedBy != "chapd" || !strings.Contains(k.RevokeReason, "no longer holds pr.view") {
+		t.Errorf("the revoked key: %+v", k)
+	}
+	if stopped, _ := g.s.AgentStopped(ctx, "main", "scout"); stopped {
+		t.Error("the revoke stopped an agent")
+	}
+	// The project is dropped: what is left goes.
+	run([]string{"other"}, []string{"pr.diff", "health"})
+	if state(diffOnly.ID) != "revoked" || state(health.ID) != "revoked" {
+		t.Errorf("after dropping the project: %s %s", state(diffOnly.ID), state(health.ID))
+	}
+}
+
+// H2: an attacker with many labels uses up the global cap of refusal notes, but a clash on the label that holds a slot
+// (the real agent's, squatted) is still written down, once a minute for that label.
+func TestAClashOnALabelThatHoldsASlotIsNotedWhateverTheGlobalCapSays(t *testing.T) {
+	g := newRig(t)
+	ctx := context.Background()
+	notes := func(label string) int {
+		n := 0
+		for _, e := range g.led.named("op.request") {
+			if e.Attributes["factory.op"] == "keys.enrol" && strings.Contains(e.Body, " for "+label+":") {
+				n++
+			}
+		}
+		return n
+	}
+	// The squatter holds scout and four more slots; then a flood of refusals for other labels uses the cap up.
+	for _, l := range []string{"scout", "s1", "s2", "s3", "s4"} {
+		if _, err := g.s.StartEnrolment(ctx, "acme-shop", l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 40 {
+		_, _ = g.s.StartEnrolment(ctx, "acme-shop", "flood"+string(rune('a'+i%26))+string(rune('a'+i/26)))
+	}
+	capped := 0
+	for _, e := range g.led.named("op.request") {
+		if e.Attributes["factory.op"] == "keys.enrol" {
+			capped++
+		}
+	}
+	if capped != refusedStartMax {
+		t.Fatalf("the flood wrote %d notes, want the cap of %d", capped, refusedStartMax)
+	}
+	// The real agent starts its enrolment: its label is held, so it is a clash, and it is written down all the same.
+	if _, err := g.s.StartEnrolment(ctx, "acme-shop", "scout"); err == nil {
+		t.Fatal("expected a clash")
+	}
+	if notes("scout") != 1 {
+		t.Errorf("the clash on scout was not written down: %d", notes("scout"))
+	}
+	// Once a minute for that label.
+	_, _ = g.s.StartEnrolment(ctx, "acme-shop", "scout")
+	if notes("scout") != 1 {
+		t.Errorf("the clash was written twice in a minute: %d", notes("scout"))
 	}
 }

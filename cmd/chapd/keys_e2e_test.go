@@ -469,3 +469,51 @@ func TestE2EAKeyInADroppedProjectIsRevokedWhenTheTokenIsReissued(t *testing.T) {
 		t.Errorf("the key in the dropped project: %+v", k)
 	}
 }
+
+// Re-issuing an orchestrator's token with the same projects but fewer operations revokes the keys it owns that hold a
+// dropped operation, and leaves the keys that are still inside the new scope.
+func TestE2EAKeyWithADroppedOperationIsRevokedWhenTheTokenIsReissued(t *testing.T) {
+	e := newKeysE2E(t)
+	ctx := context.Background()
+	n, _ := e.mediumPR("agent/ops")
+	keep := e.grant(map[string]any{"holder": "keeper", "ops": []any{"pr.diff"}})
+	drop := e.grant(nil) // pr.diff, pr.view
+	tokens := map[string]string{}
+	for _, id := range []string{keep, drop} {
+		_, cl := e.call("POST", "/v0/keys/"+id+"/claim", e.maker, nil)
+		tokens[id], _ = cl["token"].(string)
+	}
+	if st, _ := e.view(tokens[drop], n); st != http.StatusOK {
+		t.Fatalf("the key does not work: %d", st)
+	}
+	// Same projects, same ops: both stay.
+	scope := runtoken.OrchScope{Projects: []string{"storefront"}, Ops: []string{"keys.issue", "pr.view", "pr.diff"}}
+	if _, err := e.app.Orch.Issue(ctx, runtoken.IssueParams{ID: "keymaker", Scope: scope, Days: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := e.view(tokens[drop], n); st != http.StatusOK {
+		t.Fatalf("a re-issue that kept the ops revoked the key: %d", st)
+	}
+	// pr.view is dropped.
+	scope.Ops = []string{"keys.issue", "pr.diff"}
+	if _, err := e.app.Orch.Issue(ctx, runtoken.IssueParams{ID: "keymaker", Scope: scope, Days: 1}); err != nil {
+		t.Fatal(err)
+	}
+	st, body := e.view(tokens[drop], n)
+	if st == http.StatusOK {
+		t.Fatalf("the key that holds a dropped operation still reads the pull request: %v", body)
+	}
+	mustValidDenial(t, body, "TOKEN_REVOKED")
+	k, _ := e.app.Keys.Get(ctx, drop)
+	if k.State != "revoked" || k.StoppedByHuman || k.RevokedBy != "chapd" || !strings.Contains(k.RevokeReason, "no longer holds pr.view") {
+		t.Errorf("the key with the dropped operation: %+v", k)
+	}
+	if k, _ := e.app.Keys.Get(ctx, keep); k.State != "live" {
+		t.Errorf("a key inside the new scope was revoked: %+v", k)
+	}
+	var events int
+	e.app.DB.SQL().QueryRow(`SELECT count(*) FROM ledger_events WHERE event_name = 'op.request' AND event LIKE '%keys.revoke%' AND event LIKE '%` + drop + `%'`).Scan(&events)
+	if events != 1 {
+		t.Errorf("%d ledger events for the revoke, want 1", events)
+	}
+}

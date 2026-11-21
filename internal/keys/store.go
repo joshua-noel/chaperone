@@ -435,6 +435,53 @@ func (s *Store) RevokeOwnedTx(ctx context.Context, tx *store.Tx, owner string, p
 	return nil
 }
 
+// RevokeOwnedBeyondTx revokes, inside the caller's transaction, the keys owner holds that its new token no longer
+// reaches: a key in a project the token does not cover, or holding an op the token's ops (patterns, as in the token)
+// do not allow. It is what happens when an orchestrator's token is re-issued narrower (ADR-008). Like
+// [Store.RevokeOwnedTx] it is chapd's own act, never a human stop, with one keys.revoke event for each key whose
+// reason says what was lost. A key that is still inside the new scope is left alone.
+func (s *Store) RevokeOwnedBeyondTx(ctx context.Context, tx *store.Tx, owner string, projects, opPatterns []string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, project, ops_json FROM keys WHERE owner_id = ? AND revoked_at IS NULL ORDER BY id`, owner)
+	if err != nil {
+		return err
+	}
+	type lost struct{ id, why string }
+	var out []lost
+	for rows.Next() {
+		var id, project, opsJSON string
+		if err := rows.Scan(&id, &project, &opsJSON); err != nil {
+			rows.Close()
+			return err
+		}
+		if !slices.Contains(projects, project) {
+			out = append(out, lost{id, "its orchestrator " + owner + " no longer covers the project"})
+			continue
+		}
+		var granted []string
+		_ = json.Unmarshal([]byte(opsJSON), &granted) // an unreadable list holds nothing, and is revoked below
+		if len(granted) == 0 && opsJSON != "[]" {
+			out = append(out, lost{id, "its list of ops is unreadable"})
+			continue
+		}
+		for _, op := range granted {
+			if !spec.OpAllowed(op, opPatterns) {
+				out = append(out, lost{id, "its orchestrator " + owner + " no longer holds " + clipText(op, 60)})
+				break
+			}
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, l := range out {
+		if err := s.revokeTx(ctx, tx, l.id, "chapd", l.why, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // AgentStopped reports whether a human stopped this owner's agent.
 func (s *Store) AgentStopped(ctx context.Context, owner, label string) (bool, error) {
 	var n int

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -344,42 +345,40 @@ func TestReservedOrchestratorIdsAreRefusedAtVerifyToo(t *testing.T) {
 	}
 }
 
-// A token re-issued without a project tells the owner of the keys which projects it lost, in the same transaction; a
-// first issue, a re-issue with the same or more projects, and a re-issue after a revoke lose none.
-func TestReissueWithFewerProjectsNamesTheDroppedOnes(t *testing.T) {
+// Issuing a token tells the owner of the keys, in the same transaction and before the old token is rotated out, the
+// scope the new token will have, so that what it no longer reaches (a project, an operation) can be revoked with it.
+func TestIssueGivesTheKeyOwnerTheNewScopeInTheSameTransaction(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
-	var dropped [][]string
+	var seen []string
 	var err error
 	e.orch, err = NewOrchestrators(OrchConfig{
 		DB: e.db, Appender: e.led, Now: func() time.Time { return e.clock },
 		PolicyVersion: func() string { return e.policy },
-		TxDropProjects: func(_ context.Context, _ *store.Tx, id string, d []string) error {
-			dropped = append(dropped, append([]string{id}, d...))
+		TxReissue: func(_ context.Context, tx *store.Tx, id string, sc OrchScope) error {
+			var live int
+			_ = tx.QueryRowContext(ctx, `SELECT count(*) FROM orchestrators WHERE id = ? AND revoked_at IS NULL`, id).Scan(&live)
+			seen = append(seen, id+":"+strings.Join(sc.Projects, "+")+":"+strings.Join(sc.Ops, "+")+":live="+strconv.Itoa(live))
 			return nil
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	two := OrchScope{Projects: []string{"acme-shop", "acme-blog"}, Ops: []string{"pr.merge"}}
-	one := OrchScope{Projects: []string{"acme-shop"}, Ops: []string{"pr.merge"}}
-	e.issueOrch("main", two, 0)
-	e.issueOrch("main", two, 0) // the same
-	e.issueOrch("main", OrchScope{Projects: []string{"acme-shop", "acme-blog", "acme-docs"}, Ops: []string{"pr.merge"}}, 0)
-	if len(dropped) != 0 {
-		t.Fatalf("projects dropped by a re-issue that kept them all: %v", dropped)
+	e.issueOrch("main", OrchScope{Projects: []string{"acme-shop", "acme-blog"}, Ops: []string{"pr.merge", "pr.view"}}, 0)
+	e.issueOrch("main", OrchScope{Projects: []string{"acme-shop"}, Ops: []string{"pr.merge"}}, 0)
+	want := []string{"main:acme-shop+acme-blog:pr.merge+pr.view:live=0", "main:acme-shop:pr.merge:live=1"}
+	if strings.Join(seen, "|") != strings.Join(want, "|") {
+		t.Errorf("the hook saw %v, want %v", seen, want)
 	}
-	e.issueOrch("main", one, 0)
-	if len(dropped) != 1 || strings.Join(dropped[0], ",") != "main,acme-blog,acme-docs" {
-		t.Fatalf("dropped: %v", dropped)
+	// A hook that fails stops the issue and leaves the old token live.
+	e.orch.cfg.TxReissue = func(context.Context, *store.Tx, string, OrchScope) error { return errors.New("no") }
+	if _, err := e.orch.Issue(ctx, IssueParams{ID: "main", Scope: mainScope}); err == nil {
+		t.Fatal("an issue went on after its hook failed")
 	}
-	// After a revoke the keys are already revoked (by the revoke hook): a re-issue drops nothing.
-	if err := e.orch.Revoke(ctx, "main", "test"); err != nil {
-		t.Fatal(err)
-	}
-	e.issueOrch("main", two, 0)
-	if len(dropped) != 1 {
-		t.Errorf("a re-issue after a revoke dropped %v", dropped[1:])
+	var live int
+	e.db.SQL().QueryRow(`SELECT count(*) FROM orchestrators WHERE id = 'main' AND revoked_at IS NULL`).Scan(&live)
+	if live != 1 {
+		t.Errorf("%d live tokens after the failed issue, want the old one", live)
 	}
 }

@@ -190,14 +190,17 @@ type EnrolView struct {
 // refusedStartMax the most refusals written down in that time for all labels together. A process that keeps asking
 // must not fill the log and the ledger, only show up in them; and one label's refusals must not hide another's
 // (a process that squats on the label of the real agent must not use up the real agent's refusal), so the limit is
-// per label, with a global cap so that a process that tries many labels cannot flood.
+// per label, with a global cap so that a process that tries many labels cannot flood (a clash on a label that holds a slot is outside the cap).
 const (
 	refusedStartEvery = time.Minute
 	refusedStartMax   = 10
 )
 
-// allowNote says whether a refusal of project/label is written down now, and records that it was.
-func (s *Store) allowNote(project, label string) bool {
+// allowNote says whether a refusal of project/label is written down now, and records that it was. A clash (the label
+// already holds a slot, 409) is outside the global cap: only a label that holds one of the few slots can clash, so at
+// most MaxPendingEnrolments of them a minute are written down, and the refusal of the real agent's label is never
+// hidden by an attacker who tries many labels (those are the cap's 429s, which the global cap does limit).
+func (s *Store) allowNote(project, label string, clash bool) bool {
 	now := s.now()
 	key := project + "/" + label
 	s.mu.Lock()
@@ -208,13 +211,15 @@ func (s *Store) allowNote(project, label string) bool {
 	if at, ok := s.refused[key]; ok && now.Sub(at) < refusedStartEvery {
 		return false
 	}
-	if now.Sub(s.noteFrom) >= refusedStartEvery {
-		s.noteFrom, s.noteN = now, 0
+	if !clash {
+		if now.Sub(s.noteFrom) >= refusedStartEvery {
+			s.noteFrom, s.noteN = now, 0
+		}
+		if s.noteN >= refusedStartMax {
+			return false
+		}
+		s.noteN++
 	}
-	if s.noteN >= refusedStartMax {
-		return false
-	}
-	s.noteN++
 	s.refused[key] = now
 	return true
 }
@@ -224,7 +229,7 @@ func (s *Store) allowNote(project, label string) bool {
 // credential, so a local process can keep the slots or a label filled; this does not stop it, it lets the operator
 // see it.
 func (s *Store) noteRefusedStart(ctx context.Context, project, label string, ref *EnrolRefusal) {
-	if !s.allowNote(project, label) {
+	if !s.allowNote(project, label, ref.Status == 409) {
 		return
 	}
 	log := s.cfg.Log

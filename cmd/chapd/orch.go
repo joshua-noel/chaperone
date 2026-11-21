@@ -91,10 +91,10 @@ func openOrch(ctx context.Context, dbPath, instance string) (*orchEnv, error) {
 		_ = led.Close()
 		return fail(err)
 	}
-	txRevoke, txDrop := orchestratorHooks(svc, ks)
+	txRevoke, txReissue := orchestratorHooks(svc, ks)
 	o, err := runtoken.NewOrchestrators(runtoken.OrchConfig{
 		DB: db, Appender: sink, Redact: reg, PolicyVersion: base.BaselineVersion,
-		TxRevoke: txRevoke, TxDropProjects: txDrop,
+		TxRevoke: txRevoke, TxReissue: txReissue,
 	})
 	if err != nil {
 		_ = led.Close()

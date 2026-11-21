@@ -133,11 +133,12 @@ type OrchConfig struct {
 	// TxRevoke runs inside the revoke transaction: cancel the orchestrator's
 	// pending approvals here (ADR-007 item 7). An error rolls the revoke back.
 	TxRevoke func(ctx context.Context, tx *store.Tx, id string) error
-	// TxDropProjects runs inside the transaction that re-issues a token (rotation) whose scope has lost projects:
-	// the projects the new token no longer covers. Revoke what the orchestrator owns there (ADR-008): once a project
-	// is out of its token the orchestrator can no longer see, and so could not revoke, a key it built in it. An error
-	// rolls the re-issue back.
-	TxDropProjects func(ctx context.Context, tx *store.Tx, id string, dropped []string) error
+	// TxReissue runs inside the transaction that issues a token for id, before the old token of id is rotated out,
+	// with the scope the new token will have. Revoke here what the orchestrator owns beyond that scope (ADR-008): a key
+	// in a project the new token no longer covers, or holding an operation it no longer allows, could not be seen or
+	// revoked by its owner any more, and must not outlive the access it was built from. An error rolls the issue
+	// back.
+	TxReissue func(ctx context.Context, tx *store.Tx, id string, scope OrchScope) error
 	// AfterRevoke runs after the revoke committed.
 	AfterRevoke func(ctx context.Context, id string)
 	Now         func() time.Time
@@ -311,13 +312,9 @@ func (o *Orchestrators) Issue(ctx context.Context, p IssueParams) (IssueResult, 
 	}
 	res := IssueResult{Token: token, Fingerprint: hexSum[:8], ExpiresAt: time.Unix(expires.Unix(), 0).UTC()}
 	err = o.cfg.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
-		if o.cfg.TxDropProjects != nil {
-			if dropped, err := o.droppedProjects(ctx, tx, p.ID, p.Scope.Projects); err != nil {
-				return err
-			} else if len(dropped) > 0 {
-				if err := o.cfg.TxDropProjects(ctx, tx, p.ID, dropped); err != nil {
-					return fmt.Errorf("runtoken: drop projects hook: %w", err)
-				}
+		if o.cfg.TxReissue != nil {
+			if err := o.cfg.TxReissue(ctx, tx, p.ID, p.Scope); err != nil {
+				return fmt.Errorf("runtoken: re-issue hook: %w", err)
 			}
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -341,30 +338,6 @@ func (o *Orchestrators) Issue(ctx context.Context, p IssueParams) (IssueResult, 
 		return IssueResult{}, err
 	}
 	return res, nil
-}
-
-// droppedProjects lists the projects the live token of id covers that the new scope does not. An id with no live
-// token (a first issue, or after a revoke, which already revoked what it owned) drops nothing.
-func (o *Orchestrators) droppedProjects(ctx context.Context, tx *store.Tx, id string, now []string) ([]string, error) {
-	var scopeJSON string
-	err := tx.QueryRowContext(ctx, `SELECT scope FROM orchestrators WHERE id = ? AND revoked_at IS NULL`, id).Scan(&scopeJSON)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("runtoken: read orchestrator: %w", err)
-	}
-	var old OrchScope
-	if err := json.Unmarshal([]byte(scopeJSON), &old); err != nil {
-		return nil, fmt.Errorf("runtoken: stored scope of %q is unreadable", id)
-	}
-	var dropped []string
-	for _, pr := range old.Projects {
-		if !slices.Contains(now, pr) {
-			dropped = append(dropped, pr)
-		}
-	}
-	return dropped, nil
 }
 
 func (o *Orchestrators) appendOp(ctx context.Context, tx *store.Tx, op, project, id string, params map[string]any, body string) error {
