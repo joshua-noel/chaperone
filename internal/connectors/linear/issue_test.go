@@ -2,6 +2,7 @@ package linear
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -880,5 +881,135 @@ func TestAMovedIssueDoesNotNameItsNewTeam(t *testing.T) {
 	out, err := r.ad(OpIssueGet).Execute(ctx, req(OpIssueGet, "AGT-4", nil))
 	if err != nil || !out.Failed || strings.Contains(out.Result["error"].(string), "ENG") {
 		t.Errorf("issue.get: %v %+v", err, out)
+	}
+}
+
+// The guard against references to the operator board does not rest on a list of forms: it refuses invisible
+// characters, a word that mixes alphabets, and full-width letters, and it looks for the identifier in a normalised copy
+// (entities and percent-escapes decoded until stable, markdown and HTML removed, dashes made hyphens). Every form the
+// security review got past the first check is here: in a comment body, in a link URL and in a link title. It is a
+// best-effort guard; the operations cannot act on the board whatever a comment says.
+func TestTheBoardGuardRefusesEveryFormOfAReference(t *testing.T) {
+	r := issueRig(t)
+	ctx := context.Background()
+	forms := map[string]string{
+		"percent-encoded dash":        "SHOP%2D1",
+		"percent-encoded letter":      "%53HOP-1",
+		"double percent-encoding":     "%2553HOP-1",
+		"encoded in a linear.app URL": "https://linear.app/acme/issue/SHOP%2D1",
+		"markdown backslash":          `SHOP\-1`,
+		"decimal entity":              "SHOP&#45;1",
+		"entity for a letter":         "S&#72;OP-1",
+		"entity without a semicolon":  "SHOP&#45 1 SHOP-&#49",
+		"bold":                        "SH**OP**-1",
+		"code span":                   "`SHOP`-1",
+		"html comment":                "SHOP<!-- -->-1",
+		"html tag":                    "<b>S</b>HOP-1",
+		"underscores":                 "SH_OP-1",
+		"strike-through":              "S~~H~~OP-1",
+		"combining grapheme joiner":   "S\u034fHOP-1",
+		"variation selector":          "SHOP\ufe0f-1",
+		"khmer vowel inherent":        "S\u17b4HOP-1",
+		"hangul filler":               "S\u3164HOP-1",
+		"zero-width space":            "S\u200bHOP-1",
+		"soft hyphen":                 "S\u00adHOP-1",
+		"team page by id":             "https://linear.app/acme/team/1b6e4f1a-9c3d-4f0e-8d10-0123456789ab/all",
+		"team page by name":           "https://linear.app/acme/team/Operations/active",
+		"linear.app alone":            "see linear.app for it",
+		"linear.app in capitals":      "LINEAR.APP",
+		"linear.app percent-encoded":  "linear%2Eapp",
+		"Cyrillic letter in the key":  "S\u041dOP-1",
+		"Greek letter in the key":     "SH\u039fP-1",
+		"full-width":                  "\uff33\uff28\uff2f\uff30\uff0d\uff11",
+		"Unicode hyphen":              "SHOP\u20101",
+		"Unicode minus":               "SHOP\u22121",
+		"en dash":                     "SHOP\u20131",
+		"escaped in a mixed way":      "&#83;&#72;OP%2d1",
+	}
+	for name, text := range forms {
+		cases := []struct {
+			op string
+			q  *ops.Request
+		}{
+			{OpIssueComment, req(OpIssueComment, "AGT-1", map[string]any{"body": text})},
+			{OpIssueLink, req(OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/x/y?ref=" + text})},
+			{OpIssueLink, req(OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/x/y", "title": text})},
+		}
+		for i, c := range cases {
+			if i == 1 && strings.Contains(text, "linear") { // a URL that is only a linear.app host is the host check's
+				continue
+			}
+			_, err := r.ad(c.op).Check(ctx, c.q)
+			var ref *ops.Refusal
+			if !errors.As(err, &ref) {
+				t.Errorf("%s in %s #%d was accepted: %v", name, c.op, i, err)
+				continue
+			}
+			if strings.Contains(ref.Why, "SHOP") {
+				t.Errorf("%s: the refusal repeats the identifier: %s", name, ref.Why)
+			}
+			if out, err := r.ad(c.op).Execute(ctx, c.q); err != nil || !out.Failed {
+				t.Errorf("%s in %s #%d executed: %v %+v", name, c.op, i, err, out)
+			}
+		}
+	}
+	if r.mutations() != 0 {
+		t.Errorf("%d writes reached Linear", r.mutations())
+	}
+}
+
+// Ordinary text passes: other teams, other languages in one alphabet, percent signs and entities that are not a
+// reference, and a title that says nothing about the board.
+func TestTheBoardGuardLetsOrdinaryTextThrough(t *testing.T) {
+	r := issueRig(t)
+	ctx := context.Background()
+	for _, text := range []string{
+		"AGT-1 is related to AGT-2", "NOTSHOP-1 is another team", "SHOPPING-1", "the shop is open",
+		"Le caf\u00e9 est ouvert, s'il vous pla\u00eet", "\u041f\u0440\u0438\u0432\u0435\u0442, \u043c\u0438\u0440", "\u3053\u308c\u306f\u30c6\u30b9\u30c8\u3067\u3059\u3002", "\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1 \u03ba\u03cc\u03c3\u03bc\u03b5",
+		"100% done, 5 of 7 tests", "a &amp; b, 1 &lt; 2", "snake_case and **bold** and `code`", "see https://github.com/example-org/storefront/pull/9",
+		"\u4e2d\u6587\uff0c\u6ca1\u6709\u95ee\u9898\uff01",
+	} {
+		if _, err := r.ad(OpIssueComment).Check(ctx, req(OpIssueComment, "AGT-1", map[string]any{"body": text})); err != nil {
+			t.Errorf("comment %q refused: %v", text, err)
+		}
+	}
+	l := req(OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/example-org/storefront/pull/9", "title": "the pull request that fixes it"})
+	if _, err := r.ad(OpIssueLink).Check(ctx, l); err != nil {
+		t.Errorf("an ordinary link was refused: %v", err)
+	}
+}
+
+// A bad linear.issues block turns off the Linear issue operations (and Linear's issue.comment) for the project and
+// nothing else: every refusal names the project, the file and the field, and the intake operations keep working.
+func TestABadIssuesBlockTurnsOffTheIssueOpsOnlyAndNamesTheFile(t *testing.T) {
+	r := issueRig(t)
+	r.pol.Issues = nil
+	r.pol.IssuesInvalid = errors.New("its policy file acme-shop.yaml has a linear.issues block that cannot be used, so the Linear issue operations are off for project acme-shop until it is fixed: issues.label \"claude\" is the operator-board intake label")
+	ctx := context.Background()
+	for _, q := range []*ops.Request{
+		req(OpIssueGet, "AGT-1", nil),
+		req(OpIssueList, "team", nil),
+		req(OpIssueComment, "AGT-1", map[string]any{"body": "x"}),
+		req(OpIssueLabel, "AGT-1", map[string]any{"add": "bug"}),
+		req(OpIssueMove, "AGT-1", map[string]any{"state": "Done"}),
+		req(OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/x/y"}),
+	} {
+		_, err := r.ad(q.Op).Check(ctx, q)
+		ref := wantRefusal(t, err, ops.CodePolicyRefused)
+		for _, want := range []string{"acme-shop.yaml", "project", "linear.issues", "issues.label"} {
+			if !strings.Contains(ref.Why, want) {
+				t.Errorf("%s: the refusal lacks %q: %s", q.Op, want, ref.Why)
+			}
+		}
+		if out, err := r.ad(q.Op).Execute(ctx, q); err != nil || !out.Failed {
+			t.Errorf("%s executed: %v %+v", q.Op, err, out)
+		}
+	}
+	if n := len(r.fake.Requests()); n != 0 {
+		t.Errorf("%d requests reached Linear", n)
+	}
+	// The intake keeps working.
+	if _, _, out, err := r.run(req(OpList, "board", nil)); err != nil || out.Failed {
+		t.Errorf("intake.list with a bad issues block: %v %+v", err, out)
 	}
 }

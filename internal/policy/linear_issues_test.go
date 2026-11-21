@@ -1,8 +1,11 @@
 package policy
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const issuesBlock = `
@@ -60,7 +63,9 @@ func TestLinearIssuesBlockLoads(t *testing.T) {
 
 // No field of the issues block can reach the operator board (the security
 // review's P1): the intake team and the intake label are refused wherever the
-// block could name them, and the whole file is refused.
+// block could name them. A mistake in the block turns off the Linear issue operations only (the block is dropped,
+// and the error names the project, the file and the field); a key the file format does not know still refuses the
+// whole file.
 func TestLinearIssuesBlockCannotNameTheOperatorBoard(t *testing.T) {
 	long := strings.Repeat("a", LinearMaxLabel+1)
 	for name, c := range map[string]struct{ block, want string }{
@@ -87,9 +92,27 @@ func TestLinearIssuesBlockCannotNameTheOperatorBoard(t *testing.T) {
 		"unknown field":              {"team: AGT\n    label: agent\n    intake_label_excluded: false\n", ""},
 		"an enabled flag":            {"team: AGT\n    label: agent\n    enabled: true\n", ""},
 	} {
-		_, err := linearProject(t, "linear:\n  team: SHOP\n  label: Claude\n  issues:\n    "+c.block)
-		if err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: err = %v, want one with %q", name, err, c.want)
+		eff, err := linearProject(t, "linear:\n  team: SHOP\n  label: Claude\n  issues:\n    "+c.block)
+		if c.want == "" { // not a mistake in the block but in the file: still refused whole
+			if err == nil {
+				t.Errorf("%s: accepted", name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: the whole project was refused: %v", name, err)
+			continue
+		}
+		if eff.Linear == nil || eff.Linear.Issues != nil || eff.Linear.IssuesInvalid == nil || !strings.Contains(eff.Linear.IssuesInvalid.Error(), c.want) {
+			t.Errorf("%s: the block is not off with a reason holding %q: %+v", name, c.want, eff.Linear)
+			continue
+		}
+		if msg := eff.Linear.IssuesInvalid.Error(); !strings.Contains(msg, eff.Project+".yaml") || !strings.Contains(msg, "project "+eff.Project) || !strings.Contains(msg, "linear.issues") {
+			t.Errorf("%s: the reason does not name the project and the file: %s", name, msg)
+		}
+		// The intake block and the rest of the project work.
+		if eff.Linear.Team != "SHOP" || eff.Linear.Label != "Claude" || eff.Invalid != nil {
+			t.Errorf("%s: the intake block was lost: %+v", name, eff.Linear)
 		}
 	}
 }
@@ -138,17 +161,62 @@ func TestLinearIssuesCommentIsOffUnlessTheBlockSaysSo(t *testing.T) {
 }
 
 // A link to Linear itself could point at an item of the operator board, so the
-// host list may not name Linear or any of its subdomains. The mistake refuses
-// the project's whole policy file, like every other mistake in the block.
+// host list may not name Linear or any of its subdomains. The mistake turns off
+// the Linear issue operations of the project, like every other mistake in the block.
 func TestLinearIssuesLinkHostsRefuseLinear(t *testing.T) {
 	for _, h := range []string{"linear.app", "www.linear.app", "a.b.linear.app"} {
-		_, err := linearProject(t, "linear:\n  team: SHOP\n  label: Claude\n  issues:\n    team: AGT\n    label: agent\n    link_hosts: [github.com, "+h+"]\n")
-		if err == nil || !strings.Contains(err.Error(), "linear.app") || !strings.Contains(err.Error(), "intake_label_excluded") {
-			t.Errorf("link_hosts %s: %v", h, err)
+		eff, err := linearProject(t, "linear:\n  team: SHOP\n  label: Claude\n  issues:\n    team: AGT\n    label: agent\n    link_hosts: [github.com, "+h+"]\n")
+		if err != nil || eff.Linear.Issues != nil || eff.Linear.IssuesInvalid == nil ||
+			!strings.Contains(eff.Linear.IssuesInvalid.Error(), "linear.app") || !strings.Contains(eff.Linear.IssuesInvalid.Error(), "intake_label_excluded") {
+			t.Errorf("link_hosts %s: %v %+v", h, err, eff)
 		}
 	}
 	// A host that only ends in the same letters is not Linear.
 	if _, err := linearProject(t, "linear:\n  team: SHOP\n  label: Claude\n  issues:\n    team: AGT\n    label: agent\n    link_hosts: [notlinear.app, linear.app.example.org]\n"); err != nil {
 		t.Errorf("an unrelated host was refused: %v", err)
+	}
+}
+
+// The engine follows the same convention as a bad pr.tiers glob: a mistake in the linear.issues block leaves the
+// project usable and the intake block in force, Problems says which block is off, and fixing the file turns the
+// issue operations back on on the next read.
+func TestEngineTurnsLinearIssuesOffAndBackOn(t *testing.T) {
+	cat, base := mustDefault(t)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "acme-shop.yaml")
+	bad := "project: acme-shop\n" + strings.Replace(issuesBlock, "label: agent", "label: Claude", 1)
+	if err := os.WriteFile(file, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	eng := NewEngine(cat, base, dir)
+	eng.now = func() time.Time { return now }
+
+	eff := eng.For("acme-shop")
+	if eff.Invalid != nil {
+		t.Fatalf("the project must stay valid: %v", eff.Invalid)
+	}
+	if eff.Linear == nil || eff.Linear.Team != "SHOP" || eff.Linear.Issues != nil || eff.Linear.IssuesInvalid == nil {
+		t.Fatalf("the intake block is lost or the issues block is not off: %+v", eff.Linear)
+	}
+	for _, want := range []string{"acme-shop.yaml", "project acme-shop", "issues.label"} {
+		if !strings.Contains(eff.Linear.IssuesInvalid.Error(), want) {
+			t.Errorf("the reason lacks %q: %v", want, eff.Linear.IssuesInvalid)
+		}
+	}
+	problems := eng.Problems()
+	if len(problems) != 1 || problems[0].Project != "acme-shop" || problems[0].File != "acme-shop.yaml" || problems[0].Block != "linear.issues" || problems[0].Err == nil {
+		t.Errorf("Problems = %+v", problems)
+	}
+
+	if err := os.WriteFile(file, []byte("project: acme-shop\n"+issuesBlock), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(5 * time.Second)
+	if eff := eng.For("acme-shop"); eff.Linear == nil || eff.Linear.Issues == nil || eff.Linear.IssuesInvalid != nil {
+		t.Errorf("the fixed file is still off: %+v", eff.Linear)
+	}
+	if p := eng.Problems(); len(p) != 0 {
+		t.Errorf("Problems after the fix: %+v", p)
 	}
 }

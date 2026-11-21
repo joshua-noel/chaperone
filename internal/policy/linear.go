@@ -33,6 +33,10 @@ type Linear struct {
 	// nil when the file has none, and then every `issue.*` request for Linear
 	// is refused. It can never reach the operator board: see [LinearIssues].
 	Issues *LinearIssues
+	// IssuesInvalid is set when the `linear.issues` block cannot be used (it is dropped: Issues is nil). It names the
+	// project, the file and the field. Only the Linear issue operations are off; the intake block and everything else
+	// work. nil when the block is fine or absent.
+	IssuesInvalid error
 }
 
 // LinearIssues is the policy of the generic `issue.get|list|comment|label|move|
@@ -193,10 +197,20 @@ func (l *Linear) validate() error {
 		}
 		seen[k] = true
 	}
-	if l.Issues != nil {
-		if err := l.Issues.validate(l); err != nil {
-			return err
-		}
+	return nil
+}
+
+// issuesProblem checks the `linear.issues` block against the intake block and says what is wrong with it, naming the
+// project, the file and the field, or returns nil. A bad block turns off the Linear issue operations and Linear's side
+// of issue.comment for the project only: the intake block, the rest of the Linear block and every other block and op
+// keep working (the same narrowing as a bad `pr.tiers` glob, [PR].Invalid). The caller drops the block, so a
+// problem here is never a block that works.
+func (l *Linear) issuesProblem(project string) error {
+	if l.Issues == nil {
+		return nil
+	}
+	if err := l.Issues.validate(l); err != nil {
+		return fmt.Errorf("its policy file %s.yaml has a linear.issues block that cannot be used, so the Linear issue operations (issue.get, issue.list, issue.comment, issue.label, issue.move and issue.link on Linear) are off for project %s until it is fixed: %w", project, project, err)
 	}
 	return nil
 }

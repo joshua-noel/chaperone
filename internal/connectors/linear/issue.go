@@ -89,6 +89,9 @@ func (b base) issuePolicy(r *ops.Request) (*policy.Linear, *policy.LinearIssues,
 	if pol == nil {
 		return nil, nil, policyRefused("%s is refused for project %s: its policy file has no valid linear: block", r.Op, clip(r.Project, 60))
 	}
+	if pol.IssuesInvalid != nil {
+		return nil, nil, policyRefused("%s is refused for project %s: %s", r.Op, clip(r.Project, 60), clip(pol.IssuesInvalid.Error(), 900))
+	}
 	if pol.Issues == nil {
 		return nil, nil, policyRefused("%s is refused for project %s: its policy file has no linear.issues block", r.Op, clip(r.Project, 60))
 	}
@@ -98,19 +101,6 @@ func (b base) issuePolicy(r *ops.Request) (*policy.Linear, *policy.LinearIssues,
 // intakeRefused is the refusal of the `intake_label_excluded` condition.
 func intakeRefused(format string, a ...any) error {
 	return policyRefused("intake_label_excluded: "+format, a...)
-}
-
-// namesTheBoard refuses text that points at an item of the operator board: an
-// identifier of the intake team (SHOP-12, in any case, alone or inside a URL),
-// or a URL of that team's pages. Linear may turn a link or a mention into a
-// backlink on the item it names, which would be a write to the operator board.
-func namesTheBoard(pol *policy.Linear, what, text string) error {
-	key := regexp.QuoteMeta(pol.Team)
-	re := regexp.MustCompile("(?i)((^|[^a-z0-9])" + key + "-[0-9]|(/|%2f)team(/|%2f)" + key + "([^a-z0-9]|$))")
-	if re.MatchString(text) {
-		return intakeRefused("%s names an item or a page of the operator board (the intake team); the issue ops never point at it", what)
-	}
-	return nil
 }
 
 // issueIdent checks a target that names an issue and returns its identifier.
@@ -366,7 +356,7 @@ func (a *issueCommentAdapter) parse(r *ops.Request) (issueCommentParams, error) 
 	if err := checkText("body", p.body, MaxCommentBytes); err != nil {
 		return p, err
 	}
-	if err := namesTheBoard(pol, "a comment", p.body); err != nil {
+	if err := guardBoard(pol, "a comment", p.body); err != nil {
 		return p, err
 	}
 	if n := len(mentionRE.FindAllString(p.body, -1)); n > iss.MaxMentions {
@@ -669,7 +659,7 @@ func (a *issueLinkAdapter) parse(r *ops.Request) (issueLinkParams, error) {
 	if err := checkText("url", p.url, maxURL); err != nil {
 		return p, err
 	}
-	if err := namesTheBoard(pol, "a link", p.url); err != nil {
+	if err := guardBoard(pol, "a link", p.url); err != nil {
 		return p, err
 	}
 	u, err := url.ParseRequestURI(p.url)
@@ -687,6 +677,9 @@ func (a *issueLinkAdapter) parse(r *ops.Request) (issueLinkParams, error) {
 			return p, err
 		}
 		if err := checkText("title", p.title, maxLinkTitle); err != nil {
+			return p, err
+		}
+		if err := guardBoard(pol, "the link title", p.title); err != nil {
 			return p, err
 		}
 	}

@@ -98,7 +98,8 @@ type Problem struct {
 	Project string
 	File    string // the file name in the policy folder, <project>.yaml
 	// Block is "" when the whole project is refused (an invalid file), or the part that is off: "pr" for a bad tier
-	// glob, which turns off pr.merge and pr.update only.
+	// glob, which turns off pr.merge and pr.update only, and "linear.issues" for a bad block of that name, which turns
+	// off the Linear issue operations only.
 	Block string
 	Err   error
 }
@@ -122,11 +123,15 @@ func (e *Engine) Problems() []Problem {
 			continue
 		}
 		eff := e.For(project)
-		switch {
-		case eff.Invalid != nil:
+		if eff.Invalid != nil {
 			out = append(out, Problem{Project: project, File: name, Err: eff.Invalid})
-		case eff.PR != nil && eff.PR.Invalid != nil:
+			continue
+		}
+		if eff.PR != nil && eff.PR.Invalid != nil {
 			out = append(out, Problem{Project: project, File: name, Block: "pr", Err: eff.PR.Invalid})
+		}
+		if eff.Linear != nil && eff.Linear.IssuesInvalid != nil {
+			out = append(out, Problem{Project: project, File: name, Block: "linear.issues", Err: eff.Linear.IssuesInvalid})
 		}
 	}
 	return out

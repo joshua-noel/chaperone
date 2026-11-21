@@ -205,6 +205,10 @@ func (p *Pack) LoadProject(project string, data []byte, cat *Catalog) (*Effectiv
 		if err := l.validate(); err != nil {
 			return nil, fmt.Errorf("policy: project %s: linear: %w", project, err)
 		}
+		// A bad issues block turns off the Linear issue operations only, not the project and not the intake.
+		if l.IssuesInvalid = l.issuesProblem(project); l.IssuesInvalid != nil {
+			l.Issues = nil
+		}
 		eff.Linear = l
 	}
 	return eff, nil

@@ -230,6 +230,8 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	for _, p := range a.Policy.Problems() {
 		if p.Block == "" {
 			a.log.Warn("policy: a project file is invalid, so every op of the project is refused until it is fixed", "project", p.Project, "file", p.File, "err", p.Err.Error())
+		} else if p.Block == "linear.issues" {
+			a.log.Warn("policy: a project file has an unusable linear.issues block; the Linear issue operations (and Linear's issue.comment) are off for the project, the intake and its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
 		} else {
 			a.log.Warn("policy: a project file has an unusable "+p.Block+" block; pr.merge and pr.update are off for the project, its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
 		}
