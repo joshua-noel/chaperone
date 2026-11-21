@@ -216,7 +216,8 @@ func (p *prepared) bound(approved []ops.Evidence) error {
 }
 
 // Execute sends the message once, with an idempotency key made from the
-// execution id. It never retries: a send whose answer was lost ends
+// execution id. The adapter never repeats a send itself (the HTTP transport may replay
+// the identical request with the same key, see Client.Send): a send whose answer was lost ends
 // `unconfirmed`, and the result says what to look up.
 func (a *sendAdapter) Execute(ctx context.Context, r *ops.Request) (ops.Outcome, error) {
 	p, err := a.parse(r)

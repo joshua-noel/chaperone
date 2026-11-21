@@ -78,8 +78,8 @@ func (r *Resend) validate() error {
 		return err
 	}
 	for _, e := range r.AllowRecipients {
-		if strings.HasPrefix(e, "@") && slices.Contains(ResendMailboxDomains, e[1:]) {
-			return fmt.Errorf("allow_recipients entry %q lists a whole public mailbox domain, which would let an agent write to everyone there; list the exact addresses instead", e)
+		if m, listed := mailboxDomain(strings.TrimPrefix(e, "@")); strings.HasPrefix(e, "@") && listed {
+			return fmt.Errorf("allow_recipients entry %q is a whole public mailbox domain (%s), which would let an agent write to everyone there; an exact address is needed here, so list the exact addresses instead", e, m)
 		}
 	}
 	seen = map[string]bool{}
@@ -124,13 +124,29 @@ func (r *Resend) RecipientAllowed(addr string) bool {
 	return false
 }
 
-// ResendMailboxDomains is a short built-in list of the largest public mailbox
-// domains. An `@domain` entry for one of them is refused when the block is loaded:
-// it would allow mail to every person who has an account there. An exact address at
-// the domain is fine. The list is not a defence against every such domain (a smaller
-// provider is not on it); it is a guard against the common mistake, and the runbook
-// says the same for all of them.
+// ResendMailboxDomains is a built-in list of large public mailbox domains and their
+// common regional and sibling domains. An `@domain` entry for one of them, or for a
+// subdomain of one, is refused when the block is loaded: it would allow mail to every
+// person who has an account there. An exact address at the domain is fine.
+//
+// The list is a guard against the common mistake and nothing more. It is not complete:
+// a provider that is not on it passes, and so does any domain that gives accounts to the
+// public. The rule is the operator's to keep, and the runbook says so.
 var ResendMailboxDomains = []string{
 	"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com",
 	"me.com", "proton.me", "protonmail.com", "aol.com", "gmx.com", "yandex.com", "mail.com",
+	"yahoo.co.uk", "yahoo.co.jp", "yahoo.fr", "yahoo.de", "ymail.com", "rocketmail.com", "msn.com",
+	"live.co.uk", "hotmail.co.uk", "hotmail.fr", "outlook.fr", "outlook.de", "gmx.de", "gmx.net", "web.de",
+	"mail.ru", "yandex.ru", "qq.com", "163.com", "126.com", "pm.me", "zoho.com", "fastmail.com", "hey.com",
+	"duck.com", "tutanota.com", "tuta.io",
+}
+
+// mailboxDomain returns the listed domain that d is, or is a subdomain of.
+func mailboxDomain(d string) (string, bool) {
+	for _, m := range ResendMailboxDomains {
+		if d == m || strings.HasSuffix(d, "."+m) {
+			return m, true
+		}
+	}
+	return "", false
 }

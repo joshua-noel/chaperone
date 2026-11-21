@@ -100,6 +100,7 @@ type Problem struct {
 	// Block is "" when the whole project is refused (an invalid file), or the part that is off: "pr" for a bad tier
 	// glob, which turns off pr.merge and pr.update only, "linear.issues" for a bad block of that name, which turns
 	// off the Linear issue operations only, "sentry" for a bad block of that name, which turns off the Sentry
+	// operations only, and "resend" for a bad block of that name, which turns off the Resend side of mail.send only.
 	Block string
 	Err   error
 }

@@ -276,7 +276,7 @@ func failed(err error, res map[string]any) ops.Outcome {
 func reason(err error) string {
 	var ae *APIError
 	switch {
-	case errors.Is(err, ErrNoSendKey):
+	case errors.Is(err, ErrNoSendKey), errors.Is(err, ErrMalformedKey):
 		return err.Error()
 	case errors.As(err, &ae):
 		return apiReason(ae)
@@ -301,13 +301,13 @@ func apiReason(ae *APIError) string {
 	case ae.Status >= 400 && ae.Status < 500:
 		return fmt.Sprintf("Resend refused the request (HTTP %d, %s)", ae.Status, ae.Code)
 	}
-	return fmt.Sprintf("Resend answered HTTP %d", ae.Status)
+	return fmt.Sprintf("Resend answered HTTP %d (%s)", ae.Status, ae.Code)
 }
 
 // credentialRefusal turns a missing key into a refusal the operator can read:
 // asking again cannot help. Any other error is returned as it is.
 func credentialRefusal(err error) error {
-	if errors.Is(err, ErrNoSendKey) {
+	if errors.Is(err, ErrNoSendKey) || errors.Is(err, ErrMalformedKey) {
 		return policyRefused("%v", err)
 	}
 	return err

@@ -82,6 +82,9 @@ type Message struct {
 // JSON returns the request body.
 func (m Message) JSON() ([]byte, error) { return json.Marshal(m) }
 
+// ErrMalformedKey means the stored key holds a byte that no API key holds.
+var ErrMalformedKey = errors.New("resend: the stored API key is malformed (it holds a character outside printable ASCII, such as a line break); import resend-api-key again (docs/runbooks/resend.md)")
+
 // ErrNoSendKey means the vault holds no sending key.
 var ErrNoSendKey = errors.New("resend: not connected; the vault has no resend-api-key (docs/runbooks/resend.md)")
 
@@ -91,9 +94,6 @@ var errUnreadable = errors.New("resend: the answer is not the expected JSON")
 // ErrTooLarge means an answer was bigger than the client reads.
 var ErrTooLarge = errors.New("resend: the answer is too large to read")
 
-// errorCodes is the closed list of error types Resend documents (API reference,
-// Errors) that the connector tells apart. An error type that is not in it
-// becomes "other": text from outside never reaches an error as it is.
 var errorCodes = map[string]bool{
 	"validation_error": true, "invalid_idempotency_key": true, "missing_api_key": true,
 	"restricted_api_key": true, "invalid_permission": true, "suspended_api_key": true,
@@ -103,6 +103,8 @@ var errorCodes = map[string]bool{
 	"missing_required_field": true, "missing_required_parameter": true,
 	"daily_quota_exceeded": true, "monthly_quota_exceeded": true, "rate_limit_exceeded": true,
 	"email_above_quota": true, "application_error": true, "service_unavailable": true,
+	"resource_locked": true, "dns_lookup_failed": true, "invalid_api_key": true, "invalid_from_address": true,
+	"invalid_access": true, "invalid_region": true, "security_error": true, "internal_server_error": true,
 }
 
 // APIError is an answer that is not a success. It holds the status, a word from
@@ -193,6 +195,14 @@ func (c *Client) key(ctx context.Context) (string, error) {
 	if tok == "" {
 		return "", &notSentError{ErrNoSendKey}
 	}
+	// A key is printable ASCII, `!` to `~`, and nothing else: a newline, a NUL or any
+	// other byte in a header value is refused by Go before anything is written, which
+	// would otherwise read as a send that may have gone. Refuse it here, as not sent.
+	for i := 0; i < len(tok); i++ {
+		if tok[i] < '!' || tok[i] > '~' {
+			return "", &notSentError{ErrMalformedKey}
+		}
+	}
 	if c.cfg.Registry != nil {
 		// Every call: the registry may have been cleared since, and a key that is
 		// not registered would reach a log unmasked.
@@ -216,8 +226,11 @@ const sendPath = "/emails"
 
 // Send posts one message. key is the Idempotency-Key header: use
 // [IdempotencyKey] of the execution id. It returns the id Resend gave the
-// message, as Resend wrote it: the adapter cleans it. The message is sent at
-// most once by this method; it never retries.
+// message, as Resend wrote it: the adapter cleans it. This method makes one call and
+// does not retry. Go's HTTP transport, below it, may replay the identical request
+// (same body, same Idempotency-Key) once if a warm keep-alive connection drops after
+// the server took the message; Resend then sees one key and sends one message. That is
+// why the key is sent on every send: it is what makes the replay safe.
 //
 // Resend keeps an idempotency key for 24 hours (API reference, Send Email; Idempotency
 // Keys). Within that time a second request with the same key and the same body

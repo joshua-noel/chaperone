@@ -88,6 +88,11 @@ var patterns = []pattern{
 	//   "xoxp-111-222-333-d6bc76"
 	{"slack-token", regexp.MustCompile(`xox[abposr]-[0-9]+-[A-Za-z0-9\-]{12,}`)},
 	{"stripe-key", regexp.MustCompile(`\bsk_(?:live|test)_[A-Za-z0-9]{16,}`)},
+	// Resend API key: "re_", 8 letters and digits, "_", 24 letters and digits. That is the shape of the one key in
+	// Resend's documentation (API reference, Create API key) and of the key fixtures in its official SDK; no example
+	// key is written here, because a host's secret scanner rightly refuses it. The lengths are exact: a looser rule also
+	// masked ordinary code names followed by a hash. The stored key itself is masked by value; this rule is a backstop.
+	{"resend-api-key", regexp.MustCompile(`\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{24}\b`)},
 	{"chaperone-key", regexp.MustCompile(`chap_key_[A-Za-z0-9_\-]{43}`)}, // ADR-008: a custom key is never in any text, with or without the registry
 }
 
