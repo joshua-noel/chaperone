@@ -36,7 +36,8 @@ func newRig(t testing.TB, canary string) *conformance.Rig {
 	fake.AddItem(@{.Name}@test.Item{ID: "item-1", Title: "First item", Body: "A short body."})
 	reg := redact.NewRegistry()
 	client, err := NewClient(ClientConfig{
-		BaseURL:    fake.URL,
+		BaseURL:    @{.Name}@test.BaseURL,
+		HTTP:       fake.HTTPClient(),
 		Credential: func(context.Context) (string, error) { return canary, nil },
 		Registry:   reg,
 	})

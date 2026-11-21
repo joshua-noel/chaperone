@@ -279,7 +279,7 @@ func TestGetWithholdsText(t *testing.T) {
 func TestGetRefusesAnIssueOfAnotherProjectWithoutItsText(t *testing.T) {
 	e := newEnv(t, nil)
 	out := e.run(OpGet, issOtherProj, nil)
-	failedWith(t, out, "does not list")
+	failedWith(t, out, "is not in a project that the policy")
 	if all := asJSON(t, out.Result); strings.Contains(all, "Not for the orchestrator") || strings.Contains(all, Sensitive) {
 		t.Errorf("the outcome holds the issue's text: %s", all)
 	}
@@ -360,7 +360,7 @@ func TestProjectChangedBetweenCheckAndWriteStopsTheWrite(t *testing.T) {
 			t.Fatalf("%s: Check: %v", c.op, err)
 		}
 		e.fake.Edit(issUnresolved, func(is *sentrytest.Issue) { is.Project = "billing" })
-		failedWith(t, e.run(c.op, issUnresolved, c.params), "does not list")
+		failedWith(t, e.run(c.op, issUnresolved, c.params), "is not in a project that the policy")
 		e.fake.Edit(issUnresolved, func(is *sentrytest.Issue) { is.Project = "web" })
 	}
 	if e.fake.WriteCalls() != 0 {
@@ -600,4 +600,141 @@ func mustExec(t *testing.T, a ops.Adapter, q *ops.Request) ops.Outcome {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// ---- review fixes ------------------------------------------------------------------
+
+// Secret-shaped text of the formats a monitored program may print is withheld
+// from titles and culprits, in a list and in a read of one issue.
+func TestTitlesAndCulpritsWithSecretShapesAreWithheld(t *testing.T) {
+	for name, secret := range map[string]string{
+		"github":         "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+		"sentry user":    "sntryu_" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"sentry org":     "sntrys_" + "eyJpYXQiOjE2OTkwMDAwMDAuMTIzLCJ1cmwiOiJodHRwczovL3NlbnRyeS5pbyJ9",
+		"aws":            "AKIA" + "IOSFODNN7EXAMPLE",
+		"slack":          "xoxb-" + "123456789012-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx",
+		"stripe live":    "sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc",
+		"stripe test":    "sk_test_" + "4eC39HqLyjWDarjtT1zdp7dc",
+		"in the culprit": "",
+	} {
+		e := newEnv(t, nil)
+		title, culprit := "failed with "+secret, "app.cart"
+		if secret == "" {
+			secret = "AKIA" + "IOSFODNN7EXAMPLE"
+			title, culprit = "plain title", "in "+secret
+		}
+		e.fake.Edit(issUnresolved, func(is *sentrytest.Issue) { is.Title, is.Culprit = title, culprit })
+		for _, op := range []struct {
+			name, ref string
+			params    map[string]any
+		}{{OpList, "web", nil}, {OpGet, issUnresolved, nil}} {
+			res := mustSucceed(t, e.run(op.name, op.ref, op.params))
+			if all := asJSON(t, res); strings.Contains(all, secret) || !strings.Contains(all, `"withheld":true`) {
+				t.Errorf("%s, %s: the secret is returned, or the item is not marked withheld: %s", name, op.name, all)
+			}
+		}
+	}
+}
+
+// A frame keeps the last two components of its file name and nothing from ? or #.
+func TestShortPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/home/alice/secret-project/app.py":                      "secret-project/app.py",
+		"C:\\work\\shop\\app\\cart.py":                           "app/cart.py",
+		"https://app.example.org/static/app.js?session=abcdef01": "static/app.js",
+		"https://app.example.org/static/app.js#token=abc":        "static/app.js",
+		"app.py":       "app.py",
+		"app/cart.py":  "app/cart.py",
+		"/app.py":      "app.py",
+		"/a/b/c/":      "b/c",
+		"?session=abc": "",
+		"":             "",
+	} {
+		if got := shortPath(in); got != want {
+			t.Errorf("shortPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGetReturnsShortFramePathsOnly(t *testing.T) {
+	e := newEnv(t, nil)
+	e.fake.Edit(issUnresolved, func(is *sentrytest.Issue) {
+		ev := *is.Event
+		ev.Exceptions = []sentrytest.Exception{{Type: "E", Frames: []sentrytest.Frame{
+			{Filename: "https://app.example.org/static/app.js?session=abcdef0123456789", Function: "a", Line: 1},
+			{Filename: "/home/alice/secret-project/app.py", Function: "b", Line: 2},
+		}}}
+		is.Event = &ev
+	})
+	ev := mustSucceed(t, e.run(OpGet, issUnresolved, nil))["latest_event"].(map[string]any)
+	stack := ev["stack"].([]any)
+	if stack[0].(map[string]any)["file"] != "secret-project/app.py" || stack[1].(map[string]any)["file"] != "static/app.js" {
+		t.Errorf("stack: %v", stack)
+	}
+	all := asJSON(t, ev)
+	for _, banned := range []string{"alice", "session", "example.org", "/home"} {
+		if strings.Contains(all, banned) {
+			t.Errorf("the event holds %q: %s", banned, all)
+		}
+	}
+}
+
+// An entry that is not an exception is read for its type and nothing else is
+// kept, whatever the order of its keys.
+func TestEventEntriesOtherThanExceptionsKeepNothing(t *testing.T) {
+	for _, in := range []string{
+		`{"type":"request","data":{"headers":[["Cookie","sensitive-1"]]}}`,
+		`{"data":{"headers":[["Cookie","sensitive-1"]]},"type":"request"}`,
+		`{"type":"breadcrumbs","data":{"values":[{"message":"sensitive-1"}]}}`,
+		`{"data":{"values":[{"type":"X"}]}}`, // no type at all
+	} {
+		var e eventEntry
+		if err := e.UnmarshalJSON([]byte(in)); err != nil || e.exc != nil {
+			t.Errorf("%s: err %v, kept %+v", in, err, e.exc)
+		}
+	}
+	var e eventEntry
+	if err := e.UnmarshalJSON([]byte(`{"data":{"values":[{"type":"ValueError","value":"sensitive-1"}]},"type":"exception"}`)); err != nil || e.exc == nil || e.exc.Values[0].Type != "ValueError" {
+		t.Errorf("an exception entry: %v %+v", err, e.exc)
+	}
+	if err := e.UnmarshalJSON([]byte(`{"type":`)); err == nil {
+		t.Error("a broken entry was accepted")
+	}
+}
+
+// A refusal never names a project, a member or an organisation that the policy
+// does not list.
+func TestRefusalsDoNotEchoWhatThePolicyDoesNotList(t *testing.T) {
+	e := newEnv(t, nil)
+	var texts []string
+	for _, op := range []string{OpResolve, OpUnresolve, OpAssign, OpComment, OpGet} {
+		params := map[string]any(nil)
+		switch op {
+		case OpAssign:
+			params = map[string]any{"to": "dev@example.com"}
+		case OpComment:
+			params = map[string]any{"body": "a note"}
+		}
+		if _, err := e.check(op, issOtherProj, params); err != nil {
+			texts = append(texts, err.Error())
+		}
+		out := e.run(op, issOtherProj, params)
+		texts = append(texts, fmt.Sprint(out.Result["error"]))
+	}
+	_, err := e.check(OpList, "billing", nil)
+	texts = append(texts, err.Error())
+	_, err = e.check(OpAssign, issUnresolved, map[string]any{"to": "stranger@example.com"})
+	texts = append(texts, err.Error())
+	out := e.run(OpAssign, issUnresolved, map[string]any{"to": "stranger@example.com"})
+	texts = append(texts, fmt.Sprint(out.Result["error"]))
+	if len(texts) < 12 {
+		t.Fatalf("only %d refusals were collected", len(texts))
+	}
+	for _, text := range texts {
+		for _, banned := range []string{"billing", "BILLING", "stranger", "acme"} {
+			if strings.Contains(text, banned) {
+				t.Errorf("a refusal names %q: %s", banned, text)
+			}
+		}
+	}
 }

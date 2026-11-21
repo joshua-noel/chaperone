@@ -134,6 +134,13 @@ func TestPatternShapes(t *testing.T) {
 		{"google-oauth-token", "ya29." + randB64URL(t, 120)},
 		{"google-refresh-token", "1//" + randB64URL(t, 60)},
 		{"google-client-secret", "GOCSPX-" + randB64URL(t, 28)},
+		{"sentry-token", "sntryu_" + randB64URL(t, 64)},
+		{"sentry-token", "sntrys_" + randB64URL(t, 120)},
+		{"aws-access-key-id", "AKIA" + "IOSFODNN7EXAMPLE"},
+		{"slack-token", "xoxb-" + "123456789012-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx"},
+		{"slack-token", "xoxp-" + "123456789012-1234567890123"},
+		{"stripe-key", "sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc"},
+		{"stripe-key", "sk_test_" + "4eC39HqLyjWDarjtT1zdp7dc"},
 		{"jwt", "eyJ" + randB64URL(t, 30) + ".eyJ" + randB64URL(t, 60) + "." + randB64URL(t, 43)},
 	}
 	for _, c := range cases {
@@ -144,6 +151,20 @@ func TestPatternShapes(t *testing.T) {
 		}
 		if len(res.Hits) != 1 || res.Hits[0].Rule != rule || res.Hits[0].Count != 1 {
 			t.Errorf("%s: hits %+v", rule, res.Hits)
+		}
+	}
+}
+
+// The new shape rules are anchored tightly: ordinary words and near misses are left alone.
+func TestSecretShapeRulesLeaveOrdinaryTextAlone(t *testing.T) {
+	r := NewRegistry()
+	for _, in := range []string{
+		"the sntryu_ prefix and sntrys_ short", "sntryu_tooShort", "MAKIAIOSFODNN7EXAMPLEX", "AKIA", "AKIAshort", "akiaiosfodnn7example",
+		"xoxb- and xoxz-1234567890123456", "xoxb-short", "sk_live_short", "task_live_4eC39HqLyjWDarjtT1zdp7dc", "desk_test_4eC39HqLyjWDarjtT1zdp7dc",
+		"Rack and Pinion AKIRA", "ValueError: bad total (cart 4501234567)",
+	} {
+		if out, res := r.Redact(in); res.Blocked() || out != in {
+			t.Errorf("%q changed: %q %+v", in, out, res.Hits)
 		}
 	}
 }

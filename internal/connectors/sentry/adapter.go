@@ -195,7 +195,7 @@ func (res resolved) fence(r *ops.Request, id string, is Issue) (string, error) {
 			return p, nil
 		}
 	}
-	return "", scopeRefused("issue %s is in project %s, which the policy of project %s does not list (sentry.projects); nothing was done", id, clip(untrusted.Line(is.Project.Slug), 60), clip(r.Project, 60))
+	return "", scopeRefused("issue %s is not in a project that the policy of project %s lists (sentry.projects); nothing was done", id, clip(r.Project, 60))
 }
 
 // readIssue reads the issue and applies the fence. It is the one function every

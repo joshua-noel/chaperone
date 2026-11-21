@@ -43,8 +43,8 @@ ops:
   # `sentry:` block, and touches only the Sentry projects that block lists. The caps bound the load on Sentry.
   errors.list:          { enabled: false, rate_per_minute: 12, rate_per_hour: 300 }
   errors.get:           { enabled: false, rate_per_minute: 12, rate_per_hour: 300 }
-  errors.resolve:       { enabled: false, rate_per_minute: 6,  rate_per_hour: 60 }
-  errors.unresolve:     { enabled: false, rate_per_minute: 6,  rate_per_hour: 60 }
+  errors.resolve:       { enabled: false, rate_per_minute: 2,  rate_per_hour: 10 }  # what a resolve starts in Sentry (a ticket that closes, a page) is not undone: keep this low
+  errors.unresolve:     { enabled: false, rate_per_minute: 2,  rate_per_hour: 10 }
   errors.assign:        { enabled: false, rate_per_minute: 6,  rate_per_hour: 30 }
   errors.comment:       { enabled: false, rate_per_minute: 6,  rate_per_hour: 30 }
   # Read-only PR views (ADR-002 amendment 12): on since the operator's policy PR. For the orchestrator token only (no profile lists them);

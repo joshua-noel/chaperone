@@ -70,6 +70,12 @@ var patterns = []pattern{
 	{"google-refresh-token", regexp.MustCompile(`1//[0-9A-Za-z_\-]{30,}`)},
 	{"google-client-secret", regexp.MustCompile(`GOCSPX-[0-9A-Za-z_\-]{20,}`)},
 	{"jwt", regexp.MustCompile(`eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]*`)},
+	// Sentry's own token formats: a user token "sntryu_" and an organisation token "sntrys_".
+	{"sentry-token", regexp.MustCompile(`sntry[us]_[A-Za-z0-9+/=_\-]{20,}`)},
+	// An AWS access key id: AKIA and 16 capitals or digits, not inside a longer word.
+	{"aws-access-key-id", regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)},
+	{"slack-token", regexp.MustCompile(`xox[abposr]-[A-Za-z0-9\-]{10,}`)},
+	{"stripe-key", regexp.MustCompile(`\bsk_(?:live|test)_[A-Za-z0-9]{16,}`)},
 	{"chaperone-key", regexp.MustCompile(`chap_key_[A-Za-z0-9_\-]{43}`)}, // ADR-008: a custom key is never in any text, with or without the registry
 }
 

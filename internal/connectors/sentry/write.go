@@ -167,7 +167,7 @@ func (a *assignAdapter) parse(r *ops.Request) (assignParams, error) {
 		if len(res.pol.Assignees) == 0 {
 			return p, policyRefused("assignee_in_policy_list: errors.assign is refused for project %s: its policy file lists no sentry.assignees", clip(r.Project, 60))
 		}
-		return p, policyRefused("assignee_in_policy_list: %s is not a member that errors.assign may use for project %s; the policy lists %d", clip(to, 60), clip(r.Project, 60), len(res.pol.Assignees))
+		return p, policyRefused("assignee_in_policy_list: that member is not one that errors.assign may use for project %s (sentry.assignees)", clip(r.Project, 60))
 	}
 	p.res, p.member = res, member
 	return p, nil

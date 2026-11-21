@@ -25,6 +25,7 @@ func TestNoteAllowsPlainText(t *testing.T) {
 		"snake_case_names are fine",
 		"Ça marche déjà, ça va bien. Это работает. 日本語のメモ。",
 		"Done \u2705",
+		"a path app/cart.py: line 3, and a ratio 3:4",
 		strings.Repeat("a", sentryspec.MaxCommentBytes),
 	} {
 		if err := b.guardNote(s); err != nil {
@@ -68,6 +69,11 @@ func TestNoteRefusesWhatCouldMentionOrLinkOrHide(t *testing.T) {
 		"a NUL":                    {"a\x00b", ops.CodeParamsInvalid},
 		"bytes that are not UTF-8": {"a\xffb", ops.CodeParamsInvalid},
 		"too long":                 {strings.Repeat("a", sentryspec.MaxCommentBytes+1), ops.CodeParamsInvalid},
+		"a web address":            {"see https://example.org/x", ops.CodePolicyRefused},
+		"a web address, in caps":   {"see HTTPS://EXAMPLE.ORG", ops.CodePolicyRefused},
+		"a scheme only":            {"ftp:// is old", ops.CodePolicyRefused},
+		"a www address":            {"see www.example.org", ops.CodePolicyRefused},
+		"a www address, in caps":   {"see WWW.example.org", ops.CodePolicyRefused},
 		"a secret":                 {"the key is ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8", ops.CodeRedactionBlocked},
 	} {
 		err := b.guardNote(c.text)

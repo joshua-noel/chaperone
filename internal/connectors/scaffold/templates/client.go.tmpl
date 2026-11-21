@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -39,9 +38,10 @@ type Item struct {
 
 // ClientConfig builds a [Client].
 type ClientConfig struct {
-	// BaseURL is the service's root. It must be https, except for a loopback
-	// address (the fake of the tests): a credential sent in clear to another
-	// host would be readable on the wire.
+	// BaseURL is the service's root. It must be https: a credential sent in
+	// clear would be readable on the wire. There is no exception for tests: the
+	// fake is an https server, and the test gives the client an HTTP client that
+	// trusts the fake's certificate and sends every request to it.
 	BaseURL string
 	// Credential returns the credential. It is called on every request, so a
 	// rotated secret is picked up, and the client keeps no copy.
@@ -49,7 +49,9 @@ type ClientConfig struct {
 	// Registry, when set, learns each credential the client uses, so the
 	// redaction check masks it wherever it would appear.
 	Registry *redact.Registry
-	// HTTP defaults to a client with a 15 s timeout that follows no redirect.
+	// HTTP defaults to a client with a 15 s timeout. It never follows a redirect,
+	// whatever the client given: a redirect could carry the credential to
+	// another host.
 	HTTP *http.Client
 }
 
@@ -66,26 +68,19 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if err != nil || u.Host == "" {
 		return nil, errors.New("@{.Name}@: BaseURL is not a URL")
 	}
-	switch u.Scheme {
-	case "https":
-	case "http":
-		if ip := net.ParseIP(u.Hostname()); ip == nil || !ip.IsLoopback() {
-			return nil, errors.New("@{.Name}@: BaseURL is plain http to a host that is not a loopback address")
-		}
-	default:
-		return nil, fmt.Errorf("@{.Name}@: BaseURL has scheme %q", u.Scheme)
+	if u.Scheme != "https" {
+		return nil, fmt.Errorf("@{.Name}@: BaseURL has scheme %q, not https", u.Scheme)
 	}
 	if cfg.Credential == nil {
 		return nil, errors.New("@{.Name}@: the client needs a Credential")
 	}
 	hc := cfg.HTTP
 	if hc == nil {
-		hc = &http.Client{
-			Timeout:       15 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}
+		hc = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &Client{cfg: cfg, base: strings.TrimRight(cfg.BaseURL, "/"), hc: hc}, nil
+	copied := *hc // the caller's client is not changed
+	copied.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Client{cfg: cfg, base: strings.TrimRight(cfg.BaseURL, "/"), hc: &copied}, nil
 }
 
 // get reads one JSON document. The credential goes in the Authorization header

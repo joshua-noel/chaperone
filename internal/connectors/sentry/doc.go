@@ -17,8 +17,8 @@
 //     only to a base URL that the policy rule accepts, follows no redirect, and
 //     never puts the token, a URL or text from Sentry in an error. It decodes the
 //     fields that the connector lists and no others, so request bodies, cookies,
-//     headers, user data and local variables of an event never reach chapd's
-//     memory as data, let alone a result.
+//     headers, user data and local variables of an event are not kept, let alone
+//     returned. The answer is read whole into memory while it is decoded.
 //   - token.go reads the auth token from the vault.
 //   - sentrytest/server.go is a fake Sentry for the tests.
 //   - conformance_test.go runs the shared connector suite

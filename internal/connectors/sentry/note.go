@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"fmt"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -79,6 +80,10 @@ func (b base) guardNote(s string) error {
 		default:
 			return &ops.Refusal{Code: ops.CodePolicyRefused, Why: clip(fmt.Sprintf("note_plain_text: a note is plain text: letters, digits, spaces, line breaks and these marks: %s; the character U+%04X is not allowed", noteMarks, r), 400)}
 		}
+	}
+	// A bare link lets a person who clicks it carry data to a host the agent chose.
+	if low := strings.ToLower(s); strings.Contains(low, "://") || strings.Contains(low, "www.") {
+		return &ops.Refusal{Code: ops.CodePolicyRefused, Why: "note_no_link: a note may not hold a web address (`://` or `www.`): a link would take a person who clicks it to a host the agent chose"}
 	}
 	return b.scan("body", s)
 }

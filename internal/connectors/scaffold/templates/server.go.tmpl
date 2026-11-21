@@ -1,5 +1,11 @@
 // Package @{.Name}@test is a fake @{.Name}@ service for the connector's tests. It
-// never talks to the network: it listens on a loopback port that the test owns.
+// never talks to the network: it is an https server on a loopback port that the
+// test owns.
+//
+// The connector's client accepts https only, with no exception for a test. The
+// test builds the client with [BaseURL] and [Server.HTTPClient]: that HTTP client
+// trusts the fake's certificate and sends every request to the fake, whatever
+// host the URL names.
 //
 // The package does not import the connector, so the connector's own tests can
 // import it without a cycle.
@@ -11,13 +17,22 @@
 package @{.Name}@test
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+// BaseURL is the address a test gives the client. [Server.HTTPClient] sends it
+// to the fake.
+const BaseURL = "https://@{.Name}@.example.com"
 
 // Item is one item of the fake service.
 type Item struct {
@@ -48,9 +63,27 @@ type Server struct {
 func New(t testing.TB) *Server {
 	t.Helper()
 	s := &Server{token: "fake-token", items: map[string]*Item{}}
-	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
+	s.Server = httptest.NewTLSServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
 	return s
+}
+
+// HTTPClient returns an HTTP client that trusts the fake's certificate and
+// sends every request to the fake, whatever host the URL names. It follows
+// redirects as Go's default client does: the connector is the one that must not.
+func (s *Server) HTTPClient() *http.Client {
+	pool := x509.NewCertPool()
+	pool.AddCert(s.Certificate())
+	addr := s.Listener.Addr().String()
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "example.com"}, // the name the test certificate holds
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, addr)
+			},
+		},
+	}
 }
 
 // AddItem adds an item, or replaces the one with the same id.

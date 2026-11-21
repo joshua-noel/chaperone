@@ -265,7 +265,8 @@ func retryAfter(h http.Header) time.Duration {
 // Each type below lists the fields chapd reads and no others. encoding/json
 // drops every field that is not listed, so what an event or an issue carries
 // beyond them (request bodies, cookies, headers, user data, local variables,
-// tags, breadcrumbs, the exception's message) is never held by the program.
+// tags, breadcrumbs, the exception's message) is not kept. The answer itself is
+// read into memory whole, up to the cap, while it is decoded.
 
 // numString reads a JSON string or number as text.
 type numString string
@@ -386,51 +387,71 @@ type EventSummary struct {
 	Frames []Frame
 }
 
+// excData is the part of an exception entry the connector reads. The exception's
+// message ("value") is not in it.
+type excData struct {
+	Values []struct {
+		Type       string `json:"type"`
+		Stacktrace *struct {
+			Frames []struct {
+				Filename string `json:"filename"`
+				Function string `json:"function"`
+				LineNo   *int   `json:"lineNo"`
+				InApp    bool   `json:"inApp"`
+			} `json:"frames"`
+		} `json:"stacktrace"`
+	} `json:"values"`
+}
+
+// eventEntry is one element of an event's entries. Only an exception entry is
+// kept; for any other kind (request, breadcrumbs, and the rest) the decoder reads
+// the type, sees that it is not an exception, and keeps nothing of the entry.
+type eventEntry struct{ exc *excData }
+
+func (e *eventEntry) UnmarshalJSON(b []byte) error {
+	var head struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(b, &head); err != nil {
+		return err
+	}
+	if head.Type != "exception" {
+		return nil
+	}
+	var full struct {
+		Data excData `json:"data"`
+	}
+	if err := json.Unmarshal(b, &full); err != nil {
+		return err
+	}
+	e.exc = &full.Data
+	return nil
+}
+
 // LatestEvent reads the issue's latest event and keeps its essentials: the id,
 // the time, and the type and stack frames of the exception. ErrNotFound means
-// the issue has no event.
+// the issue has no event. The answer is read into memory whole, up to the cap,
+// while it is decoded, and dropped after; what is kept is the listed fields.
 func (c *Client) LatestEvent(ctx context.Context, s Scope, id string) (EventSummary, error) {
 	path, err := issuePath(s, id)
 	if err != nil {
 		return EventSummary{}, err
 	}
 	var ev struct {
-		EventID     string `json:"eventID"`
-		DateCreated string `json:"dateCreated"`
-		Entries     []struct {
-			Type string          `json:"type"`
-			Data json.RawMessage `json:"data"`
-		} `json:"entries"`
+		EventID     string       `json:"eventID"`
+		DateCreated string       `json:"dateCreated"`
+		Entries     []eventEntry `json:"entries"`
 	}
 	if _, err := c.do(ctx, http.MethodGet, s, path+"events/latest/", nil, nil, &ev); err != nil {
 		return EventSummary{}, err
 	}
 	sum := EventSummary{ID: ev.EventID, Date: ev.DateCreated}
 	for _, e := range ev.Entries {
-		if e.Type != "exception" {
+		if e.exc == nil || len(e.exc.Values) == 0 {
 			continue
 		}
-		var data struct {
-			Values []struct {
-				Type       string `json:"type"`
-				Stacktrace *struct {
-					Frames []struct {
-						Filename string `json:"filename"`
-						Function string `json:"function"`
-						LineNo   *int   `json:"lineNo"`
-						InApp    bool   `json:"inApp"`
-					} `json:"frames"`
-				} `json:"stacktrace"`
-			} `json:"values"`
-		}
-		if err := json.Unmarshal(e.Data, &data); err != nil {
-			return EventSummary{}, errUnreadable
-		}
-		if len(data.Values) == 0 {
-			break
-		}
 		// The values run from the oldest exception to the one that was raised.
-		raised := data.Values[len(data.Values)-1]
+		raised := e.exc.Values[len(e.exc.Values)-1]
 		sum.ExceptionType = raised.Type
 		if raised.Stacktrace != nil {
 			// The frames run from the outermost call to the innermost.

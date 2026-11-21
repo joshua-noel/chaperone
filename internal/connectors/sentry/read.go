@@ -3,6 +3,7 @@ package sentry
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/joshua-noel/chaperone/internal/connectors/sentry/sentryspec"
 	"github.com/joshua-noel/chaperone/internal/ops"
@@ -32,7 +33,7 @@ func (a *listAdapter) parse(r *ops.Request) (listParams, error) {
 		return p, paramsInvalid("target.ref must be a Sentry project slug, such as web")
 	}
 	if !res.pol.ProjectAllowed(r.Target.Ref) {
-		return p, scopeRefused("project %s is not listed in sentry.projects of project %s; the Sentry ops touch listed projects only", clip(r.Target.Ref, 60), clip(r.Project, 60))
+		return p, scopeRefused("that Sentry project is not listed in sentry.projects of project %s; the Sentry ops touch listed projects only", clip(r.Project, 60))
 	}
 	if err := onlyParams(r.Params, sentryspec.List.ParamNames()...); err != nil {
 		return p, err
@@ -169,16 +170,20 @@ func (a *getAdapter) event(ev EventSummary) map[string]any {
 	if eventIDRE.MatchString(ev.ID) {
 		m["event_id"] = ev.ID
 	}
+	// A frame's file name is cut before anything is scanned or returned: Sentry sends
+	// absolute paths, and script URLs with a query that can hold a session.
+	frames := make([]Frame, len(ev.Frames))
+	copy(frames, ev.Frames)
 	texts := []string{ev.ExceptionType}
-	for _, f := range ev.Frames {
-		texts = append(texts, f.File, f.Function)
+	for i := range frames {
+		frames[i].File = shortPath(frames[i].File)
+		texts = append(texts, frames[i].File, frames[i].Function)
 	}
 	if a.looksSecret(texts...) {
 		m["stack_withheld"] = true
 		return m
 	}
 	m["exception_type"] = line(ev.ExceptionType, maxType)
-	frames := ev.Frames
 	if len(frames) > maxFrames {
 		frames, m["stack_truncated"] = frames[:maxFrames], true
 	}
@@ -192,4 +197,24 @@ func (a *getAdapter) event(ev EventSummary) map[string]any {
 	}
 	m["stack"] = out
 	return m
+}
+
+// shortPath keeps the last two components of a frame's file name and nothing
+// from a "?" or a "#" on. "/home/alice/shop/app/cart.py" gives "app/cart.py", and
+// "https://app.example.org/static/app.js?session=abc" gives "static/app.js". A name
+// with one component is returned as it is. Both kinds of slash separate components.
+func shortPath(name string) string {
+	if i := strings.IndexAny(name, "?#"); i >= 0 {
+		name = name[:i]
+	}
+	var parts []string
+	for _, p := range strings.Split(strings.ReplaceAll(name, "\\", "/"), "/") {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	if len(parts) > 2 {
+		parts = parts[len(parts)-2:]
+	}
+	return strings.Join(parts, "/")
 }

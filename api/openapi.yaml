@@ -1827,7 +1827,7 @@ components:
         cursor: { type: string, pattern: "^[0-9]{1,20}:[0-9]{1,10}:[01]$" }
       additionalProperties: false
     ParamsErrorsGet:
-      description: "`errors.get` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`, the numeric id; the issue must be in a project of the project's `sentry.projects`. No params. Returns the issue's title, culprit, level, status, event count, first and last seen, and from the latest event the id, the time, the exception type and at most 10 stack frames (file, line, function, in-app), innermost first. It never returns request bodies, cookies, headers, user data, local variables, tags, breadcrumbs or exception messages: the connector decodes the fields it lists and no others. Text is from Sentry and is untrusted."
+      description: "`errors.get` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`, the numeric id; the issue must be in a project of the project's `sentry.projects`. No params. Returns the issue's title, culprit, level, status, event count, first and last seen, and from the latest event the id, the time, the exception type and at most 10 stack frames (the last two parts of the file name, line, function, in-app), innermost first. It never returns request bodies, cookies, headers, user data, local variables, tags, breadcrumbs or exception messages: the connector decodes the fields it lists and no others. Text is from Sentry and is untrusted."
       type: object
       additionalProperties: false
     ParamsErrorsResolve:
@@ -1846,7 +1846,7 @@ components:
       required: [to]
       additionalProperties: false
     ParamsErrorsComment:
-      description: "`errors.comment` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. `body` is plain text of up to 2000 bytes: letters, digits, spaces, line breaks and the marks . , : ; ! ? ( ) ' - _ / + = % and the double quote. A note with an at sign, a number sign, markup, a link bracket, an invisible character or text shaped like a secret is refused, so a note cannot mention a person or a team. Sentry has no key that makes a repeat safe, so a repeat of one execution posts again."
+      description: "`errors.comment` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. `body` is plain text of up to 2000 bytes: letters, digits, spaces, line breaks and the marks . , : ; ! ? ( ) ' - _ / + = % and the double quote. A note with an at sign, a number sign, markup, a link bracket, a web address (`://` or `www.`), an invisible character or text shaped like a secret is refused, so a note cannot mention a person or a team. Sentry has no key that makes a repeat safe, so a repeat of one execution posts again."
       type: object
       properties:
         body: { type: string, minLength: 1, maxLength: 2000 }
