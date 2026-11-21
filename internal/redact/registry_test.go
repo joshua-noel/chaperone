@@ -160,7 +160,7 @@ func TestSecretShapeRulesLeaveOrdinaryTextAlone(t *testing.T) {
 	r := NewRegistry()
 	for _, in := range []string{
 		"the sntryu_ prefix and sntrys_ short", "sntryu_tooShort", "MAKIAIOSFODNN7EXAMPLEX", "AKIA", "AKIAshort", "akiaiosfodnn7example",
-		"xoxb- and xoxz-1234567890123456", "xoxb-short", "sk_live_short", "task_live_4eC39HqLyjWDarjtT1zdp7dc", "desk_test_4eC39HqLyjWDarjtT1zdp7dc",
+		"xoxb- and xoxz-1234567890123456", "the xoxo-love-letters-collection", "xoxb-notdigits-abcdefgh", "xoxb-short", "sk_live_short", "task_live_4eC39HqLyjWDarjtT1zdp7dc", "desk_test_4eC39HqLyjWDarjtT1zdp7dc",
 		"Rack and Pinion AKIRA", "ValueError: bad total (cart 4501234567)",
 	} {
 		if out, res := r.Redact(in); res.Blocked() || out != in {
