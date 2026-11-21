@@ -102,6 +102,11 @@ jobs:
       - name: go test
         run: go test -count=1 ./...
 
+      # The normal step above prints no per-test output. This one shows what a plain create-new does at a link on this
+      # system (the probe), and which kinds of link the privfile tests made or skipped. Same tests, run again with -v.
+      - name: privfile link probe and tests (verbose)
+        run: go test -count=1 -v -run 'Probe|DoesNotFollow' ./internal/privfile/
+
       - name: build all binaries (linux and windows, CGO off)
         env:
           CHAP_VERSION: ci
@@ -135,6 +140,11 @@ jobs:
 
       - name: go test
         run: go test -count=1 ./...
+
+      # The normal step above prints no per-test output. This one shows what a plain create-new does at a link on this
+      # system (the probe), and which kinds of link the privfile tests made or skipped. Same tests, run again with -v.
+      - name: privfile link probe and tests (verbose)
+        run: go test -count=1 -v -run 'Probe|DoesNotFollow' ./internal/privfile/
 
       - name: build all binaries
         env:
@@ -170,6 +180,11 @@ jobs:
 
       - name: go test
         run: go test -count=1 ./...
+
+      # The normal step above prints no per-test output. This one shows what a plain create-new does at a link on this
+      # system (the probe), and which kinds of link the privfile tests made or skipped. Same tests, run again with -v.
+      - name: privfile link probe and tests (verbose)
+        run: go test -count=1 -v -run 'Probe|DoesNotFollow' ./internal/privfile/
 
       - name: build all binaries (native, CGO off)
         env:

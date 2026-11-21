@@ -3,6 +3,7 @@
 package privfile
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -86,8 +87,18 @@ func (d *Descriptor) Release() { runtime.KeepAlive(d) }
 // Create makes a NEW file at path and opens it for writing. The file is created with the protected, user-only
 // access list in the same call (CREATE_NEW), so it is never readable by anybody else, not even for an instant, and
 // whatever the folder's own access list says is not inherited. It fails if anything exists at path, a link
-// included. The caller's own handle is the only one: it is opened with no sharing for write.
-func Create(path string) (*os.File, error) {
+// included. The call is made with FILE_FLAG_OPEN_REPARSE_POINT: CREATE_NEW alone follows a symbolic link whose
+// target does not exist and creates the target, but a link opened as itself exists, so the call fails with "exists".
+// What was opened is then read back from the handle, and must be a plain file. The caller's own handle is the only
+// one: other openers may read but not write while it is open.
+func Create(path string) (*os.File, error) { return create(path, windows.GENERIC_WRITE|windows.DELETE) }
+
+// CreateReadWrite is Create for a file the caller also reads back (it is opened for reading and writing).
+func CreateReadWrite(path string) (*os.File, error) {
+	return create(path, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.DELETE)
+}
+
+func create(path string, access uint32) (*os.File, error) {
 	d, err := NewDescriptor(windows.NO_INHERITANCE)
 	if err != nil {
 		return nil, err
@@ -97,9 +108,22 @@ func Create(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	h, err := windows.CreateFile(p, windows.GENERIC_WRITE|windows.DELETE, windows.FILE_SHARE_READ, d.Attributes(), windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	h, err := windows.CreateFile(p, access, windows.FILE_SHARE_READ, d.Attributes(), windows.CREATE_NEW,
+		windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
 		return nil, &os.PathError{Op: "create", Path: path, Err: err}
 	}
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+		_ = windows.CloseHandle(h)
+		return nil, &os.PathError{Op: "create", Path: path, Err: err}
+	}
+	if info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 {
+		// Cannot happen for a file CREATE_NEW just made; if it does, what was opened is not ours to write.
+		_ = windows.CloseHandle(h)
+		return nil, &os.PathError{Op: "create", Path: path, Err: errNotPlain}
+	}
 	return os.NewFile(uintptr(h), path), nil
 }
+
+var errNotPlain = errors.New("what was opened is not a plain file")

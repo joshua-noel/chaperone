@@ -16,6 +16,7 @@ import (
 	"github.com/joshua-noel/chaperone/internal/connectors/google"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
+	"github.com/joshua-noel/chaperone/internal/privfile"
 	"github.com/joshua-noel/chaperone/internal/store"
 	"github.com/joshua-noel/chaperone/internal/vault"
 )
@@ -344,7 +345,7 @@ func googleSignInToFile(clientFile, out string, drive bool, timeout time.Duratio
 	if drive {
 		scopes = append(scopes, google.ScopeDrive)
 	}
-	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := privfile.Create(out) // the Google token: private from creation, never through a link
 	if err != nil {
 		fmt.Fprintf(stderr, "chapd: %v\n", err)
 		return 1

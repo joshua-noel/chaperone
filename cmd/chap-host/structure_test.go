@@ -32,7 +32,8 @@ func parseDir(t *testing.T, dir string) map[string]*ast.File {
 
 // A fault in the helper must not reach the vault: it imports neither the
 // vault, the store, nor the redaction registry (which holds secret values).
-// internal/logrot is allowed: it is a stdlib-only rotating log file.
+// internal/logrot is allowed: it is a stdlib-only rotating log file. So is internal/privfile: it makes a new file
+// that only the current user can open and never follows a link (it imports the standard library and x/sys/windows).
 func TestHelperCannotReachVault(t *testing.T) {
 	for _, dir := range []string{".", "../../internal/grant"} {
 		for name, f := range parseDir(t, dir) {
@@ -41,6 +42,7 @@ func TestHelperCannotReachVault(t *testing.T) {
 				if strings.HasPrefix(path, "github.com/joshua-noel/chaperone/") &&
 					path != "github.com/joshua-noel/chaperone/internal/grant" &&
 					path != "github.com/joshua-noel/chaperone/internal/logrot" &&
+					path != "github.com/joshua-noel/chaperone/internal/privfile" &&
 					path != "github.com/joshua-noel/chaperone/internal/version" {
 					t.Errorf("%s/%s imports %s", dir, name, path)
 				}

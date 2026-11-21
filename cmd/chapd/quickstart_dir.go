@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joshua-noel/chaperone/internal/privfile"
 )
 
 // The quickstart's folder rules, in one place. Making an ARBITRARY folder private against other local users
@@ -604,9 +606,11 @@ func reuseFiles(f *quickstartFolder, state *quickstartState) error {
 	return nil
 }
 
-// createExclusive writes data to a NEW file with mode 0600 and fails if the file exists.
+// createExclusive writes data to a NEW file that only this user can open (privfile.Create: mode 0600, or a protected
+// user-only access list on Windows) and fails if anything exists at the path, a link of any kind included. Every
+// first-run file of the quickstart goes through it: the marker, the policy, run-keys.json and the empty state.db.
 func createExclusive(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := privfile.Create(path)
 	if err != nil {
 		return err
 	}

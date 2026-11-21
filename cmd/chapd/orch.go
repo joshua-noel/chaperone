@@ -17,6 +17,7 @@ import (
 	"github.com/joshua-noel/chaperone/internal/localtime"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
+	"github.com/joshua-noel/chaperone/internal/privfile"
 	"github.com/joshua-noel/chaperone/internal/redact"
 	"github.com/joshua-noel/chaperone/internal/runtoken"
 	"github.com/joshua-noel/chaperone/internal/store"
@@ -228,7 +229,9 @@ func writePrivate(path string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, ".orch-*.tmp")
+	// A new private file with a random name (privfile): owner-only from the instant it exists, and not a name a link
+	// could be waiting at. The rename then replaces whatever is at path, a link included, without following it.
+	f, err := privfile.CreateTemp(dir, ".orch-*.tmp")
 	if err != nil {
 		return err
 	}

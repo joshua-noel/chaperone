@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/joshua-noel/chaperone/internal/grant"
+	"github.com/joshua-noel/chaperone/internal/privfile"
 )
 
 // Refusal codes the runner adds to the grant package's.
@@ -175,7 +176,7 @@ func readScript(path string) ([]byte, error) {
 // back and checks its hash, and returns it open for reading from the start.
 // What runs is what was hashed: the launcher reads this file, not the source.
 func stageCopy(path string, script []byte, want string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	f, err := privfile.CreateReadWrite(path) // new, private, and never through a link planted at the path
 	if err != nil {
 		return nil, err
 	}

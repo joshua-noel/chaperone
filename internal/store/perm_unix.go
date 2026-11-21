@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"syscall"
 )
 
 // dbFileMode is the mode of the database and of its -wal and -shm files: the
@@ -19,9 +20,14 @@ const dbFileMode = 0o600
 // tightens it if it exists, before SQLite opens it. SQLite gives the -wal and
 // -shm files the mode of the main file when it creates them, so doing this
 // first means they are never created readable by others. fchmod on the open
-// descriptor ignores the umask and follows no second path lookup.
+// descriptor ignores the umask and follows no second path lookup. A new file is made with O_EXCL, and an existing one
+// is opened with O_NOFOLLOW: a symbolic link at the path (a dangling one would have the target created, a live one
+// have its target chmod-ed) is refused, not followed.
 func prepareDBFile(path string) error {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, dbFileMode)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, dbFileMode)
+	if errors.Is(err, fs.ErrExist) {
+		f, err = os.OpenFile(path, os.O_RDWR|syscall.O_NOFOLLOW, dbFileMode)
+	}
 	if err != nil {
 		return fmt.Errorf("store: create %s: %w", path, err)
 	}
