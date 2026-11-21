@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -264,10 +265,15 @@ func TestEnrolmentRoutesLeakNothingAboutKeysOrApprovers(t *testing.T) {
 		t.Fatal(st)
 	}
 	raw, _ := json.Marshal(start)
-	for _, secret := range []string{boot, bootTok, "operator", "person:", "k-"} {
+	for _, secret := range []string{boot, bootTok, "operator", "person:"} {
 		if strings.Contains(string(raw), secret) {
 			t.Errorf("the start answer holds %q: %s", secret, raw)
 		}
+	}
+	// A key id is "k-" and 16 hex digits. The bare letters "k-" can turn up by chance in the random device code
+	// (base64url), which made this test fail now and then, so the whole shape is looked for.
+	if m := regexp.MustCompile(`k-[0-9a-f]{16}`).FindString(string(raw)); m != "" {
+		t.Errorf("the start answer holds a key id %q: %s", m, raw)
 	}
 	if len(start) != 5 {
 		t.Errorf("the start answer has %d fields: %v", len(start), start)
