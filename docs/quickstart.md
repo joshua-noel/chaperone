@@ -232,7 +232,7 @@ The moment before the first passkey exists is the risky one: whoever opens the a
 
 ## Real GitHub
 
-A real GitHub App is not in this version of the quickstart. `chapd quickstart --playground=false` says so and stops. To use a real repository today, set up the App by hand: [runbooks/github-app-key.md](runbooks/github-app-key.md).
+The playground never talks to the real GitHub. `chapd quickstart --playground=false` and `--github-app-id` say so and stop. To use a real repository, stop the quickstart and run `chapd vault init` and `chapd connect github` on its folder, then start `chapd run` on the same folder. [runbooks/github-app-setup.md](runbooks/github-app-setup.md), section "From the quickstart", lists each command and what changes. That path was tested against a fake GitHub only. To set the App up by hand instead, see "By hand" on the same page.
 
 ## If something goes wrong
 

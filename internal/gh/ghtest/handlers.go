@@ -29,6 +29,11 @@ func (s *Server) routes() http.Handler {
 	h("POST /app/installations/{id}/access_tokens", s.mint)
 	h("GET /repos/{owner}/{repo}/installation", s.findInstallation)
 	h("DELETE /installation/token", s.revoke)
+	h("POST /settings/apps/new", s.newAppPage)
+	h("POST /organizations/{org}/settings/apps/new", s.newAppPage)
+	h("POST /app-manifests/{code}/conversions", s.convertManifest)
+	h("GET /app", s.getApp)
+	h("GET /app/installations", s.listAppInstallations)
 	rp("GET /repos/{owner}/{repo}/pulls/{n}", (*Server).getPull, need{"pull_requests", "read", false})
 	rp("GET /repos/{owner}/{repo}/pulls/{n}/files", (*Server).listFiles, need{"pull_requests", "read", false})
 	rp("POST /repos/{owner}/{repo}/pulls", (*Server).createPull, need{"pull_requests", "write", false}, need{"contents", "read", true})
@@ -145,15 +150,16 @@ func page(r *http.Request, n int) (int, int) {
 // ---- App endpoints ----
 
 func (s *Server) findInstallation(w http.ResponseWriter, r *http.Request) {
-	if msg := s.verifyJWT(bearer(r)); msg != "" {
+	app, msg := s.verifyApp(bearer(r))
+	if msg != "" {
 		refuse(w, 401, msg)
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, in := range s.installs {
-		if in.Account == r.PathValue("owner") && in.repos[r.PathValue("repo")] != nil {
-			jsonOut(w, 200, map[string]any{"id": in.ID, "app_id": OwnAppID, "account": map[string]any{"login": in.Account}})
+		if in.app == app && in.Account == r.PathValue("owner") && in.repos[r.PathValue("repo")] != nil {
+			jsonOut(w, 200, map[string]any{"id": in.ID, "app_id": appNumericID(app), "account": map[string]any{"login": in.Account}})
 			return
 		}
 	}
@@ -161,7 +167,8 @@ func (s *Server) findInstallation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) mint(w http.ResponseWriter, r *http.Request) {
-	if msg := s.verifyJWT(bearer(r)); msg != "" {
+	app, msg := s.verifyApp(bearer(r))
+	if msg != "" {
 		refuse(w, 401, msg)
 		return
 	}
@@ -177,7 +184,7 @@ func (s *Server) mint(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	in := s.installs[id]
-	if in == nil {
+	if in == nil || in.app != app {
 		refuse(w, 404, "Not Found")
 		return
 	}

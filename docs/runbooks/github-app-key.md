@@ -1,5 +1,7 @@
 # Runbook: rotate the GitHub App key
 
+This page replaces a key that is already in the vault. To make the App and store its first key, see [github-app-setup.md](github-app-setup.md).
+
 The App `chaperone-app` signs a short JWT with its private key to get one-hour installation tokens (ADR-002). The key lives in the vault as secret `github-app-key`; `chapd` decrypts and parses it **on every call**, so a rotation needs no restart. Rotation is the critical op `secrets.write`: you paste the new key in the console and approve its card with Windows Hello (ADR-003, item 5).
 
 **Order matters: keep the old key on GitHub until the new one is proven.** The console does not check that a pasted value is a valid PEM, so a bad paste would break every GitHub call until you rotate again; the old key is your way back.
