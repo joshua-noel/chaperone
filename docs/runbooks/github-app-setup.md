@@ -188,11 +188,20 @@ The guided path records the Client ID, which GitHub recommends as the `iss` of t
 - each refusal of the callback: another host, another origin, `null` origin, another site, not a page load, a wrong or missing or repeated start key, a wrong state (and that guesses do not use up the chance), a second callback, a callback before the start page, a bad code, a wrong method, a path, that nothing is reflected, the deadline, interruption, and a port that `[::1]` does not give;
 - a code from another App with the right state, a wider permission, an event, another owner (including the same manifest and state posted from another personal account, an owner in another case, and an owner with no login) and a key that is not RSA (each stores nothing);
 - that the key, the client secret and the webhook secret are not in the output, in `chapd`'s log, in the database, in the ledger, or in any file of the folder in the clear;
+- the ledger record: two events for `github.app.connect` that verify as a chain, with the App, owner, permissions and groups; none after a refusal; and a refusal to start when the ledger cannot be written;
 - the quickstart folder going through the command and then `chapd run` configuration and a start of `chapd` on it.
 
 **Not executed:** anything against the real GitHub. In particular: that GitHub accepts the manifest as it is (no `hook_attributes`, an empty `default_events`, `public: false`, a `redirect_url` on `localhost`); that its page and its redirect behave as its documentation says (the exact `Origin` and fetch-metadata headers a real browser sends on the redirect back; if they differ, the command refuses the callback and prints the fixed reason, and the fix is a small change to the checks); that the description, permissions and `events` in its answer match the manifest exactly (a mismatch makes the command refuse and store nothing, after the App was made); that a new App's key is accepted at once; that `GET /app` and `GET /app/installations` answer as documented; how a real organization with an App-creation policy behaves. [INFERENCE] These follow GitHub's documentation ("Registering a GitHub App from a manifest"; "REST API endpoints for GitHub Apps"). The first real run needs you at a browser; do it with a throwaway account or organization first and delete the App after.
 
 **Not tested here either:** the Windows install (see the top of this page), a Linux keyring, macOS Keychain.
+
+## What the ledger records
+
+When the key is stored, the command writes two ledger events, `op.request` and `op.result`, for the op `github.app.connect`, by the orchestrator id `operator`. There is no `op.approve`: an offline command has no card, and you running it as the account that runs `chapd` is the authority (the same rule as `chapd orch issue`). The body names the App's id and slug, the account that owns it (a user or an organization), the permissions and the extra groups asked for, and `github-app-key` as the key's vault name. It never holds a key, a secret or the temporary code. A refused setup stores nothing and records nothing.
+
+The command opens the ledger before it asks GitHub for anything. If the ledger cannot be written (for example a broken chain), it stops with "Nothing was started". `-instance` names the ledger chain (default `pc`, as for `chapd run`).
+
+Find the record by the op name in the console **Ledger** page or in the evidence pack ([ledger-evidence-pack.md](ledger-evidence-pack.md)).
 
 ## Starting over
 

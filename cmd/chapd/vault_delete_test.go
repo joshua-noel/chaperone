@@ -67,11 +67,15 @@ func (e *deleteEnv) has(t *testing.T, name string) bool {
 
 func (e *deleteEnv) fileOf(name string) string { return filepath.Join(e.dir, "vault", name+".age") }
 
-// opEvents returns the ledger's op events (name and body) in order.
-func (e *deleteEnv) opEvents(t *testing.T) []string {
+func (e *deleteEnv) opEvents(t *testing.T) []string { return ledgerEventsOf(t, e.db) }
+
+func (e *deleteEnv) verifyLedger(t *testing.T) { verifyLedgerOf(t, e.db) }
+
+// ledgerEventsOf returns every ledger event of the database, in order, as "event_name event-json".
+func ledgerEventsOf(t *testing.T, db string) []string {
 	t.Helper()
 	ctx := context.Background()
-	d, err := store.Open(ctx, e.db)
+	d, err := store.Open(ctx, db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,10 +96,10 @@ func (e *deleteEnv) opEvents(t *testing.T) []string {
 	return out
 }
 
-func (e *deleteEnv) verifyLedger(t *testing.T) {
+func verifyLedgerOf(t *testing.T, db string) {
 	t.Helper()
 	ctx := context.Background()
-	d, err := store.Open(ctx, e.db)
+	d, err := store.Open(ctx, db)
 	if err != nil {
 		t.Fatal(err)
 	}

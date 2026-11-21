@@ -31,10 +31,14 @@ import (
 // vault. See connect_github_flow.go for the local web server and its rules.
 //
 // Like `chapd vault import` and `chapd connect google`, it is an operator
-// command run as the account that runs chapd: it writes no ledger event of its
-// own (the spec has no event for it; docs/runbooks/github-app-setup.md says so).
+// command run as the account that runs chapd. It records the connection in the
+// ledger the way `chapd orch issue` does (operator_op.go): an op.request and an
+// op.result for the op github.app.connect, by the operator, with no approval
+// because an offline command has no card. The spec has no event name for it and
+// none is needed. The record holds the App id, slug and owner and the permissions
+// asked for, never a secret.
 
-const githubConnectUsage = `usage: chapd connect github (-org ORG | -user LOGIN) [-with GROUPS] [-timeout D]   create your own GitHub App, keep its key in the vault
+const githubConnectUsage = `usage: chapd connect github (-org ORG | -user LOGIN) [-with GROUPS] [-timeout D] [-instance NAME]   create your own GitHub App, keep its key in the vault
        chapd connect github status                                         what is saved, then ask GitHub who the App is and where it is installed
        (both take [-db PATH] [-vault-dir D] [-vault-key-dir D] [-vault-wrapper NAME] [-vault-passphrase-fd N];
         see chapd vault for the key wrappers)
@@ -45,6 +49,10 @@ GitHub, where you check the name and press "Create GitHub App". GitHub sends the
 browser back to a port on this computer; the command takes the App's private key
 from GitHub's answer into the vault. The key is never written to a file, printed
 or logged.
+
+The command writes the connection to the ledger (op github.app.connect, by the operator;
+-instance names the ledger chain, default pc): the App id, slug and owner and the
+permissions asked for. It refuses to start when the ledger cannot be written.
 
 The App is private to the account you name, has no webhook, and asks for the
 smallest permissions the shipped GitHub operations need: contents write,
@@ -189,6 +197,7 @@ func githubConnectCmd(args []string, stdout, stderr io.Writer) int {
 	user := fs.String("user", "", "create the App in this personal GitHub account: your login (exactly one of -org and -user is required)")
 	with := fs.String("with", "", "extra permission groups for operations that are off by default: deploy, issues, ci-report (comma-separated)")
 	timeout := fs.Duration("timeout", flowDefaultTimeout, "how long to wait for the browser (at most 30m)")
+	instance := fs.String("instance", "pc", "ledger instance (chain chaperone.<instance>)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -269,7 +278,7 @@ func githubConnectCmd(args []string, stdout, stderr io.Writer) int {
 	if action == "status" {
 		return githubStatus(ctx, v, *db, stdout, stderr)
 	}
-	return githubSetup(ctx, v, *db, *org, *user, perms, *timeout, stdout, stderr)
+	return githubSetup(ctx, v, d, *instance, *db, *org, *user, extras, perms, *timeout, stdout, stderr)
 }
 
 // dbFlag is the flag text that points a command the operator runs next at the same database.
@@ -280,7 +289,7 @@ func dbFlag(db string) string {
 	return " -db " + db
 }
 
-func githubSetup(ctx context.Context, v *vault.Vault, db, org, user string, perms map[string]string, timeout time.Duration, stdout, stderr io.Writer) int {
+func githubSetup(ctx context.Context, v *vault.Vault, d *store.DB, instance, db, org, user string, extras []string, perms map[string]string, timeout time.Duration, stdout, stderr io.Writer) int {
 	// Before anything starts: this command makes a first setup and replaces nothing.
 	switch _, err := v.Info(ctx, gh.AppKeySecretID); {
 	case err == nil:
@@ -294,6 +303,14 @@ func githubSetup(ctx context.Context, v *vault.Vault, db, org, user string, perm
 		fmt.Fprintf(stderr, "chapd: %s already exists. To start over from nothing, both of these must go: that file and the vault secret %s (`chapd vault delete --name %s`) (see docs/runbooks/github-app-setup.md, \"Starting over\")\n", githubAppPath(db), gh.AppKeySecretID, gh.AppKeySecretID)
 		return 1
 	}
+
+	// The ledger is opened before GitHub is asked for anything: a connection that cannot be recorded is not started.
+	led, err := openOperatorLedger(ctx, d, instance, v.Registry())
+	if err != nil {
+		fmt.Fprintf(stderr, "chapd: %v. Nothing was started\n", err)
+		return 1
+	}
+	defer led.Close()
 
 	flow, err := startManifestFlow(flowConfig{
 		WebBase: githubWebBase, Org: org, User: user, Permissions: perms, Timeout: timeout,
@@ -370,6 +387,12 @@ func githubSetup(ctx context.Context, v *vault.Vault, db, org, user string, perm
 	fmt.Fprintf(stdout, "\nGitHub created the App %s for %s (App id %d), the account you named.\nIts private key is in the vault as %s (fingerprint %s). It was not written to a file.\n",
 		cleanText(app.Slug), cleanText(app.OwnerLogin), app.ID, gh.AppKeySecretID, info.Fingerprint)
 
+	// The connection is recorded as soon as the key is stored, before anything that can fail. Never a secret: the App id, slug and owner, and what was asked for.
+	ledgerErr := led.append(ctx, d, githubConnectOp(app.ID, app.Slug, app.OwnerLogin, org != "", extras, perms))
+	if ledgerErr != nil {
+		fmt.Fprintf(stderr, "chapd: the App is connected, but the ledger could not record it: %v\nWrite down for your records: App %s (id %d), owner %s, key stored as %s. The command goes on and will exit with an error\n", ledgerErr, cleanText(app.Slug), app.ID, cleanText(app.OwnerLogin), gh.AppKeySecretID)
+	}
+
 	rec := githubAppRecord{Version: 1, AppID: app.ID, ClientID: app.ClientID, Slug: app.Slug, Owner: app.OwnerLogin, Created: time.Now().UTC().Format(time.RFC3339)}
 	if err := writeGitHubAppRecord(db, rec); err != nil {
 		fmt.Fprintf(stderr, "chapd: the key is stored, but the App could not be recorded: %v\nStart chapd with -github-app-id %s instead\n", err, app.ClientID)
@@ -391,7 +414,41 @@ func githubSetup(ctx context.Context, v *vault.Vault, db, org, user string, perm
 	installURL := githubWebBase + "/apps/" + app.Slug + "/installations/new"
 	fmt.Fprintf(stdout, "\nOne step is left: install the App on the repositories you choose.\n  1. Open %s\n  2. Choose \"Only select repositories\", pick them, and press Install.\n", installURL)
 	fmt.Fprintf(stdout, "You do not copy an installation id. For each repository chapd asks GitHub, with the App's key, which installation covers it.\nTo check, run `chapd connect github status%s`. Then start chapd with the vault open (-vault-dir and -vault-key-dir): it reads %s.\n", dbFlag(db), githubAppFile)
+	if ledgerErr != nil {
+		return 1
+	}
+	fmt.Fprintln(stdout, "The connection is recorded in the ledger (op github.app.connect, by the operator).")
 	return 0
+}
+
+// githubConnectOp is the ledger record of one connection. The permissions and the groups are what was ASKED for in
+// the manifest; GitHub's own answer is checked before the key is stored (ManifestApp.Check), so they are what the App has.
+func githubConnectOp(id int64, slug, owner string, inOrg bool, extras []string, perms map[string]string) operatorOp {
+	slug, owner = cleanText(slug), cleanText(owner)
+	groups := append([]string{}, extras...)
+	sort.Strings(groups)
+	names := make([]string, 0, len(perms))
+	for k := range perms {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	asked := make([]string, 0, len(names))
+	for _, k := range names {
+		asked = append(asked, k+" "+perms[k])
+	}
+	ownerKind := "user"
+	if inOrg {
+		ownerKind = "organization"
+	}
+	pm := make(map[string]any, len(perms))
+	for k, v := range perms {
+		pm[k] = v
+	}
+	return operatorOp{
+		Op: "github.app.connect", Ref: "github-app:" + slug, Reversibility: "compensable",
+		Params: map[string]any{"app_id": id, "slug": slug, "owner": owner, "owner_kind": ownerKind, "groups": groups, "permissions": pm, "key_secret": gh.AppKeySecretID},
+		Body:   fmt.Sprintf("operator connected the GitHub App %s (id %d), owned by the %s %s, with chapd connect github; permissions asked for: %s; extra groups: %s; key stored in the vault as %s", slug, id, ownerKind, owner, bodyList(asked), bodyList(groups), gh.AppKeySecretID),
+	}
 }
 
 // githubClient is the App client for the stored key and the App id given.
