@@ -116,8 +116,12 @@ func TestTheOwnerRevokesAtTheConsoleAndThatStopsTheAgent(t *testing.T) {
 	if _, err := d.Revoke(ctx, "someone-else", key); !errors.Is(err, ErrNotFound) {
 		t.Errorf("another person revokes: %v", err)
 	}
-	if _, err := d.Revoke(ctx, "operator", orchKey.ID); !errors.Is(err, ErrNotFound) {
-		t.Errorf("a person revokes an orchestrator's key: %v", err)
+	// A key an orchestrator owns is the operator's to end too, and ending it is not a stop.
+	if k, err := d.Revoke(ctx, "operator", orchKey.ID); err != nil || k.State != "revoked" || k.StoppedByHuman {
+		t.Errorf("a person revokes an orchestrator's key: %+v %v", k, err)
+	}
+	if stopped, _ := g.s.AgentStopped(ctx, "main", "scout"); stopped {
+		t.Error("the operator's revoke of an orchestrator's key stopped its agent")
 	}
 	k, err := d.Revoke(ctx, "operator", key)
 	if err != nil || k.State != "revoked" || !k.StoppedByHuman {
@@ -303,16 +307,16 @@ func TestRefusedEnrolmentStartsAreWrittenDownOnceAMinuteAndWaitingOnesCanBeCance
 	if err != nil || len(list) != 5 || list[0].Label != "scout" || list[0].Project != "acme-shop" || !list[0].CreatedAt.Before(list[1].CreatedAt) {
 		t.Fatalf("waiting: %+v %v", list, err)
 	}
-	if err := d.CancelEnrol(ctx, list[0].ID); err != nil {
+	if err := d.CancelEnrol(ctx, "operator", list[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if after, _ := d.WaitingEnrolments(ctx); len(after) != 4 {
 		t.Errorf("after the cancel: %d waiting", len(after))
 	}
-	if err := d.CancelEnrol(ctx, list[0].ID); !errors.Is(err, ErrNotFound) {
+	if err := d.CancelEnrol(ctx, "operator", list[0].ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a second cancel: %v", err)
 	}
-	if err := d.CancelEnrol(ctx, "en-nope"); !errors.Is(err, ErrNotFound) {
+	if err := d.CancelEnrol(ctx, "operator", "en-nope"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("an unknown enrolment: %v", err)
 	}
 	// With the slot free again the label can start once more.

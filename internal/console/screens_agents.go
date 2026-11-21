@@ -82,9 +82,11 @@ func viewOfRequest(r ops.KeyRequestInfo) reqView {
 
 type agentKeyView struct {
 	ID, Holder, Project, State, Ops, Units, Expires, LastUsed string
+	Owner                                                     string // "you", or the orchestrator that built the key
 	Uses                                                      int
 	CanExtend                                                 bool
 	CanRevoke                                                 bool // a key that is granted or live can be revoked
+	Stops                                                     bool // revoking it stops the agent for good (a key of your own agent)
 }
 
 // waitingEnrolView is an enrolment that waits for its owner: what the agent asked to be called, in which project,
@@ -166,14 +168,19 @@ func (s *screens) agentsPage(w http.ResponseWriter, r *http.Request) {
 	for _, p := range recent {
 		v.Recent = append(v.Recent, viewOfRequest(p))
 	}
-	agentKeys, err := s.cfg.Keys.AgentKeys(ctx, me)
+	agentKeys, err := s.cfg.Keys.Keys(ctx, me)
 	if err != nil {
 		s.fail(w, "list agent keys", err)
 		return
 	}
 	for _, k := range agentKeys {
 		last := k.LastUsedAt
-		v.Keys = append(v.Keys, agentKeyView{
+		mine := k.Owner == keys.OwnerOf(me)
+		owner := k.Owner
+		if mine {
+			owner = "you"
+		}
+		v.Keys = append(v.Keys, agentKeyView{Owner: owner, Stops: mine && k.HolderKind == keys.HolderAgent,
 			ID: k.ID, Holder: k.Holder, Project: k.Project, State: k.State, Ops: listText(k.Ops), Units: listText(k.Units),
 			Expires: k.ExpiresAt, LastUsed: last, Uses: k.Uses, CanExtend: k.State == "live" && k.GrantKind == keys.GrantSelf,
 			CanRevoke: k.State == "live" || k.State == "granted",
@@ -404,12 +411,13 @@ func (s *screens) agentKeyRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 // agentEnrolCancel is POST /agents/enrolments/{id}/cancel: end a waiting enrolment. Like a revoke it only takes
-// away, so a session is enough.
+// away, so a session is enough; any signed-in approver may cancel any waiting enrolment, and the ledger names who did.
 func (s *screens) agentEnrolCancel(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.user(w, r); !ok || !s.needKeys(w, "#agents-status") {
+	st, ok := s.user(w, r)
+	if !ok || !s.needKeys(w, "#agents-status") {
 		return
 	}
-	if err := s.cfg.Keys.CancelEnrol(r.Context(), r.PathValue("id")); err != nil {
+	if err := s.cfg.Keys.CancelEnrol(r.Context(), approverSpecID(st.user), r.PathValue("id")); err != nil {
 		s.keyRefusal(w, "#agents-status", "Not cancelled", err)
 		return
 	}

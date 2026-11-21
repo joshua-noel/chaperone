@@ -13,6 +13,7 @@ import (
 
 	"github.com/joshua-noel/chaperone/internal/approvals"
 	"github.com/joshua-noel/chaperone/internal/policy"
+	"github.com/joshua-noel/chaperone/internal/runtoken"
 )
 
 // Tracer 1 of custom keys, end to end on the real chapd: the real ledger, policy pack, approvals engine and op
@@ -366,5 +367,105 @@ func TestE2EKeyRulesRefuseBeforeACardIsMade(t *testing.T) {
 	}
 	if cards, _ := e.app.Approvals.Pending(context.Background()); len(cards) != 0 {
 		t.Errorf("%d cards were made for refused requests", len(cards))
+	}
+}
+
+// A key built by an orchestrator is the orchestrator's to see and revoke, so it must not outlive the orchestrator's
+// access to it. When the operator revokes the orchestrator, every key it owns is revoked in the same transaction
+// (by chapd, not a human stop, in the ledger), and the operator sees the key at the console and can end it there
+// whoever owns it.
+func TestE2EAKeyEndsWithItsOrchestratorAndTheOperatorCanAlwaysRevokeIt(t *testing.T) {
+	e := newKeysE2E(t)
+	ctx := context.Background()
+	n, _ := e.mediumPR("agent/orphan")
+	id := e.grant(nil)
+	_, claimed := e.call("POST", "/v0/keys/"+id+"/claim", e.maker, nil)
+	token, _ := claimed["token"].(string)
+	if st, _ := e.view(token, n); st != http.StatusOK {
+		t.Fatalf("the key does not work: %d", st)
+	}
+	// The console lists it, with its owner, before anything is revoked.
+	list, err := e.app.KeyDecider.Keys(ctx, "operator")
+	if err != nil || len(list) != 1 || list[0].ID != id || list[0].Owner != "keymaker" {
+		t.Fatalf("the console's keys: %+v %v", list, err)
+	}
+
+	// The operator revokes the orchestrator (the console's Revoke orchestrator button).
+	if err := e.app.Orch.Revoke(ctx, "keymaker", "console"); err != nil {
+		t.Fatal(err)
+	}
+	st, body := e.view(token, n)
+	if st == http.StatusOK {
+		t.Fatalf("the key of a revoked orchestrator still works: %v", body)
+	}
+	mustValidDenial(t, body, "TOKEN_REVOKED")
+	k, err := e.app.Keys.Get(ctx, id)
+	if err != nil || k.State != "revoked" || k.StoppedByHuman || k.RevokedBy != "chapd" {
+		t.Errorf("the key after the orchestrator was revoked: %+v %v", k, err)
+	}
+	var stopped int
+	e.app.DB.SQL().QueryRow(`SELECT count(*) FROM key_agents`).Scan(&stopped)
+	if stopped != 0 {
+		t.Errorf("%d agents stopped by the cascade", stopped)
+	}
+	var events int
+	e.app.DB.SQL().QueryRow(`SELECT count(*) FROM ledger_events WHERE event_name = 'op.request' AND event LIKE '%keys.revoke%' AND event LIKE '%` + id + `%'`).Scan(&events)
+	if events != 1 {
+		t.Errorf("%d ledger events for the revoke of the key, want 1", events)
+	}
+	// Another orchestrator still gets "no such key", and the operator still sees the key at the console.
+	if st, _ := e.call("POST", "/v0/keys/"+id+"/revoke", e.token, nil); st != http.StatusNotFound {
+		t.Errorf("another orchestrator's revoke: %d", st)
+	}
+	if list, _ := e.app.KeyDecider.Keys(ctx, "operator"); len(list) != 1 || list[0].State != "revoked" {
+		t.Errorf("the console's keys after: %+v", list)
+	}
+}
+
+// A key that outlives its orchestrator some other way (its token expired: nothing revoked it) is the operator's to end
+// at the console, and that is not a stop of the agent.
+func TestE2ETheOperatorRevokesAnOrchestratorsKeyAtTheConsole(t *testing.T) {
+	e := newKeysE2E(t)
+	n, _ := e.mediumPR("agent/console")
+	id := e.grant(nil)
+	_, claimed := e.call("POST", "/v0/keys/"+id+"/claim", e.maker, nil)
+	token, _ := claimed["token"].(string)
+	k, err := e.app.KeyDecider.Revoke(context.Background(), "operator", id)
+	if err != nil || k.State != "revoked" || k.StoppedByHuman || k.RevokedBy != "person.operator" {
+		t.Fatalf("the operator's revoke of an orchestrator's key: %+v %v", k, err)
+	}
+	if st, body := e.view(token, n); st == http.StatusOK {
+		t.Fatalf("the key still works: %v", body)
+	}
+}
+
+// Re-issuing an orchestrator's token without one of its projects revokes the keys it owns in that project, and leaves
+// the keys in the projects it keeps.
+func TestE2EAKeyInADroppedProjectIsRevokedWhenTheTokenIsReissued(t *testing.T) {
+	e := newKeysE2E(t)
+	ctx := context.Background()
+	n, _ := e.mediumPR("agent/dropped")
+	id := e.grant(nil)
+	_, claimed := e.call("POST", "/v0/keys/"+id+"/claim", e.maker, nil)
+	token, _ := claimed["token"].(string)
+
+	// The same projects and ops again: the key stays.
+	if _, err := e.app.Orch.Issue(ctx, runtoken.IssueParams{ID: "keymaker", Scope: runtoken.OrchScope{Projects: []string{"storefront", "sideproject"}, Ops: []string{"keys.issue", "pr.view", "pr.diff"}}, Days: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := e.view(token, n); st != http.StatusOK {
+		t.Fatalf("a re-issue that kept the project revoked the key: %d", st)
+	}
+	// Without storefront: the key in storefront goes with it.
+	if _, err := e.app.Orch.Issue(ctx, runtoken.IssueParams{ID: "keymaker", Scope: runtoken.OrchScope{Projects: []string{"sideproject"}, Ops: []string{"keys.issue", "pr.view", "pr.diff"}}, Days: 1}); err != nil {
+		t.Fatal(err)
+	}
+	st, body := e.view(token, n)
+	if st == http.StatusOK {
+		t.Fatalf("the key in a dropped project still works: %v", body)
+	}
+	mustValidDenial(t, body, "TOKEN_REVOKED")
+	if k, _ := e.app.Keys.Get(ctx, id); k.State != "revoked" || k.StoppedByHuman || k.RevokedBy != "chapd" {
+		t.Errorf("the key in the dropped project: %+v", k)
 	}
 }

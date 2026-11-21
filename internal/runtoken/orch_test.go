@@ -324,7 +324,7 @@ func TestOrchestratorIdsCannotStartWithTheKeyPrefix(t *testing.T) {
 // agents and enrolments.
 func TestReservedOrchestratorIdsAreRefusedAtVerifyToo(t *testing.T) {
 	ctx := context.Background()
-	for _, id := range []string{"operator", "key.k-0123456789abcdef", "person.operator", "agent.operator.scout", "enrol.en-0123456789abcdef"} {
+	for _, id := range []string{"operator", "chapd", "key.k-0123456789abcdef", "person.operator", "agent.operator.scout", "enrol.en-0123456789abcdef"} {
 		e := newEnv(t)
 		r := e.issueOrch("main", mainScope, 0)
 		if _, err := e.orch.Verify(ctx, r.Token); err != nil {
@@ -341,5 +341,45 @@ func TestReservedOrchestratorIdsAreRefusedAtVerifyToo(t *testing.T) {
 		if _, err := e.orch.Issue(ctx, IssueParams{ID: id, Scope: mainScope}); !errors.Is(err, ErrInvalid) {
 			t.Errorf("issue %s: %v", id, err)
 		}
+	}
+}
+
+// A token re-issued without a project tells the owner of the keys which projects it lost, in the same transaction; a
+// first issue, a re-issue with the same or more projects, and a re-issue after a revoke lose none.
+func TestReissueWithFewerProjectsNamesTheDroppedOnes(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	var dropped [][]string
+	var err error
+	e.orch, err = NewOrchestrators(OrchConfig{
+		DB: e.db, Appender: e.led, Now: func() time.Time { return e.clock },
+		PolicyVersion: func() string { return e.policy },
+		TxDropProjects: func(_ context.Context, _ *store.Tx, id string, d []string) error {
+			dropped = append(dropped, append([]string{id}, d...))
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	two := OrchScope{Projects: []string{"acme-shop", "acme-blog"}, Ops: []string{"pr.merge"}}
+	one := OrchScope{Projects: []string{"acme-shop"}, Ops: []string{"pr.merge"}}
+	e.issueOrch("main", two, 0)
+	e.issueOrch("main", two, 0) // the same
+	e.issueOrch("main", OrchScope{Projects: []string{"acme-shop", "acme-blog", "acme-docs"}, Ops: []string{"pr.merge"}}, 0)
+	if len(dropped) != 0 {
+		t.Fatalf("projects dropped by a re-issue that kept them all: %v", dropped)
+	}
+	e.issueOrch("main", one, 0)
+	if len(dropped) != 1 || strings.Join(dropped[0], ",") != "main,acme-blog,acme-docs" {
+		t.Fatalf("dropped: %v", dropped)
+	}
+	// After a revoke the keys are already revoked (by the revoke hook): a re-issue drops nothing.
+	if err := e.orch.Revoke(ctx, "main", "test"); err != nil {
+		t.Fatal(err)
+	}
+	e.issueOrch("main", two, 0)
+	if len(dropped) != 1 {
+		t.Errorf("a re-issue after a revoke dropped %v", dropped[1:])
 	}
 }

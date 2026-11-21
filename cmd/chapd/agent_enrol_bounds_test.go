@@ -114,7 +114,7 @@ func TestEnrolmentCapHoldsUnderConcurrentStarts(t *testing.T) {
 // What a process on the machine can do with no credential: fill the slots, or take the one label of the agent it
 // wants to block. The real agent is refused until those enrolments expire (ten minutes). Nothing can stop that (a
 // per-source limit cannot work on loopback), so it is made visible: the refusal is written to the log and the ledger
-// (once a minute), and the waiting enrolments are listed for the operator, who can cancel them (the Agents page).
+// (once a minute for each label), and the waiting enrolments are listed for the operator, who can cancel them (the Agents page).
 // This test pins what happens, so a change to it is a decision.
 func TestAProcessOnTheMachineCanBlockEnrolmentForTenMinutesAndTheOperatorSeesIt(t *testing.T) {
 	e := newAgentE2E(t)
@@ -136,14 +136,15 @@ func TestAProcessOnTheMachineCanBlockEnrolmentForTenMinutesAndTheOperatorSeesIt(
 	if st, _ := e.startRaw("other"); st != http.StatusTooManyRequests {
 		t.Errorf("a different agent while the slots are full: %d", st)
 	}
-	// The two refusals came within a minute: one is written down (a request and a result event), not one each.
-	if after := e.ledgerEvents(); after-before != 2 {
-		t.Errorf("refused enrolment starts wrote %d ledger events, want the 2 of one refusal", after-before)
+	// Two refusals for two labels came within a minute: each is written down (a request and a result event), because
+	// the limit is per label: the squatter's refusals must not hide the real agent's.
+	if after := e.ledgerEvents(); after-before != 4 {
+		t.Errorf("refused enrolment starts wrote %d ledger events, want the 4 of two refusals", after-before)
 	}
 	var refused int
 	e.app.DB.SQL().QueryRow(`SELECT count(*) FROM ledger_events WHERE event_name = 'op.result' AND event LIKE '%ENROLMENT_REFUSED%'`).Scan(&refused)
-	if refused != 1 {
-		t.Errorf("%d refused-enrolment results in the ledger, want 1", refused)
+	if refused != 2 {
+		t.Errorf("%d refused-enrolment results in the ledger, want 2", refused)
 	}
 	// The waiting enrolments are listed for the operator, with the name each one asked for.
 	waiting, err := e.app.KeyDecider.WaitingEnrolments(context.Background())

@@ -103,12 +103,15 @@ func (d *Decider) Request(ctx context.Context, approver, id string) (ops.KeyRequ
 	return d.s.view(rq), nil
 }
 
-// AgentKeys lists the keys of approver's agents, newest first.
-func (d *Decider) AgentKeys(ctx context.Context, approver string) ([]ops.KeyInfo, error) {
-	all, err := d.s.List(ctx, OwnerOf(approver))
+// Keys lists the keys approver may see and revoke at the console, newest first: the keys of their own agents, and the
+// keys that orchestrators own (whoever built a key, the operator can always see it and end it, even when its
+// orchestrator is gone). Another person's keys are not listed: people are not modelled yet, and that person's agent
+// looks like no agent.
+func (d *Decider) Keys(ctx context.Context, approver string) ([]ops.KeyInfo, error) {
+	all, err := d.s.List(ctx, "")
 	var out []ops.KeyInfo
 	for _, k := range all {
-		if k.HolderKind == HolderAgent {
+		if k.Owner == OwnerOf(approver) || !personRE.MatchString(k.Owner) {
 			out = append(out, k)
 		}
 	}
@@ -318,19 +321,21 @@ func (d *Decider) ApproveEnrol(ctx context.Context, approver, code string) (ops.
 	return card, nil
 }
 
-// Revoke is the human stop (ADR-008): the owner revokes a key of theirs at the console, and if an agent held it,
-// the agent is stopped for good (an orchestrator's token can never do this). Revoking only takes access away, so
-// the signed-in session is enough and there is no card: the same rule as denying a request, cancelling a card or
-// revoking a run. Another person's key looks like no key.
+// Revoke ends a key at the console. A key of the approver's own agent is the human stop (ADR-008): if an agent held it,
+// the agent is stopped for good (an orchestrator's token can never do this). A key an orchestrator owns is ended
+// without a stop: it is the operator's power over what an orchestrator built, and the orchestrator may ask again
+// (each ask is a card). Revoking only takes access away, so the signed-in session is enough and there is no card:
+// the same rule as denying a request, cancelling a card or revoking a run. Another person's key looks like no key.
 func (d *Decider) Revoke(ctx context.Context, approver, keyID string) (ops.KeyInfo, error) {
 	k, err := d.s.Get(ctx, keyID)
 	if err != nil {
 		return ops.KeyInfo{}, err
 	}
-	if k.Owner != OwnerOf(approver) {
+	mine := k.Owner == OwnerOf(approver)
+	if !mine && personRE.MatchString(k.Owner) {
 		return ops.KeyInfo{}, ErrNotFound
 	}
-	info, err := d.s.Revoke(ctx, keyID, OwnerOf(approver), true)
+	info, err := d.s.Revoke(ctx, keyID, OwnerOf(approver), mine)
 	if errors.Is(err, ErrRevoked) {
 		return ops.KeyInfo{}, rule("this key is already revoked")
 	}
@@ -344,9 +349,11 @@ func (d *Decider) WaitingEnrolments(ctx context.Context) ([]EnrolView, error) {
 	return d.s.WaitingEnrolments(ctx)
 }
 
-// CancelEnrol cancels a waiting enrolment. Like a revoke it only takes away, so a session is enough. An
+// CancelEnrol cancels a waiting enrolment, and the ledger names the approver who did. Like a revoke it only takes
+// away, so a session is enough, and like the list of waiting enrolments it is open to any signed-in approver: until an
+// owner answers, an enrolment has no owner (the same reach as denying a card, which any approver may do). An
 // enrolment whose card is already waiting is refused: deny the card first.
-func (d *Decider) CancelEnrol(ctx context.Context, id string) error {
+func (d *Decider) CancelEnrol(ctx context.Context, approver, id string) error {
 	e, err := d.s.enrolRow(ctx, d.s.cfg.DB.SQL(), id)
 	if err != nil {
 		return err
@@ -354,5 +361,5 @@ func (d *Decider) CancelEnrol(ctx context.Context, id string) error {
 	if d.cardWaiting(ctx, e.IssueOp) {
 		return rule("a card for this enrolment is already waiting: deny it on the approvals page first")
 	}
-	return d.s.CancelEnrolment(ctx, id)
+	return d.s.CancelEnrolment(ctx, id, OwnerOf(approver))
 }

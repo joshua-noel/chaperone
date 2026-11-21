@@ -186,22 +186,47 @@ type EnrolView struct {
 	ExpiresAt          time.Time
 }
 
-// refusedStartEvery is the least time between two written-down refusals of an enrolment start: a process that
-// keeps asking must not fill the log and the ledger, only show up in them.
-const refusedStartEvery = time.Minute
+// refusedStartEvery is the least time between two written-down refusals of the same label in the same project, and
+// refusedStartMax the most refusals written down in that time for all labels together. A process that keeps asking
+// must not fill the log and the ledger, only show up in them; and one label's refusals must not hide another's
+// (a process that squats on the label of the real agent must not use up the real agent's refusal), so the limit is
+// per label, with a global cap so that a process that tries many labels cannot flood.
+const (
+	refusedStartEvery = time.Minute
+	refusedStartMax   = 10
+)
+
+// allowNote says whether a refusal of project/label is written down now, and records that it was.
+func (s *Store) allowNote(project, label string) bool {
+	now := s.now()
+	key := project + "/" + label
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.refused == nil || len(s.refused) > 1024 { // bounded: labels are many, a minute is short
+		s.refused = map[string]time.Time{}
+	}
+	if at, ok := s.refused[key]; ok && now.Sub(at) < refusedStartEvery {
+		return false
+	}
+	if now.Sub(s.noteFrom) >= refusedStartEvery {
+		s.noteFrom, s.noteN = now, 0
+	}
+	if s.noteN >= refusedStartMax {
+		return false
+	}
+	s.noteN++
+	s.refused[key] = now
+	return true
+}
 
 // noteRefusedStart makes a refused start (the cap, or a label that already waits) visible: one WARN in the log
-// and one event in the ledger, and no more than one of each a minute. A start needs no credential, so a local
-// process can keep the slots or a label filled; this does not stop it, it lets the operator see it.
+// and one event in the ledger, at most once a minute for each label (and ten a minute in all). A start needs no
+// credential, so a local process can keep the slots or a label filled; this does not stop it, it lets the operator
+// see it.
 func (s *Store) noteRefusedStart(ctx context.Context, project, label string, ref *EnrolRefusal) {
-	now := s.now()
-	s.mu.Lock()
-	if !s.lastRefuse.IsZero() && now.Sub(s.lastRefuse) < refusedStartEvery {
-		s.mu.Unlock()
+	if !s.allowNote(project, label) {
 		return
 	}
-	s.lastRefuse = now
-	s.mu.Unlock()
 	log := s.cfg.Log
 	if log == nil {
 		log = slog.Default()
@@ -237,20 +262,31 @@ func (s *Store) WaitingEnrolments(ctx context.Context) ([]EnrolView, error) {
 	return out, rows.Err()
 }
 
-// CancelEnrolment ends a waiting enrolment: its agent's next poll is told it expired. A card that was already
-// started for it must be denied on the approvals page first (cardWaiting says so, in the Decider).
-func (s *Store) CancelEnrolment(ctx context.Context, id string) error {
+// CancelEnrolment ends a waiting enrolment on behalf of by (the approver, "person:<id>") and writes who did it to
+// the ledger, in the same transaction: its agent's next poll is told it expired. A card that was already started
+// for it must be denied on the approvals page first (cardWaiting says so, in the Decider).
+func (s *Store) CancelEnrolment(ctx context.Context, id, by string) error {
 	if !enrolIDRE.MatchString(id) {
 		return ErrNotFound
 	}
-	res, err := s.cfg.DB.SQL().ExecContext(ctx, `UPDATE key_enrolments SET state = 'cancelled' WHERE id = ? AND state = 'pending'`, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return ErrNotFound
-	}
-	return nil
+	return s.cfg.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
+		e, err := s.enrolRow(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE key_enrolments SET state = 'cancelled' WHERE id = ? AND state = 'pending'`, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return ErrNotFound
+		}
+		return s.appendNote(ctx, tx, note{
+			Op: "keys.enrol.cancel", Project: e.Project, Requester: claimerID(by), Ref: "enrol:" + id,
+			Params: map[string]any{"id": id, "label": e.Label},
+			Body:   "agent enrolment " + id + " for " + e.Label + " was cancelled by " + clipText(by, 80),
+		})
+	})
 }
 
 // EnrolmentByCode finds the waiting enrolment a short code names. An unknown, expired or answered code is

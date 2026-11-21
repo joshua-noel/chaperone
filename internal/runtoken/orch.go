@@ -133,6 +133,11 @@ type OrchConfig struct {
 	// TxRevoke runs inside the revoke transaction: cancel the orchestrator's
 	// pending approvals here (ADR-007 item 7). An error rolls the revoke back.
 	TxRevoke func(ctx context.Context, tx *store.Tx, id string) error
+	// TxDropProjects runs inside the transaction that re-issues a token (rotation) whose scope has lost projects:
+	// the projects the new token no longer covers. Revoke what the orchestrator owns there (ADR-008): once a project
+	// is out of its token the orchestrator can no longer see, and so could not revoke, a key it built in it. An error
+	// rolls the re-issue back.
+	TxDropProjects func(ctx context.Context, tx *store.Tx, id string, dropped []string) error
 	// AfterRevoke runs after the revoke committed.
 	AfterRevoke func(ctx context.Context, id string)
 	Now         func() time.Time
@@ -240,6 +245,10 @@ type IssueResult struct {
 	ExpiresAt   time.Time
 }
 
+// ChapdID is the id chapd writes into the ledger for what it does on its own: the sweep of keys nobody claimed, and
+// the revoke of the keys an orchestrator owns when the orchestrator is revoked or loses a project.
+const ChapdID = "chapd"
+
 // reservedOrchID says why an orchestrator id may not be used, or returns "" when it may. These are the ids chapd
 // writes into the ledger for what is not an orchestrator: the person at the console, a key, a person's own
 // agent, an enrolment. Issue refuses them when a token is made, and Verify refuses them again, so a row that
@@ -247,6 +256,9 @@ type IssueResult struct {
 func reservedOrchID(id string) string {
 	if id == OperatorID {
 		return "it is reserved: it is what chapd records for a person at the console"
+	}
+	if id == ChapdID {
+		return "it is reserved: it is what chapd records for what it does by itself (a sweep, the revoke of a key with its owner)"
 	}
 	if strings.HasPrefix(id, spec.KeyRequesterPrefix) {
 		return "it must not start with " + strconv.Quote(spec.KeyRequesterPrefix) + " (reserved for keys)"
@@ -299,6 +311,15 @@ func (o *Orchestrators) Issue(ctx context.Context, p IssueParams) (IssueResult, 
 	}
 	res := IssueResult{Token: token, Fingerprint: hexSum[:8], ExpiresAt: time.Unix(expires.Unix(), 0).UTC()}
 	err = o.cfg.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
+		if o.cfg.TxDropProjects != nil {
+			if dropped, err := o.droppedProjects(ctx, tx, p.ID, p.Scope.Projects); err != nil {
+				return err
+			} else if len(dropped) > 0 {
+				if err := o.cfg.TxDropProjects(ctx, tx, p.ID, dropped); err != nil {
+					return fmt.Errorf("runtoken: drop projects hook: %w", err)
+				}
+			}
+		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE orchestrators SET revoked_at = ?, revoked_by = 'rotated' WHERE id = ? AND revoked_at IS NULL`,
 			now.Unix(), p.ID); err != nil {
@@ -320,6 +341,30 @@ func (o *Orchestrators) Issue(ctx context.Context, p IssueParams) (IssueResult, 
 		return IssueResult{}, err
 	}
 	return res, nil
+}
+
+// droppedProjects lists the projects the live token of id covers that the new scope does not. An id with no live
+// token (a first issue, or after a revoke, which already revoked what it owned) drops nothing.
+func (o *Orchestrators) droppedProjects(ctx context.Context, tx *store.Tx, id string, now []string) ([]string, error) {
+	var scopeJSON string
+	err := tx.QueryRowContext(ctx, `SELECT scope FROM orchestrators WHERE id = ? AND revoked_at IS NULL`, id).Scan(&scopeJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("runtoken: read orchestrator: %w", err)
+	}
+	var old OrchScope
+	if err := json.Unmarshal([]byte(scopeJSON), &old); err != nil {
+		return nil, fmt.Errorf("runtoken: stored scope of %q is unreadable", id)
+	}
+	var dropped []string
+	for _, pr := range old.Projects {
+		if !slices.Contains(now, pr) {
+			dropped = append(dropped, pr)
+		}
+	}
+	return dropped, nil
 }
 
 func (o *Orchestrators) appendOp(ctx context.Context, tx *store.Tx, op, project, id string, params map[string]any, body string) error {

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,8 +67,10 @@ type Store struct {
 	cfg Config
 	now func() time.Time
 
-	mu         sync.Mutex
-	lastRefuse time.Time // when a refused enrolment start was last written down (at most once a minute)
+	mu       sync.Mutex
+	refused  map[string]time.Time // when a refused enrolment start of project/label was last written down
+	noteFrom time.Time            // the minute in which noteN refusals were written down, for all labels
+	noteN    int
 }
 
 var (
@@ -397,6 +400,39 @@ func (s *Store) revokeTx(ctx context.Context, tx *store.Tx, id, byID, reason str
 	params := map[string]any{"id": id, "fingerprint": fp, "human": human, "agent_stopped": stop}
 	body := fmt.Sprintf("key %s revoked: %s", id, clipText(reason, 200))
 	return s.appendOp(ctx, tx, "keys.revoke", project, byID, id, params, body)
+}
+
+// RevokeOwnedTx revokes, inside the caller's transaction, every key that owner holds and that is not revoked yet:
+// all of them (projects nil), or only those in the given projects. It is what happens to what an orchestrator built
+// when the orchestrator is revoked, or is re-issued without a project (ADR-008): such a key could otherwise not be
+// read or revoked by its owner, which has no access to it any more. It is never a human stop, and it is ledgered
+// as chapd's own act, one keys.revoke per key. The pending approvals and waiting ops of each key are cancelled with it.
+func (s *Store) RevokeOwnedTx(ctx context.Context, tx *store.Tx, owner string, projects []string, why string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, project FROM keys WHERE owner_id = ? AND revoked_at IS NULL ORDER BY id`, owner)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id, project string
+		if err := rows.Scan(&id, &project); err != nil {
+			rows.Close()
+			return err
+		}
+		if projects == nil || slices.Contains(projects, project) {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := s.revokeTx(ctx, tx, id, "chapd", why, false); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // AgentStopped reports whether a human stopped this owner's agent.

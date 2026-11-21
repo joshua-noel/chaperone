@@ -116,19 +116,30 @@ func TestTheOwnerRevokesAnAgentKeyAtTheConsole(t *testing.T) {
 	b, _ := ar.signedIn()
 
 	page := get(t, b, "/agents")
-	mustHave(t, "agents page", page, `hx-post="/agents/keys/`+mine+`/revoke"`, `aria-label="Revoke the key of scout"`, "stopped for good")
-	mustNotHave(t, "agents page", page, theirs, other)
+	// Your own agent's key, and the key an orchestrator built (with its owner shown), are listed: the operator can
+	// always see and end every key an orchestrator owns. Another person's agent looks like no agent.
+	mustHave(t, "agents page", page, `hx-post="/agents/keys/`+mine+`/revoke"`, `aria-label="Revoke the key of scout"`, "stopped for good",
+		`hx-post="/agents/keys/`+other+`/revoke"`, `aria-label="Revoke the key of bot2"`, `data-label="Owner">keymaker<`, `data-label="Owner">you<`)
+	mustNotHave(t, "agents page", page, theirs)
 
-	for _, id := range []string{theirs, other} {
-		rec := hxPost(b, "/agents/keys/"+id+"/revoke", url.Values{})
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("revoke of %s: %d %s", id, rec.Code, rec.Body)
-		}
-		if k, _ := ar.store.Get(context.Background(), id); k.State != "live" || k.StoppedByHuman {
-			t.Errorf("%s was changed: %+v", id, k)
-		}
+	rec := hxPost(b, "/agents/keys/"+theirs+"/revoke", url.Values{})
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("revoke of another person's key: %d %s", rec.Code, rec.Body)
 	}
-	rec := hxPost(b, "/agents/keys/"+mine+"/revoke", url.Values{})
+	if k, _ := ar.store.Get(context.Background(), theirs); k.State != "live" || k.StoppedByHuman {
+		t.Errorf("another person's key was changed: %+v", k)
+	}
+	// The key of an orchestrator is revoked at the console too, and that is not a stop of anything.
+	if rec := hxPost(b, "/agents/keys/"+other+"/revoke", url.Values{}); rec.Code != http.StatusNoContent {
+		t.Fatalf("revoke of an orchestrator's key: %d %s", rec.Code, rec.Body)
+	}
+	if k, _ := ar.store.Get(context.Background(), other); k.State != "revoked" || k.StoppedByHuman {
+		t.Errorf("the orchestrator's key after the console revoke: %+v", k)
+	}
+	if stopped, _ := ar.store.AgentStopped(context.Background(), "keymaker", "bot2"); stopped {
+		t.Error("revoking an orchestrator's key stopped its agent for good")
+	}
+	rec = hxPost(b, "/agents/keys/"+mine+"/revoke", url.Values{})
 	if rec.Code != http.StatusNoContent || rec.Header().Get("HX-Redirect") != "/agents" {
 		t.Fatalf("revoke: %d %v %s", rec.Code, rec.Header(), rec.Body)
 	}
