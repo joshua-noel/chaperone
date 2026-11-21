@@ -1,0 +1,17 @@
+$ chap mail status 49a3999c-0ce1-4ea6-ab68-afcd6dc2e794 --project acme-shop
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"mail.status","params":{},"project":"acme-shop","target":{"adapter":"resend","ref":"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794"}}
+--- stdout
+mail.status 49a3999c-0ce1-4ea6-ab68-afcd6dc2e794: succeeded
+id: q-4s8t1u  class: routine  policy: baseline-2026.10.1
+execution: x-4s8t1u
+external_ref: resend:email/49a3999c-0ce1-4ea6-ab68-afcd6dc2e794
+result:
+  created_at: 2026-11-05T11:59:50Z
+  email: 49a3999c-0ce1-4ea6-ab68-afcd6dc2e794
+  last_event: delivered
+  sender: alerts@mail.example.com
+--- stderr

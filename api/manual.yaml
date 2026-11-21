@@ -135,7 +135,7 @@ ops:
     reversibility: irreversible
     surface: op
     summary: Send one email to allowlisted recipients after approval.
-    usage: chap mail send --from <account> --to <a> --subject <s> --body-file <f>
+    usage: chap mail send --from <account> --to <a> --subject <s> --body-file <f> [--via resend]
   drive.share:
     class: high
     reversibility: compensable
@@ -296,3 +296,11 @@ ops:
     summary: Add a note to a Sentry issue.
     usage: chap errors comment <id> [--body <b> | --body-file <f>]
   # END generated: connector sentry
+  # BEGIN generated: connector resend (do not edit by hand; run `go generate ./internal/connectors/...`)
+  mail.status:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read the delivery status of one email sent through Resend.
+    usage: chap mail status <email-id>
+  # END generated: connector resend

@@ -59,4 +59,13 @@ var Pins = map[string]kit.Pin{
 	"issue.comment": {Class: kit.Routine, Reversibility: kit.Compensable},
 	"issue.reopen":  {Class: kit.Routine, Reversibility: kit.Reversible},
 	"ci.report":     {Class: kit.Routine, Reversibility: kit.Reversible},
+
+	// Resend. mail.send is one name for two connectors, the Google connector's (Gmail) and
+	// this one, and is pinned once. It is the one high, irreversible operation of the
+	// table: a message that has gone cannot be recalled, and every send needs the
+	// operator's approval. Do not loosen it. The Resend side is declared in
+	// resendspec.MailSend, and a test in package declared checks that it agrees with this
+	// pin. mail.status only reads.
+	"mail.send":   {Class: kit.High, Reversibility: kit.Irreversible},
+	"mail.status": {Class: kit.Routine, Reversibility: kit.Reversible},
 }

@@ -2,7 +2,7 @@
 
 A connector lets Chaperone act on one service for an agent, so the agent never holds a credential for it. This page says how a connector is put together, what rules it must follow, and how to add one operation.
 
-Status: the connector kit covers the Linear connector (the intake operations and the issue operations), the GitHub operations and the Sentry connector. Google still uses the older layout. See [What is covered](#github-what-is-covered-and-what-stays-custom) and [What is not covered yet](#what-is-not-covered-yet). To add a connector, follow [Write a connector](write-a-connector.md). That page starts from a scaffold and ends at a passing conformance suite.
+Status: the connector kit covers the Linear connector (the intake operations and the issue operations), the GitHub operations, the Sentry connector and the Resend connector. Google still uses the older layout. See [What is covered](#github-what-is-covered-and-what-stays-custom) and [What is not covered yet](#what-is-not-covered-yet). To add a connector, follow [Write a connector](write-a-connector.md). That page starts from a scaffold and ends at a passing conformance suite.
 
 ## The seam
 
@@ -235,6 +235,18 @@ What is new here, compared with Linear and GitHub:
 - **A state-setting write is repeat-safe without a key.** A resolve of a resolved issue sends nothing. `errors.comment` is the exception, as GitHub's `issue.comment` is: Sentry has no idempotency key for a note, and a marker in the text would change what is posted. It is declared `NotRepeatable` in the connector test.
 - **Four of the five fixed routes are for one issue.** The caller gives an issue id, and the issue is fenced by the project it reports, on every write.
 
+## Resend: a name that a hand-written entry owns
+
+The Resend connector (`internal/connectors/resend`) was built from the scaffold and the guide, after Sentry. Its point is to prove that **one mail-sending operation name is served by two connectors**. `mail.send` is the operation the Google connector serves for Gmail (it is not declared with the kit, so its catalog entry, params, card and baseline rule are written by hand). The Resend side of the same name is `resendspec.MailSend`: the target adapter picks (`google` or `resend`), `chapd` puts the two adapters behind one `ops.ByTarget`, and the class (high, irreversible), the approval card, the rate and the baseline line are the existing ones. Nothing about Gmail changed except that `chap mail send` gained `--via` (default `google`).
+
+- **The shared declaration is not generated from.** `resendspec.MailSend` is in `resendspec.Served` (so the adapters are bound to it and the conformance suite runs over it) and not in `resendspec.Connector` (so no catalog entry is written twice). `TestTheSharedMailSendAgreesWithTheCatalogAndGmail` in package `declared` keeps it equal to the hand-written entry, the baseline rate, the pin, the params (Gmail's less `attachments`) and Gmail's limits.
+- **`mail.status` is a new operation** and is declared, generated and bound the usual way. It is routine, for the orchestrator token only, and needs a second vault key, because Resend lets a sending-only key send and nothing else (see the runbook).
+- **Narrower than Gmail, on purpose.** Plain text only; no attachment, HTML, reply-to, scheduled send, template, tag or header; the orchestrator token only; and the policy's `resend.max_recipients` lowers the cap of 10. Each refusal names the part that failed and never repeats an address the policy does not list.
+- **The approval is bound to the message twice.** The op hash covers the sender (the target) and every param. The card's evidence also holds the SHA-256 of the body and of the exact JSON sent to Resend, and `Execute` makes the evidence again and refuses when it differs from the approved one (`Request.ApprovedEvidence`).
+- **Repeat safety by a key.** `Idempotency-Key` is `chaperone-mail-send/` plus the execution id; Resend keeps it 24 hours. The fake models the window, and a test shows that after it a repeat sends again.
+- **The base address is fixed.** There is no policy-set host. The client sends to `https://api.resend.com`, and a test reaches the fake through the HTTP client it is given.
+- **Tested against a fake only.** See [the runbook](runbooks/resend.md).
+
 ## The conformance suite
 
 `internal/connectors/conformance` is a test that a connector's own test calls with `conformance.Run`. It drives the real adapters against a fake service and runs seven checks for every declared operation:
@@ -261,7 +273,7 @@ The first run of the suite found four gaps in the shipped connectors. Each was r
 ## What is not covered yet
 
 - **Operations of chapd itself are not declared.** `keys.issue` (custom keys, [ADR-008](adr/008-custom-keys.md)), `secrets.write`, `policy.activate` and `approvers.enroll` are not a connector's operations: they act on Chaperone, not on a service. Their catalog entries stay hand-written, and `unprofiledOps` in `internal/policy/profile_test.go` lists them.
-- **Google is not migrated.** Its operations are declared by hand in the old places.
+- **Google is not migrated.** Its operations are declared by hand in the old places. `mail.send` is shared with Resend through a second declaration (`resendspec.MailSend`) that a test keeps equal to the hand-written entry.
 - **The kit cannot express a surface other than `op`.** `branch.push` and `pr.push.workflow` (the git proxy) have no declaration.
 - **The kit cannot express a default that the schema does not have.** `pr merge --base main` and `pr open --base main` are command defaults and not schema defaults, so those two commands stay custom. The same holds for a param that is read from git (`pr open --branch`).
 - **The kit cannot express an enum, a one-of or a nested object** in a params schema. `issue.list` (`state`) and `issue.label` (`add` or `remove`) are the two places it shows: the first uses a pattern, the second says "exactly one" in its description and in the adapter.

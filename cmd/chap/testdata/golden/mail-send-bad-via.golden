@@ -1,0 +1,8 @@
+$ chap mail send --via smtp --from a@example.com --to b@example.com --subject x --body-file -
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --via must be google (Gmail) or resend
+usage: chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f> [--via resend]

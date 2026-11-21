@@ -19,6 +19,7 @@ One page per procedure. Each says who runs it, where, and what was **executed** 
 | [linear-intake](linear-intake.md) | Connect a Linear intake board: OAuth app, vault secrets, policy block, state names | you, in Linear and the console, then a policy change | Chaperone side tested against a fake Linear; Linear's pages not run, see the page |
 | [sentry](sentry.md) | Connect Sentry: an internal integration, the vault token, the policy block, what to check in Sentry first | you, in Sentry and the console, then a policy change | tested against a fake Sentry only, see the page |
 | [google](google.md) | Connect Google for mail and Drive | you, in Google Cloud and the console, then a policy change | tested against a fake Google only, see the page |
+| [resend](resend.md) | Send mail through Resend: the domain, a sending-only key, the vault, the policy block, what Resend's idempotency window means | you, in Resend and the console, then a policy change | tested against a fake Resend only, see the page |
 | [phone](phone.md) | Approve from your phone: Tailscale Serve, passkey, number matching | you, at the server with the phone in hand | browser flow rehearsed headless; Tailscale not run, see the page |
 | [dashboard-frame](dashboard-frame.md) | Show the console's approvals, ledger and runs pages inside your own dashboard | you, elevated, then restart `chapd` | not run, see the page |
 | [ledger-evidence-pack](ledger-evidence-pack.md) | Read, verify and hand over the ledger | the orchestrator or you, normal window | `chap ledger verify` in the logs above |

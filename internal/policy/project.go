@@ -90,6 +90,14 @@ type narrowFile struct {
 		Projects     []string `yaml:"projects"`
 		Assignees    []string `yaml:"assignees"`
 	} `yaml:"sentry"`
+	// Resend is the connector policy of the project for mail.send and mail.status when the target adapter is
+	// `resend`: the sender addresses, who may receive mail and the cap on recipients. Like `sentry:` it only adds
+	// data; it never turns an op on. A mistake in it turns off the Resend side only (see Resend.Invalid).
+	Resend *struct {
+		Senders         []string `yaml:"senders"`
+		AllowRecipients []string `yaml:"allow_recipients"`
+		MaxRecipients   *int     `yaml:"max_recipients"`
+	} `yaml:"resend"`
 }
 
 // LoadProject applies a project file to the baseline. The file may only
@@ -232,6 +240,21 @@ func (p *Pack) LoadProject(project string, data []byte, cat *Catalog) (*Effectiv
 			s = &Sentry{Invalid: err}
 		}
 		eff.Sentry = s
+	}
+	if f.Resend != nil {
+		r := &Resend{
+			Senders: slices.Clone(f.Resend.Senders), AllowRecipients: slices.Clone(f.Resend.AllowRecipients),
+			MaxRecipients: ResendDefaultMaxRecipients,
+		}
+		if f.Resend.MaxRecipients != nil {
+			r.MaxRecipients = *f.Resend.MaxRecipients
+		}
+		// A bad block turns off the Resend side only, not the project and not mail through Gmail. The fields are
+		// cleared, so a block that cannot be used is never half usable.
+		if err := r.problem(project); err != nil {
+			r = &Resend{Invalid: err}
+		}
+		eff.Resend = r
 	}
 	return eff, nil
 }

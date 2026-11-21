@@ -80,7 +80,8 @@ The op catalog (`api/manual.yaml`). Whether an op is switched on is policy, per 
 | `keys.issue` | high | compensable | op | Give a script or an agent a key after approval (HIGH). | `chap key create --project <p> --holder <name> --ops <op,op> [--repo owner/name] [--ttl 24h]` |
 | `keys.request` | routine | reversible | op | Ask your owner for the access a job needs. | `chap key request --ops <op,op> [--repo owner/name] [--ttl 24h] --reason <why> [--wait]` |
 | `logs` | routine | reversible | op | Read recent log lines from a fixed source. | `chap logs <web\|worker\|db\|tunnel> [--lines <n>]` |
-| `mail.send` | high | irreversible | op | Send one email to allowlisted recipients after approval. | `chap mail send --from <account> --to <a> --subject <s> --body-file <f>` |
+| `mail.send` | high | irreversible | op | Send one email to allowlisted recipients after approval. | `chap mail send --from <account> --to <a> --subject <s> --body-file <f> [--via resend]` |
+| `mail.status` | routine | reversible | op | Read the delivery status of one email sent through Resend. | `chap mail status <email-id>` |
 | `notion.write` | high | compensable | op | Write one Notion page after approval. | `chap request op notion.write --reason <why>` |
 | `policy.activate` | critical | compensable | op | Activate a new policy pack (CRITICAL). | `chap request op policy.activate --reason <why>` |
 | `pr.checks` | routine | reversible | op | Read the check runs on a PR's head commit. | `chap pr checks <n> [--expected-head <sha>] [--repo owner/name]` |
@@ -140,6 +141,7 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap ledger verify` | walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only) |
 | `chap logs` | read recent log lines from a fixed source |
 | `chap mail send` | send one email to allowlisted recipients (needs approval) |
+| `chap mail status` | read the delivery status of one email sent through Resend |
 | `chap manual` | what this caller may ask for, with usage |
 | `chap op show` | show one op, optionally waiting for it to change |
 | `chap pr checks` | read the check runs on a PR's head commit (orchestrator only) |
@@ -802,7 +804,7 @@ chap logs <web|worker|db|tunnel> [--lines <n>]
 send one email to allowlisted recipients (needs approval)
 
 ```
-chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f>
+chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f> [--via resend]
 ```
 
 | Flag | Meaning |
@@ -811,13 +813,31 @@ chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --sub
 | `--bcc <value>` | blind-copy recipient (repeat, or comma-separated) |
 | `--body-file <string>` | file with the message text, - for stdin (required) |
 | `--cc <value>` | copy recipient (repeat, or comma-separated) |
-| `--from <string>` | the Google account that sends, the address chapd connect google status prints (required) |
+| `--from <string>` | the sender: the Google account (the address chapd connect google status prints), or with --via resend one of the project's resend.senders (required) |
 | `--json` | print chapd's JSON reply instead of text |
 | `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
 | `--reason <string>` | why (shown on the approval card, never used for authorization) |
 | `--request` | create the approval card for this exact op instead of running it (needs --reason) |
 | `--subject <string>` | subject line (required) |
 | `--to <value>` | recipient (repeat, or comma-separated) |
+| `--via <string>` | the service that sends: google (Gmail, the default) or resend (default "google") |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap mail status`
+
+read the delivery status of one email sent through Resend
+
+```
+chap mail status <email-id>
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
 | `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
 
 ### `chap manual`

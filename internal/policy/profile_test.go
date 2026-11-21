@@ -56,7 +56,7 @@ func TestC1CatalogNamesMatchTheOpPattern(t *testing.T) {
 // reverse, fails CI").
 var unprofiledOps = []string{
 	"approvers.enroll", "data.apply", "deploy", "drive.share", "health", "host.scripts.refresh", "keys.extend", "keys.issue", "keys.request",
-	"logs", "mail.send", "notion.write", "policy.activate", "secrets.write",
+	"logs", "notion.write", "policy.activate", "secrets.write",
 }
 
 // C19: profile, catalog, baseline pack and chap usage agree.

@@ -1816,6 +1816,12 @@ components:
           maxLength: 48
       required: [exit_code, outcome]
       additionalProperties: false
+    # BEGIN generated: connector resend (do not edit by hand; run `go generate ./internal/connectors/...`)
+    ParamsMailStatus:
+      description: "Target is `{adapter: resend, ref: \"<email id>\"}`, the `message_id` that `mail.send` returned (a UUID). No params. Returns the id, the last event Resend recorded (one of a closed list of words, else `other`) and the time Resend made the record. The email must have been sent from one of the project's `resend.senders`; any other email is refused and nothing about it is shown. Resend's text (the subject, the body, the addresses, its error messages) is never returned. Needs a separate, optional vault secret with Resend's `full_access` permission, because Resend lets a `sending_access` key send and nothing else."
+      type: object
+      additionalProperties: false
+    # END generated: connector resend
     # BEGIN generated: connector sentry (do not edit by hand; run `go generate ./internal/connectors/...`)
     ParamsErrorsList:
       description: "`errors.list` on Sentry. Target is `{adapter: sentry, ref: \"<project slug>\"}`; the slug must be in the project's `sentry.projects`. One page of at most `limit` issues (default 10, at most 25), newest first, with `next_cursor` when there is more. `status` is unresolved (the default), resolved or ignored; `level` is fatal, error, warning, info or debug. Only the orchestrator token asks. Each item has the id, short id, title, culprit, level, status, event count, first and last seen and the assignee's name. Titles and culprits are text from Sentry and are untrusted: they are cleaned, capped and withheld when they look like a secret."

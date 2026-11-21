@@ -10,9 +10,11 @@ import (
 
 	"github.com/joshua-noel/chaperone/api"
 	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
+	"github.com/joshua-noel/chaperone/internal/connectors/google"
 	"github.com/joshua-noel/chaperone/internal/connectors/kit"
 	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
 	"github.com/joshua-noel/chaperone/internal/connectors/pintable"
+	"github.com/joshua-noel/chaperone/internal/connectors/resend/resendspec"
 	"github.com/joshua-noel/chaperone/internal/policy"
 )
 
@@ -63,6 +65,10 @@ func TestEveryDeclaredOpIsPinned(t *testing.T) {
 			t.Errorf("%s: %s", c.Name, d)
 		}
 	}
+	// mail.send is one name for two connectors and is in no connector's Ops: its
+	// catalog entry is written by hand (Gmail's), and Resend's side is
+	// resendspec.MailSend. See TestTheSharedMailSendAgreesWithTheCatalogAndGmail.
+	declaredNames[resendspec.MailSend.Name] = true
 	for name := range pins {
 		if !declaredNames[name] {
 			t.Errorf("pins lists %s, which no connector declares", name)
@@ -342,5 +348,70 @@ func TestTheSharedIssueCommentAgreesAcrossConnectors(t *testing.T) {
 		if o.Name == ln.Name {
 			t.Errorf("%s is in linearspec.Connector: it would be generated twice", o.Name)
 		}
+	}
+}
+
+// mail.send is one name for two connectors, Gmail (target.adapter google, not a
+// declared connector yet) and Resend (target.adapter resend), and the catalog has
+// one entry for a name, written by hand. Resend's declaration of the same name
+// (resendspec.MailSend) is not generated from, so it must agree with that entry in
+// everything the catalog states, with the baseline rule and the pin, and with
+// Gmail's limits: one name has one set of limits, whichever connector the target
+// picks. It takes the params of the Gmail side less `attachments`, and the test
+// writes the list out by hand, so a new param is a second, deliberate edit.
+func TestTheSharedMailSendAgreesWithTheCatalogAndGmail(t *testing.T) {
+	s := resendspec.MailSend
+	cat, base, err := policy.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := cat.Lookup(s.Name)
+	if !ok {
+		t.Fatalf("%s is not in the catalog", s.Name)
+	}
+	if e.Class != policy.Class(s.Class) || e.Reversibility != string(s.Reversibility) || e.Surface != policy.SurfaceOp ||
+		e.Summary != s.Summary || e.Usage != s.Usage {
+		t.Errorf("the catalog entry %+v and the Resend declaration %+v disagree on what the catalog states", e, s)
+	}
+	if e.Class != policy.ClassHigh || e.Reversibility != "irreversible" {
+		t.Errorf("mail.send is %s/%s: it is high and irreversible, and needs the operator's approval every time", e.Class, e.Reversibility)
+	}
+	if r, ok := base.Ops[s.Name]; !ok || r.RatePerMinute != s.RatePerMinute || r.Enabled {
+		t.Errorf("the baseline rule of mail.send is %+v: the declared rate is %d and it ships off", r, s.RatePerMinute)
+	}
+	if p, ok := pins[s.Name]; !ok || p.Class != s.Class || p.Reversibility != s.Reversibility {
+		t.Errorf("the pin of %s is %+v", s.Name, p)
+	}
+	for _, o := range resendspec.Connector.Ops {
+		if o.Name == s.Name {
+			t.Errorf("%s is in resendspec.Connector: its catalog entry would be generated twice", o.Name)
+		}
+	}
+	if !slices.Contains(resendspec.Served.Names(), s.Name) {
+		t.Errorf("%s is not served", s.Name)
+	}
+	if !strings.Contains(s.Usage, "--via resend") {
+		t.Errorf("the usage of mail.send does not say how to choose Resend: %q", s.Usage)
+	}
+	// The params, written out by hand: Gmail's without `attachments`.
+	if got, want := s.ParamNames(), []string{"to", "cc", "bcc", "subject", "body"}; !slices.Equal(got, want) {
+		t.Errorf("declared params %v, the pin says %v", got, want)
+	}
+	// One name, one set of limits.
+	for _, c := range []struct {
+		what          string
+		resend, gmail int
+	}{
+		{"recipients", resendspec.MaxRecipients, google.MaxRecipients},
+		{"subject bytes", resendspec.MaxSubjectBytes, google.MaxSubjectBytes},
+		{"body bytes", resendspec.MaxBodyBytes, google.MaxBodyBytes},
+	} {
+		if c.resend != c.gmail {
+			t.Errorf("limit of %s: Resend %d, Gmail %d", c.what, c.resend, c.gmail)
+		}
+	}
+	// The ref of the Gmail side is a sending address with the same shape.
+	if !strings.Contains(resendspec.AddressPattern, "[a-z0-9._+-]{0,63}@") {
+		t.Error("the address pattern is not the one the Google connector and the policy use")
 	}
 }

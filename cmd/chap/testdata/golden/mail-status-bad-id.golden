@@ -1,0 +1,8 @@
+$ chap mail status not-a-uuid
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the email id must be a UUID such as 49a3999c-0ce1-4ea6-ab68-afcd6dc2e794
+usage: chap mail status <email-id>

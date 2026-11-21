@@ -5,4 +5,4 @@ exit: 2
 --- stdout
 --- stderr
 chap: --from, --to, --subject and --body-file are required
-usage: chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f>
+usage: chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f> [--via resend]

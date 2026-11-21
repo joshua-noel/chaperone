@@ -717,7 +717,7 @@ func TestCatalogNarrowsToToken(t *testing.T) {
 		t.Errorf("run asked for all: %d %v", st, body)
 	}
 	st, body, _ := g.call("GET", "/v0/catalog?all=true&project=acme-shop", orchTok, nil)
-	if st != 200 || len(opNames(body)) != 43 {
+	if st != 200 || len(opNames(body)) != 44 {
 		t.Errorf("orchestrator all: %d %v", st, opNames(body))
 	}
 	var disabled int
@@ -726,7 +726,7 @@ func TestCatalogNarrowsToToken(t *testing.T) {
 			disabled++
 		}
 	}
-	if disabled != 21-8-4+5+3+6 { // the seven enabled above, plus pr.merge, which the shipped baseline turns on, and the four pr read ops, which it turns on too; plus the five Linear issue ops and keys.issue, keys.request and keys.extend, which ship off; plus the six Sentry errors.* ops, which ship off
+	if disabled != 21-8-4+5+3+6+1 { // the seven enabled above, plus pr.merge, which the shipped baseline turns on, and the four pr read ops, which it turns on too; plus the five Linear issue ops and keys.issue, keys.request and keys.extend, which ship off; plus the six Sentry errors.* ops, which ship off; plus mail.status of the Resend connector, which ships off
 		t.Errorf("disabled = %d", disabled)
 	}
 	// --profile docs: only that profile's enabled ops, and a small manual.

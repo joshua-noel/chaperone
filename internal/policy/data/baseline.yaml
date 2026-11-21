@@ -63,7 +63,12 @@ ops:
   intake.states:        { enabled: true,  rate_per_minute: 6 }
   deploy:               { enabled: false, rate_per_minute: 3 }
   data.apply:           { enabled: false, rate_per_minute: 3 }
+  # mail.send is one name for two connectors (Gmail, target `google`, and Resend, target `resend`); this one rule turns both on.
+  # Each refuses a project whose policy file has no valid block of its own (`google:` or `resend:`). Every send needs an approval.
   mail.send:            { enabled: false, rate_per_minute: 3 }
+  # Resend (internal/connectors/resend): the read of one sent email's delivery status, for the orchestrator token only. Off. It also needs
+  # the project's `resend:` block and the optional vault secret `resend-status-key`, which needs Resend's full_access permission.
+  mail.status:          { enabled: false, rate_per_minute: 12 }
   drive.share:          { enabled: false, rate_per_minute: 3 }
   notion.write:         { enabled: false, rate_per_minute: 3 }
   pr.push.workflow:     { enabled: false, rate_per_minute: 3 }

@@ -288,7 +288,7 @@ func opCommands() []*command {
 			summary: "read recent log lines from a fixed source", run: cmdLogs},
 		{path: "deploy", usage: "chap deploy <sha>",
 			summary: "deploy a commit to the pilot (needs one approval)", run: cmdDeploy},
-		{path: "mail send", usage: "chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f>",
+		{path: "mail send", usage: "chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f> [--via resend]",
 			summary: "send one email to allowlisted recipients (needs approval)", run: cmdMailSend},
 		{path: "drive share", usage: "chap drive share <file-id> --from <account> --name <file-name> --to <a> [--to <b>] --role <r>",
 			summary: "share one Drive file with allowlisted recipients (needs approval)", run: cmdDriveShare},
@@ -440,10 +440,11 @@ func cmdDeploy(a *app, c *command, args []string) int {
 func cmdMailSend(a *app, c *command, args []string) int {
 	var co common
 	var to, cc, bcc listFlag
-	var subject, bodyFile, from string
+	var subject, bodyFile, from, via string
 	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
 	co.register(fs, a)
-	fs.StringVar(&from, "from", "", "the Google account that sends, the address chapd connect google status prints (required)")
+	fs.StringVar(&from, "from", "", "the sender: the Google account (the address chapd connect google status prints), or with --via resend one of the project's resend.senders (required)")
+	fs.StringVar(&via, "via", "google", "the service that sends: google (Gmail, the default) or resend")
 	fs.Var(&to, "to", "recipient (repeat, or comma-separated)")
 	fs.Var(&cc, "cc", "copy recipient (repeat, or comma-separated)")
 	fs.Var(&bcc, "bcc", "blind-copy recipient (repeat, or comma-separated)")
@@ -458,6 +459,9 @@ func cmdMailSend(a *app, c *command, args []string) int {
 	if from == "" || len(to) == 0 || subject == "" || bodyFile == "" {
 		return a.usageErr(c, "--from, --to, --subject and --body-file are required")
 	}
+	if via != "google" && via != "resend" {
+		return a.usageErr(c, "--via must be google (Gmail) or resend")
+	}
 	text, err := a.readText(bodyFile)
 	if err != nil {
 		return a.usageErr(c, "%v", err)
@@ -469,9 +473,10 @@ func cmdMailSend(a *app, c *command, args []string) int {
 	if len(bcc) > 0 {
 		params["bcc"] = []string(bcc)
 	}
-	// The target is the sending account: the card shows it, and chapd refuses a
-	// request for an account it is not connected as.
-	return a.ask(&co, opReq{op: "mail.send", target: target{"google", from}, params: params})
+	// The target adapter picks the service (one name, two connectors) and the ref is the
+	// sender: the card shows it, and chapd refuses a sender it is not connected as or that
+	// the policy does not list.
+	return a.ask(&co, opReq{op: "mail.send", target: target{via, from}, params: params})
 }
 
 func cmdDriveShare(a *app, c *command, args []string) int {

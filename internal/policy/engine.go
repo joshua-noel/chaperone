@@ -99,8 +99,9 @@ type Problem struct {
 	File    string // the file name in the policy folder, <project>.yaml
 	// Block is "" when the whole project is refused (an invalid file), or the part that is off: "pr" for a bad tier
 	// glob, which turns off pr.merge and pr.update only, "linear.issues" for a bad block of that name, which turns
-	// off the Linear issue operations only, and "sentry" for a bad block of that name, which turns off the Sentry
-	// operations only.
+	// off the Linear issue operations only, "sentry" for a bad block of that name, which turns off the Sentry
+	// operations only, and "resend" for a bad block of that name, which turns off the Resend side of mail.send and
+	// mail.status only.
 	Block string
 	Err   error
 }
@@ -136,6 +137,9 @@ func (e *Engine) Problems() []Problem {
 		}
 		if eff.Sentry != nil && eff.Sentry.Invalid != nil {
 			out = append(out, Problem{Project: project, File: name, Block: "sentry", Err: eff.Sentry.Invalid})
+		}
+		if eff.Resend != nil && eff.Resend.Invalid != nil {
+			out = append(out, Problem{Project: project, File: name, Block: "resend", Err: eff.Resend.Invalid})
 		}
 	}
 	return out
