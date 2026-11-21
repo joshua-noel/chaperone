@@ -1013,3 +1013,70 @@ func TestABadIssuesBlockTurnsOffTheIssueOpsOnlyAndNamesTheFile(t *testing.T) {
 		t.Errorf("intake.list with a bad issues block: %v %+v", err, out)
 	}
 }
+
+// An autolink, an anchor or a reference definition is shaped like an HTML tag, and the first guard removed tags before
+// it looked: so a standard markdown link to an item passed. The decoded text is checked with its tags in as well as
+// without them. The seven forms of the review, in a comment body, a link URL and a link title.
+func TestTheBoardGuardSeesLinksThatLookLikeTags(t *testing.T) {
+	r := issueRig(t)
+	ctx := context.Background()
+	forms := []string{
+		"<https://linear.app/acme/issue/SHOP-1>",
+		"<http://linear.app/acme/issue/SHOP-1>",
+		"<https://LINEAR.APP/x/issue/SHOP-1>",
+		"<https://linear%2Eapp/acme/issue/SHOP-1>",
+		`<a href="https://linear.app/acme/issue/SHOP-1">x</a>`,
+		"[1]: <https://linear.app/acme/issue/SHOP-1>",
+		"<SHOP-1>",
+		"see <https://linear.app/acme/team/Operations> and <b>this</b>",
+		"&lt;https://linear.app/acme/issue/SHOP-1&gt;",
+	}
+	for _, text := range forms {
+		for i, q := range []*ops.Request{
+			req(OpIssueComment, "AGT-1", map[string]any{"body": text}),
+			req(OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/x/y?ref=" + text}),
+			req(OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/x/y", "title": text}),
+		} {
+			_, err := r.ad(q.Op).Check(ctx, q)
+			var ref *ops.Refusal
+			if !errors.As(err, &ref) {
+				t.Errorf("%q in %s #%d was accepted: %v", text, q.Op, i, err)
+				continue
+			}
+			if strings.Contains(ref.Why, "SHOP") {
+				t.Errorf("%q: the refusal repeats the identifier: %s", text, ref.Why)
+			}
+			if out, err := r.ad(q.Op).Execute(ctx, q); err != nil || !out.Failed {
+				t.Errorf("%q in %s #%d executed: %v %+v", text, q.Op, i, err, out)
+			}
+		}
+	}
+	if r.mutations() != 0 {
+		t.Errorf("%d writes reached Linear", r.mutations())
+	}
+}
+
+// Ordinary comments the first guard refused: an emoji with its variation selector, a keycap, and a Greek letter in a
+// Latin word. A variation selector hidden inside an ASCII word is still refused.
+func TestTheBoardGuardLetsEmojiAndGreekLettersInOrdinaryWordsThrough(t *testing.T) {
+	r := issueRig(t)
+	ctx := context.Background()
+	for _, text := range []string{
+		"done \u2764\ufe0f", "careful \u26a0\ufe0f", "checked \u2714\ufe0f", "step 1\ufe0f\u20e3 then 2\ufe0f\u20e3", "text style \u2764\ufe0e",
+		"latency is 120\u03bcs", "\u0394t is 5 ms", "\u03bbx. x", "\u0394time", "\u041f\u0440\u0438\u0432\u0435\u0442World", "thumbs \U0001F44D\U0001F3FD",
+		"the \u03c0-day on 3-14",
+	} {
+		if _, err := r.ad(OpIssueComment).Check(ctx, req(OpIssueComment, "AGT-1", map[string]any{"body": text})); err != nil {
+			t.Errorf("comment %q refused: %v", text, err)
+		}
+		l := req(OpIssueLink, "AGT-1", map[string]any{"url": "https://github.com/x/y", "title": text})
+		if _, err := r.ad(OpIssueLink).Check(ctx, l); err != nil {
+			t.Errorf("link title %q refused: %v", text, err)
+		}
+	}
+	for _, text := range []string{"SHOP\ufe0f-1", "SHOP-\ufe0f1", "SHOP-1\ufe0f", "S\ufe0eHOP", "\ufe0fSHOP-1", "1\ufe0f"} {
+		if _, err := r.ad(OpIssueComment).Check(ctx, req(OpIssueComment, "AGT-1", map[string]any{"body": text})); err == nil {
+			t.Errorf("%q was accepted", text)
+		}
+	}
+}

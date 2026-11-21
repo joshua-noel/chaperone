@@ -24,11 +24,14 @@ import (
 // The check is therefore not a list of forms. It does three things:
 //
 //   - refuses text that cannot be read as it is shown: any invisible or default-ignorable character
-//     (untrusted.Hidden), any letter of the full-width forms, and a word that mixes the Latin alphabet with another
-//     alphabet that has look-alike letters (Cyrillic, Greek, Armenian, Cherokee, Coptic). Ordinary text in another
-//     language passes, since a word in one alphabet is not refused; a word written wholly in look-alike letters is not
-//     either, and that cannot create a backlink, because Linear reads only the ASCII identifier;
-//   - works on a normalised copy (see [normalise]), so an escape or a bit of markup does not hide a reference;
+//     (untrusted.Hidden; the variation selector of an emoji or a keycap is ordinary and passes), any letter of the
+//     full-width forms, and a word shaped like an issue identifier (letters and digits, a hyphen, a digit) that mixes
+//     the Latin alphabet with another alphabet that has look-alike letters (Cyrillic, Greek, Armenian, Cherokee,
+//     Coptic). Ordinary text passes: another language, a Greek letter in 120μs or Δt. A word written wholly in
+//     look-alike letters passes as well, and that cannot create a backlink, because Linear reads only the ASCII
+//     identifier;
+//   - works on normalised copies (see [normalForms]), so an escape or a bit of markup does not hide a reference. Two
+//     copies are looked at, with and without the HTML tags, because an autolink or an anchor is shaped like a tag;
 //   - refuses any text that, once normalised, holds linear.app, or the identifier of the intake team, or a page of it.
 
 // guardBoard is the check an agent's comment body, link title and link URL go through. what names the text for the
@@ -37,11 +40,18 @@ func guardBoard(pol *policy.Linear, what, text string) error {
 	if err := readableAsShown(what, text); err != nil {
 		return err
 	}
-	n := normalise(text)
-	if strings.Contains(strings.ToLower(n), "linear.app") {
-		return intakeRefused("%s points at Linear itself (linear.app); the issue ops never link to Linear, because a link could name an item of the operator board", what)
+	// Two copies are looked at: the decoded text with its markup still in it, and the same with HTML comments and tags
+	// removed. A tag-shaped piece is where a markdown autolink (<https://linear.app/...>) or an anchor lives, so the
+	// check must see it before the removal as well as after.
+	for _, n := range normalForms(text) {
+		if strings.Contains(strings.ToLower(n), "linear.app") {
+			return intakeRefused("%s points at Linear itself (linear.app); the issue ops never link to Linear, because a link could name an item of the operator board", what)
+		}
+		if err := namesTheBoard(pol, what, n); err != nil {
+			return err
+		}
 	}
-	return namesTheBoard(pol, what, n)
+	return nil
 }
 
 // namesTheBoard refuses normalised text that holds an identifier of the intake team (SHOP-12, in any case, alone or
@@ -59,29 +69,56 @@ func namesTheBoard(pol *policy.Linear, what, text string) error {
 // readableAsShown refuses text that a reader could not take as it is shown: an invisible character, a full-width
 // letter or digit, or a word that mixes the Latin alphabet with a look-alike one.
 func readableAsShown(what, s string) error {
-	for _, r := range s {
+	rs := []rune(s)
+	for i, r := range rs {
 		switch {
+		case (r == 0xFE0E || r == 0xFE0F) && variationSelectorIsOrdinary(rs, i):
+			// An emoji written with its variation selector, or a keycap: ordinary text.
 		case untrusted.Hidden(r):
 			return paramsInvalid("%s has an invisible character (U+%04X)", what, r)
 		case fullWidthAlnum(r):
 			return paramsInvalid("%s has a full-width letter or digit (U+%04X): write it in plain letters", what, r)
 		}
 	}
-	for _, w := range words(s) {
+	for _, w := range identifierWords(s) {
 		if mixesLookAlikes(w) {
-			return paramsInvalid("%s has a word that mixes the Latin alphabet with look-alike letters of another (Cyrillic, Greek or similar): write the word in one alphabet", what)
+			return paramsInvalid("%s has an identifier-shaped word that mixes the Latin alphabet with look-alike letters of another (Cyrillic, Greek or similar): write it in one alphabet", what)
 		}
 	}
 	return nil
+}
+
+// variationSelectorIsOrdinary reports whether the variation selector at rs[i] is the one an emoji carries: it follows a
+// character that is not ASCII (a heart, a warning sign), or it follows a digit, # or * and starts a keycap (it is then
+// followed by U+20E3). Inside an ASCII word, as in SHOP<U+FE0F>-1, it is a way to hide a reference, and is refused.
+func variationSelectorIsOrdinary(rs []rune, i int) bool {
+	if i == 0 {
+		return false
+	}
+	switch prev := rs[i-1]; {
+	case prev >= 0x80:
+		return true
+	case prev >= '0' && prev <= '9' || prev == '#' || prev == '*':
+		return i+1 < len(rs) && rs[i+1] == 0x20E3
+	}
+	return false
 }
 
 func fullWidthAlnum(r rune) bool {
 	return r >= 0xFF10 && r <= 0xFF19 || r >= 0xFF21 && r <= 0xFF3A || r >= 0xFF41 && r <= 0xFF5A || r == 0xFF0D
 }
 
-// words splits s into runs of letters, digits and marks.
-func words(s string) []string {
-	return strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) })
+// identifierShaped finds the words that have the shape of an issue identifier: letters and digits, a hyphen (of any
+// kind), then a digit. Only these are checked for look-alike letters: a Greek letter in 120μs or Δt, or a Cyrillic word
+// next to a Latin one, is ordinary text and cannot be mistaken for SHOP-1.
+var identifierShaped = regexp.MustCompile(`([\p{L}\p{N}\p{M}]+)[-\x{2010}-\x{2015}\x{2212}\x{FE58}\x{FE63}\x{FF0D}]\p{N}`)
+
+func identifierWords(s string) []string {
+	var out []string
+	for _, m := range identifierShaped.FindAllStringSubmatch(s, -1) {
+		out = append(out, m[1])
+	}
+	return out
 }
 
 // lookAlikeScripts are the alphabets whose letters can look like Latin ones.
@@ -114,11 +151,11 @@ var (
 	htmlTag     = regexp.MustCompile(`</?[A-Za-z][^>]*>`)
 )
 
-// normalise returns a copy of s as a renderer, a browser or Linear could read it: HTML entities and percent-escapes
+// normalForms returns the copies of s that are looked at, as a renderer, a browser or Linear could read it: HTML entities and percent-escapes
 // decoded until nothing changes (a few rounds at most), HTML comments and tags removed, the characters that markdown
 // takes as emphasis or escape (backslash, asterisk, underscore, backtick, tilde) removed, and every kind of dash
 // written as a hyphen. It is used only to look for references; the text itself is never changed.
-func normalise(s string) string {
+func normalForms(s string) []string {
 	for range 8 {
 		prev := s
 		s = percentDecode(html.UnescapeString(s))
@@ -127,8 +164,12 @@ func normalise(s string) string {
 		}
 	}
 	s = strings.ToValidUTF8(s, "")
-	s = htmlComment.ReplaceAllString(s, "")
-	s = htmlTag.ReplaceAllString(s, "")
+	stripped := htmlTag.ReplaceAllString(htmlComment.ReplaceAllString(s, ""), "")
+	return []string{foldMarkup(s), foldMarkup(stripped)}
+}
+
+// foldMarkup removes the characters that markdown takes as emphasis or escape and makes every dash a hyphen.
+func foldMarkup(s string) string {
 	return strings.Map(func(r rune) rune {
 		switch {
 		case r == '\\' || r == '*' || r == '_' || r == '`' || r == '~':
