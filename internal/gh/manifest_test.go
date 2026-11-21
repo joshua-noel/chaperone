@@ -91,17 +91,22 @@ func TestEveryPermsFunctionIsPlacedInAGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	var found []string
+	sources := 0
 	for _, pkg := range files {
 		for fname, f := range pkg.Files {
 			if strings.HasSuffix(fname, "_test.go") {
 				continue
 			}
+			sources++
 			for _, d := range f.Decls {
 				if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && strings.HasPrefix(fn.Name.Name, "Perms") {
 					found = append(found, fn.Name.Name)
 				}
 			}
 		}
+	}
+	if sources == 0 {
+		t.Skip("the source of package gh is not in the working folder (a test binary built elsewhere); this check reads it")
 	}
 	var known []string
 	for n := range opPerms {

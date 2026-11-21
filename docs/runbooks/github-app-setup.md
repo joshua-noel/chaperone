@@ -17,7 +17,7 @@ You run it, at a normal terminal on the computer where `chapd` runs, **as the ac
 - a web browser on the same computer, signed in to GitHub as the owner of the account (or an owner of the organization) that will own the App;
 - GitHub reachable from this computer.
 
-**Where this does not work today:** the Windows install of [install.md](install.md). There the vault belongs to the `svc-chaperone` account, whose sign-in is closed after the install, so you cannot run this command as that account. Use "By hand" below and import the key on the console's Secrets screen. A guided path for that install needs a change to the installer (see the report that came with this page).
+**Where this does not work today:** the Windows install of [install.md](install.md). There the vault belongs to the `svc-chaperone` account, whose sign-in is closed after the install, so you cannot run this command as that account. Use "By hand" below and import the key on the console's Secrets screen. A guided path for that install needs a change to the installer.
 
 It works on the quickstart folder, on a development vault, and on any system where you can run `chapd` as the vault's own account. See "From the quickstart" below.
 
