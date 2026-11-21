@@ -231,17 +231,28 @@ func TestRunDaemonTakesThePortBeforeStart(t *testing.T) {
 	// Free: the port is held before start-up, and nothing is accepted until the start-up has finished.
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg.DBPath = filepath.Join(dir, "state2.db")
+	started := make(chan struct{})
 	cfg.afterBuild = func(context.Context, *App) error {
 		events = append(events, "started")
 		if l, err := net.Listen("tcp4", "127.0.0.1:"+port); err == nil {
 			l.Close()
 			t.Error("the port was not held when start-up finished")
 		}
+		close(started)
 		return nil
 	}
 	done := make(chan error, 1)
 	go func() { done <- runDaemon(ctx, cfg) }()
 	waitServing(t, "tcp6", "[::1]:"+port)
+	// The port is held before start-up, so a connection succeeds while start-up is still running. Cancelling then
+	// stops the start-up itself ("context canceled"), which is not what this test is about: wait for it to finish.
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("runDaemon ended before start-up finished: %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("start-up did not finish")
+	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("runDaemon: %v", err)
