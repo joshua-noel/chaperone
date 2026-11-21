@@ -177,3 +177,88 @@ func TestQuickstartRefusesAParentOthersCanWriteIn(t *testing.T) {
 		t.Error("a writable grandparent was accepted")
 	}
 }
+
+// On macOS the temp folder is reached through a link (/var -> /private/var) and a home may be too (a home on another volume,
+// /home -> /System/Volumes/Data/home). A folder is inside a root when it is, once BOTH are resolved. The tests below build the shape under a temp
+// folder: a root reached through a symlink, a folder given through the link, and the same given through the real path.
+func TestQuickstartRootsAndFoldersMayBeReachedThroughLinks(t *testing.T) {
+	base := qsTemp(t)
+	real := filepath.Join(base, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	old := quickstartTestRoots
+	defer func() { quickstartTestRoots = old }()
+	for _, root := range []string{link, real} {
+		quickstartTestRoots = []string{root}
+		for _, via := range []string{link, real} {
+			dir := filepath.Join(via, "deeper", "qs")
+			// The check, and the preparation called directly with the path as written.
+			if _, _, err := checkQuickstartDir(dir); err != nil {
+				t.Errorf("root %s, folder via %s: check: %v", root, via, err)
+			}
+			if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55450", time.Now()); err != nil {
+				t.Errorf("root %s, folder via %s: prepare: %v", root, via, err)
+			}
+			_ = os.RemoveAll(filepath.Join(real, "deeper"))
+		}
+	}
+}
+
+// The production rule, with a HOME that is a symlink: a user whose home is reached through a link is not refused, and
+// nothing outside that home is accepted because of it.
+func TestQuickstartAHomeReachedThroughALink(t *testing.T) {
+	base := qsTemp(t)
+	realHome := filepath.Join(base, "volume", "u")
+	outside := filepath.Join(base, "volume", "other")
+	for _, d := range []string{realHome, outside} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linkHome := filepath.Join(base, "home-link")
+	if err := os.Symlink(realHome, linkHome); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	old := quickstartTestRoots
+	quickstartTestRoots = nil // production: the home folder alone
+	defer func() { quickstartTestRoots = old }()
+	t.Setenv("HOME", linkHome)
+	if h, _ := os.UserHomeDir(); h != linkHome {
+		t.Skipf("home is %s here", h)
+	}
+
+	for _, dir := range []string{
+		filepath.Join(linkHome, ".config", "qs"), // as the user writes it
+		filepath.Join(realHome, ".config", "qs"), // by its real path
+		filepath.Join(linkHome, "a", "b", "qs"),  // missing parents, made inside the real home
+	} {
+		if _, _, err := checkQuickstartDir(dir); err != nil {
+			t.Errorf("%s inside a home reached through a link was refused: %v", dir, err)
+		}
+		if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55451", time.Now()); err != nil {
+			t.Errorf("%s: prepare: %v", dir, err)
+		}
+		_ = os.RemoveAll(filepath.Join(realHome, ".config"))
+		_ = os.RemoveAll(filepath.Join(realHome, "a"))
+	}
+	// Not loosened: a sibling of the home, by either route, and a link in home that leads out, are refused.
+	escape := filepath.Join(realHome, "escape")
+	if err := os.Symlink(outside, escape); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{
+		filepath.Join(outside, "qs"), filepath.Join(escape, "qs"), filepath.Join(linkHome, "escape", "qs"),
+	} {
+		if _, _, err := checkQuickstartDir(dir); err == nil || !strings.Contains(err.Error(), "outside your home folder") {
+			t.Errorf("%s was not refused as outside home: %v", dir, err)
+		}
+		if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55452", time.Now()); err == nil {
+			t.Errorf("%s: prepare went on", dir)
+		}
+	}
+}

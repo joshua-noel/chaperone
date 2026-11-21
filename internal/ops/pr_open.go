@@ -127,11 +127,11 @@ func (p *PROpen) parse(req *Request) (prOpenParams, error) {
 	if !ok {
 		return bad(fmt.Sprintf("body must be text of at most %d bytes", prBodyMax))
 	}
-	head, ok := str("head", true, 250)
+	head, ok := str("head", true, githubspec.BranchMax)
 	if !ok {
 		return bad("head is required: the branch to open the pull request from (params.head; `chap pr open` takes the current git branch or --branch)")
 	}
-	base, ok := str("base", true, 250)
+	base, ok := str("base", true, githubspec.BranchMax)
 	if !ok {
 		return bad("base is required")
 	}

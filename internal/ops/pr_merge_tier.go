@@ -1,10 +1,11 @@
 package ops
 
 import (
-	"fmt"
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/joshua-noel/chaperone/internal/tierglob"
 )
 
 // PRTier is the review tier of a pull request (decision #22, ADR-002 step 5).
@@ -70,6 +71,8 @@ var (
 		"**/gemini.md", "**/agent.md", "**/claude.local.md", "**/skill.md", "**/copilot-instructions.md", "**/*.instructions.md",
 		"**/.cursorrules", "**/.windsurfrules", "**/.clinerules", "**/.aider*", "**/.mcp.json", "**/mcp.json",
 		"**/.claude/**", "**/.cursor/**", "**/.clinerules/**", "**/.codex/**", "**/.gemini/**", "**/.omp/**",
+		"**/agents.*.md", "**/claude.*.md", "**/gemini.*.md", "**/warp.md", "**/*.chatmode.md", "**/*.prompt.md",
+		"**/.windsurf/**", "**/.kiro/**", "**/.roo/**", "**/.junie/**", "**/.continue/**", "**/.amazonq/**", "**/.trae/**", "**/.agents/**",
 		// A documentation build runs these.
 		"**/.readthedocs.yaml", "**/.readthedocs.yml",
 	}
@@ -80,11 +83,12 @@ var (
 	// above; pyproject.toml would be medium as a .toml file, and is listed so
 	// the floor does not depend on the extension list.
 	baselineMedium = []string{
-		"**/requirements*.txt", "**/constraints*.txt", "**/pyproject.toml",
+		"**/*requirements*.txt", "**/*constraints*.txt", "**/requirements/**/*.txt", "**/pyproject.toml",
 		// A build script that the *.txt rule would call low.
 		"**/cmakelists.txt",
-		// An SVG can carry script; the other documentation types below are inert.
-		"docs/**/*.svg",
+		// MDX is compiled to a program that runs when the site is built, and an SVG can carry script; the other
+		// documentation types (Markdown, text, reStructuredText, AsciiDoc, images) are inert.
+		"**/*.mdx", "docs/**/*.svg",
 	}
 	// baselineTests are the paths a PR weakens the checks through. Tests are
 	// low on their own (CI runs them), but deleting or skipping them is medium.
@@ -100,7 +104,7 @@ var (
 	// Under docs/ only documentation file types are low. Anything else there falls through to the code rules, because
 	// a documentation build runs it (docs/conf.py for Sphinx, docs/hooks.py, a Makefile).
 	baselineLow = []string{
-		"**/*.md", "**/*.mdx", "**/*.txt", "license", "license.*",
+		"**/*.md", "**/*.txt", "license", "license.*",
 		"docs/**/*.rst", "docs/**/*.adoc", "docs/**/*.png", "docs/**/*.jpg", "docs/**/*.jpeg", "docs/**/*.gif", "docs/**/*.webp",
 		"**/*_test.go", "**/*.test.*", "**/*.spec.*",
 	}
@@ -126,31 +130,9 @@ var (
 func (g PRTierGlobs) Validate() error {
 	for _, set := range [][]string{g.High, g.Medium, g.Low} {
 		for _, p := range set {
-			if err := validGlob(p); err != nil {
+			if err := tierglob.Validate(p); err != nil {
 				return err
 			}
-		}
-	}
-	return nil
-}
-
-func validGlob(p string) error {
-	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, `\`) {
-		return fmt.Errorf("ops: bad tier glob %q", p)
-	}
-	// A path is low only when its form is plain (see cleanPath), and every other path is high. A glob that holds a
-	// character no plain name can hold could never match anything: refuse it, so it does not silently do nothing.
-	for _, r := range p {
-		if r > 0x7e || (!plainRune(r) && !strings.ContainsRune("*?^/", r)) {
-			return fmt.Errorf("ops: tier glob %q holds %q, which no plain path name can hold, so it would never match: a path with an accent, another script, ~ or other punctuation in its name is always high (docs/running-chapd.md)", p, r)
-		}
-	}
-	for _, seg := range strings.Split(p, "/") {
-		if seg == "**" {
-			continue
-		}
-		if _, err := path.Match(strings.ToLower(seg), ""); err != nil {
-			return fmt.Errorf("ops: bad tier glob %q: %w", p, err)
 		}
 	}
 	return nil
@@ -226,22 +208,13 @@ func cleanPath(p string) (string, bool) {
 	return strings.ToLower(p), true
 }
 
-// plainRune reports whether r may be in a component of a plain path.
-func plainRune(r rune) bool {
-	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-+@()[],= ", r)
-}
-
 // plainSegment reports whether one component of a path is in the form cleanPath allows.
 func plainSegment(seg string) bool {
 	if seg == "" || seg == "." || seg == ".." || seg[0] == ' ' || seg[len(seg)-1] == ' ' || seg[len(seg)-1] == '.' {
 		return false
 	}
 	for i := 0; i < len(seg); i++ {
-		c := seg[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-		case strings.IndexByte("._-+@()[],= ", c) >= 0:
-		default:
+		if c := seg[i]; c >= 0x80 || !tierglob.PlainRune(rune(c)) {
 			return false
 		}
 	}

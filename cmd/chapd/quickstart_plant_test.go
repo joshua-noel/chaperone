@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -286,5 +288,230 @@ func TestQuickstartChecksAParentMadeInTheGap(t *testing.T) {
 	}
 	if _, err := prepareQuickstartFolder(filepath.Join(base, "okparent", "qs"), nil, "127.0.0.1:55448", time.Now()); err != nil {
 		t.Errorf("a harmless parent made in the gap: %v", err)
+	}
+}
+
+// linkOrJunction makes link lead to target: a symlink, or on Windows without the privilege a junction.
+func linkOrJunction(t *testing.T, link, target string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err == nil {
+		return
+	}
+	if runtime.GOOS != "windows" {
+		t.Skip("no symlinks here")
+	}
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Skipf("no symlinks or junctions here: %v %s", err, out)
+	}
+}
+
+// rootAndOutside makes a root (the only allowed one besides home) and a sibling folder outside it.
+func rootAndOutside(t *testing.T) (root, outside string) {
+	t.Helper()
+	base := qsTemp(t)
+	root, outside = filepath.Join(base, "root"), filepath.Join(base, "outside")
+	for _, d := range []string{root, outside} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := quickstartTestRoots
+	quickstartTestRoots = []string{root}
+	t.Cleanup(func() { quickstartTestRoots = old })
+	return root, outside
+}
+
+func mustBeEmpty(t *testing.T, dir, what string) {
+	t.Helper()
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Errorf("%s: %s is not empty: %v %v", what, dir, entries, err)
+	}
+}
+
+// A link in the path the caller gives that leads OUT of the root. The rule: a link is followed once, up front, and the
+// resolved path must lie inside the root (on Windows a junction is not followed and is refused as a link). Either way it
+// is refused, and nothing is made anywhere, the link's target included.
+func TestQuickstartRefusesALinkInTheGivenPathThatLeadsOut(t *testing.T) {
+	// The home folder is moved to a fresh folder for this test, so the temp area is not inside it. Without that, on
+	// Windows (and on a Unix system whose TMPDIR is inside home) the "outside" folder would be inside the allowed root,
+	// and a real symlink to it, which is followed once, would rightly be accepted.
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	root, outside := rootAndOutside(t)
+	if within(outside, home) {
+		t.Fatalf("the outside folder %s is inside the home folder %s", outside, home)
+	}
+	link := filepath.Join(root, "lnk")
+	linkOrJunction(t, link, outside)
+	dir := filepath.Join(link, "deeper", "qs")
+	if _, _, err := checkQuickstartDir(dir); err == nil {
+		t.Error("check accepted a link that leads out")
+	}
+	if _, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55453", time.Now()); err == nil {
+		t.Error("prepare accepted a link that leads out")
+	}
+	mustBeEmpty(t, outside, "the link's target")
+	if entries, _ := os.ReadDir(root); len(entries) != 1 || entries[0].Name() != "lnk" {
+		t.Errorf("the root holds %v", entries)
+	}
+}
+
+// A parent replaced by a link to a folder outside the root AFTER the path was resolved and checked (the gap hook runs
+// there). What is then made is made through the link; the path no longer resolves to itself, so it is refused and what
+// was made is taken back: nothing is left outside.
+func TestQuickstartRefusesAParentSwappedForALinkAfterTheCheck(t *testing.T) {
+	root, outside := rootAndOutside(t)
+	parent := filepath.Join(root, "parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(parent, "qs")
+	swapped := false
+	prepareGapHook = func() {
+		if err := os.Rename(parent, parent+".away"); err != nil {
+			t.Error(err)
+			return
+		}
+		linkOrJunction(t, parent, outside)
+		swapped = true
+	}
+	defer func() { prepareGapHook = nil }()
+	_, err := prepareQuickstartFolder(dir, nil, "127.0.0.1:55454", time.Now())
+	if !swapped {
+		t.Skip("the parent could not be swapped here")
+	}
+	if err == nil {
+		t.Fatal("a parent swapped for a link in the gap was accepted")
+	}
+	mustBeEmpty(t, outside, "the folder outside the root")
+	if _, err := os.Stat(filepath.Join(parent+".away", "qs")); err == nil {
+		t.Error("something was made in the real parent after it was moved away")
+	}
+}
+
+// ONE path: prepare resolves once, and the folder it returns, derives its files from, records and prints is the resolved one.
+func TestQuickstartPrepareUsesTheResolvedPathThroughout(t *testing.T) {
+	root, _ := rootAndOutside(t)
+	real := filepath.Join(root, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	f, err := prepareQuickstartFolder(filepath.Join(link, "qs"), nil, "127.0.0.1:55455", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(real)
+	want = filepath.Join(want, "qs")
+	for name, got := range map[string]string{"Dir": f.Dir, "DB": filepath.Dir(f.DB), "Keys": filepath.Dir(f.Keys), "PolicyDir": filepath.Dir(f.PolicyDir),
+		"TokenFile": filepath.Dir(f.TokenFile), "LogDir": filepath.Dir(f.LogDir)} {
+		if !samePath(got, want) {
+			t.Errorf("%s is under %s, want %s", name, got, want)
+		}
+	}
+	if err := f.stillTheSameFolder(); err != nil {
+		t.Error(err)
+	}
+	if _, err := os.Stat(filepath.Join(real, "qs", quickstartMarker)); err != nil {
+		t.Errorf("the folder is not where the link leads: %v", err)
+	}
+}
+
+// Clean-up must not follow a link. If a part of the path is swapped for a link between making the folders and taking them
+// back, removing by path would delete a same-named empty folder (or unlink a same-named file) somewhere else. Each folder
+// is removed only if the path still leads to the recorded folder, only with a directory-only call, and clean-up stops at
+// the first mismatch.
+func TestRemoveCreatedDoesNotFollowASwappedPath(t *testing.T) {
+	for _, what := range []string{"folder", "file"} {
+		root, outside := rootAndOutside(t)
+		dir := filepath.Join(root, "a", "b")
+		created, err := makePrivateTree(dir)
+		if err != nil || len(created) != 2 {
+			t.Fatal(created, err)
+		}
+		if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "a.away")); err != nil {
+			t.Fatal(err)
+		}
+		linkOrJunction(t, filepath.Join(root, "a"), outside)
+		victim := filepath.Join(outside, "b") // same name as the folder that was made, behind the link
+		if what == "folder" {
+			if err := os.Mkdir(victim, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := os.WriteFile(victim, []byte("mine"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		removeCreated(created)
+		if _, err := os.Lstat(victim); err != nil {
+			t.Errorf("%s: clean-up through the swapped path removed %s", what, victim)
+		}
+		if _, err := os.Stat(filepath.Join(root, "a.away", "b")); err != nil {
+			t.Errorf("%s: clean-up went on after a mismatch and removed the real folder: %v", what, err)
+		}
+	}
+}
+
+// Untouched, clean-up takes back everything that was made, innermost first.
+func TestRemoveCreatedTakesBackWhatWasMade(t *testing.T) {
+	root, _ := rootAndOutside(t)
+	created, err := makePrivateTree(filepath.Join(root, "a", "b", "c"))
+	if err != nil || len(created) != 3 {
+		t.Fatal(created, err)
+	}
+	removeCreated(created)
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("left behind: %v", entries)
+	}
+	// A folder that is not empty is not removed (and then nothing outside it is touched).
+	created, err = makePrivateTree(filepath.Join(root, "x", "y"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "x", "y", "f"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removeCreated(created)
+	if _, err := os.Stat(filepath.Join(root, "x", "y", "f")); err != nil {
+		t.Errorf("a non-empty folder was removed: %v", err)
+	}
+}
+
+// confirmCreated compares the folder the path leads to with the identity recorded when the folder was made, not with itself.
+func TestConfirmCreatedComparesWithTheRecordedIdentity(t *testing.T) {
+	root, _ := rootAndOutside(t)
+	_, dir, err := resolveFolderPath(filepath.Join(root, "p", "qs")) // confirmCreated, like prepare, is given the resolved path
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := makePrivateTree(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := confirmCreated(dir, created[len(created)-1]); err != nil {
+		t.Fatalf("the folder that was made: %v", err)
+	}
+	other, err := recordMade(filepath.Dir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := confirmCreated(dir, other); err == nil || !strings.Contains(err.Error(), "not the folder that was made") {
+		t.Errorf("a different folder's identity was accepted: %v", err)
+	}
+	// The folder itself swapped for another after it was recorded.
+	if err := os.Rename(dir, dir+".away"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := confirmCreated(dir, created[len(created)-1]); err == nil {
+		t.Error("a folder swapped after it was made was accepted")
 	}
 }

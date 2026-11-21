@@ -42,6 +42,7 @@ func PRPolicyFromEngine(e *policy.Engine) PRPolicyFunc {
 			Base:        eff.PR.Base,
 			ExtraChecks: eff.PR.ExtraChecks,
 			Tiers:       PRTierGlobs{High: eff.PR.Tiers.High, Medium: eff.PR.Tiers.Medium, Low: eff.PR.Tiers.Low},
+			Invalid:     eff.PR.Invalid,
 		}
 		if l := eff.PR.LocalCI; l != nil {
 			p.LocalCI = &PRLocalCI{Check: l.Check, Instead: l.Mode == policy.LocalCIInstead}
@@ -77,6 +78,14 @@ func projectPR(pol PRPolicyFunc, r *Request, repo gh.Repo, op string) (PRPolicy,
 	p, ok := pol(r.Project)
 	if !ok {
 		return PRPolicy{}, noPRBlock(r.Project, op)
+	}
+	if p.Invalid == nil {
+		if err := p.Tiers.Validate(); err != nil {
+			p.Invalid = fmt.Errorf("its policy file %s.yaml has a tier glob that cannot be used, so pr.merge and pr.update are off for project %s until it is fixed (%w)", r.Project, r.Project, err)
+		}
+	}
+	if p.Invalid != nil {
+		return PRPolicy{}, &Refusal{Code: CodePolicyRefused, Why: clip(fmt.Sprintf("%s is refused: %v", op, p.Invalid), 700)}
 	}
 	if p.Repo != "" && !strings.EqualFold(p.Repo, repo.String()) {
 		return PRPolicy{}, &Refusal{Code: CodePolicyRefused, Why: clip(fmt.Sprintf(
@@ -222,6 +231,9 @@ func (a *prMergeAdapter) request(r *Request) (PRMergeRequest, error) {
 	base, err := paramString(r.Params, "base")
 	if err != nil {
 		return PRMergeRequest{}, err
+	}
+	if len(base) > githubspec.BranchMax {
+		return PRMergeRequest{}, paramsInvalid("param base is at most %d bytes", githubspec.BranchMax)
 	}
 	head, err := paramString(r.Params, "head_sha")
 	if err != nil {

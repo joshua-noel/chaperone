@@ -49,6 +49,9 @@ const (
 const (
 	// TitleMax is the longest pull request or issue title.
 	TitleMax = 200
+	// BranchMax is the longest branch name (head or base) a request may carry, in bytes. Git itself allows more,
+	// but no real branch name needs it, and the schema had no limit before.
+	BranchMax = 255
 	// PRBodyMax and IssueBodyMax are the longest bodies.
 	PRBodyMax    = 20000
 	IssueBodyMax = 10000
@@ -119,8 +122,8 @@ var PROpen = kit.Op{
 	Params: []kit.Param{
 		{Name: "title", Kind: kit.String, Required: true, MinLength: 1, MaxLength: TitleMax},
 		{Name: "body", Kind: kit.Text, MaxLength: PRBodyMax},
-		{Name: "head", Kind: kit.String, Required: true, Unbounded: true},
-		{Name: "base", Kind: kit.String, Required: true, Unbounded: true},
+		{Name: "head", Kind: kit.String, Required: true, MaxLength: BranchMax},
+		{Name: "base", Kind: kit.String, Required: true, MaxLength: BranchMax},
 		{Name: "draft", Kind: kit.Bool},
 	},
 	CLI: kit.CLI{Custom: true},
@@ -162,7 +165,7 @@ var PRMerge = kit.Op{
 	Doc:           "Phase 1 shape for `pr.merge` (owned by L1-10; the spec's reference example). Target is `{adapter: github, ref: \"owner/repo#N\"}`.",
 	Target:        prTarget,
 	Params: []kit.Param{
-		{Name: "base", Kind: kit.String, Required: true, Unbounded: true},
+		{Name: "base", Kind: kit.String, Required: true, MaxLength: BranchMax},
 		{Name: "head_sha", Kind: kit.String, Required: true, Pattern: SHAPattern},
 		{Name: "method", Kind: kit.String, Required: true, Const: "squash"},
 	},

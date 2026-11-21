@@ -227,6 +227,13 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		return nil, err
 	}
 	a.Policy = policy.NewEngine(cat, base, cfg.PolicyDir)
+	for _, p := range a.Policy.Problems() {
+		if p.Block == "" {
+			a.log.Warn("policy: a project file is invalid, so every op of the project is refused until it is fixed", "project", p.Project, "file", p.File, "err", p.Err.Error())
+		} else {
+			a.log.Warn("policy: a project file has an unusable "+p.Block+" block; pr.merge and pr.update are off for the project, its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
+		}
+	}
 
 	ghc, err := a.githubClient()
 	if err != nil {

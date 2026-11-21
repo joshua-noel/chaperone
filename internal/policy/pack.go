@@ -10,6 +10,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/joshua-noel/chaperone/internal/tierglob"
 )
 
 //go:embed data/baseline.yaml
@@ -138,6 +140,10 @@ type PR struct {
 	Base        string   // the branch PRs merge into
 	ExtraChecks []string // check names that must pass besides `verify`
 	Tiers       struct{ High, Medium, Low []string }
+	// Invalid is set when the block cannot be used for merging: a tier glob that can never match a plain path (see
+	// internal/tierglob). The project and every other op keep working; pr.merge and pr.update refuse, with this error,
+	// until the file is fixed. nil when the block is fine.
+	Invalid error
 	// LocalCI is the `pr.local_ci` block (ADR-002 amendment 10); nil when the project has none, and then pr.merge
 	// reads `verify` from GitHub Actions and nothing else.
 	LocalCI *LocalCI
@@ -279,4 +285,20 @@ func cloneProfiles(in map[string][]string) map[string][]string {
 		out[k] = slices.Clone(v)
 	}
 	return out
+}
+
+// tierProblem returns why the project's tier globs cannot be used, or nil. It names the policy file of the project
+// (<project>.yaml, in the policy folder), the tier and the glob.
+func (p *PR) tierProblem(project string) error {
+	for _, set := range []struct {
+		name  string
+		globs []string
+	}{{"high", p.Tiers.High}, {"medium", p.Tiers.Medium}, {"low", p.Tiers.Low}} {
+		for _, g := range set.globs {
+			if err := tierglob.Validate(g); err != nil {
+				return fmt.Errorf("its policy file %s.yaml has a tier glob that cannot be used, so pr.merge and pr.update are off for project %s until it is fixed (tiers.%s: %w)", project, project, set.name, err)
+			}
+		}
+	}
+	return nil
 }
