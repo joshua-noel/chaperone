@@ -304,3 +304,12 @@ func checkTrusted(path string) error {
 	}
 	return nil
 }
+
+// removeDirOnly removes an empty folder with RemoveDirectory, and nothing else: it fails on a file and does not delete a link's target.
+func removeDirOnly(path string) error {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	return windows.RemoveDirectory(p)
+}

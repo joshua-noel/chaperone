@@ -384,7 +384,7 @@ func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string
 		}
 		// What was made must be what was checked: the path still resolves to itself, no ancestor is a link or open to others
 		// (a parent made or swapped in the gap), and it is the same folder by identity. If not, take back what was made.
-		if err := confirmCreated(dir); err != nil {
+		if err := confirmCreated(dir, created[len(created)-1]); err != nil {
 			removeCreated(created)
 			return nil, err
 		}
@@ -409,7 +409,7 @@ func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string
 
 // makePrivateTree creates dir and any parent that does not exist, each with createPrivateDir. dir must not
 // exist: if it does (it was made after the check) that is an error.
-func makePrivateTree(dir string) ([]string, error) {
+func makePrivateTree(dir string) ([]madeDir, error) {
 	if _, err := os.Lstat(dir); err == nil {
 		return nil, fmt.Errorf("%s already exists; the quickstart makes its own folder and never uses one that exists", dir)
 	}
@@ -424,29 +424,66 @@ func makePrivateTree(dir string) ([]string, error) {
 		}
 	}
 	slices.Reverse(missing)
-	var created []string
+	var created []madeDir
 	for _, d := range missing {
 		if err := createPrivateDir(d); err != nil {
 			removeCreated(created)
 			return nil, fmt.Errorf("cannot create %s as a private folder: %w (it must not exist yet)", d, err)
 		}
-		created = append(created, d)
+		m, err := recordMade(d)
+		if err != nil {
+			removeCreated(created)
+			return nil, fmt.Errorf("cannot confirm %s is the folder that was just made: %w", d, err)
+		}
+		created = append(created, m)
 	}
 	return created, nil
 }
 
-// removeCreated takes back the folders a first run made, the innermost first. They are empty; Remove refuses a folder that is not.
-func removeCreated(created []string) {
+// madeDir is a folder this run made: its path, and its identity read from an open handle right after it was made.
+type madeDir struct {
+	path string
+	id   os.FileInfo
+}
+
+// recordMade records the identity of a folder createPrivateDir has just made. The path must be a plain folder, not a link.
+func recordMade(path string) (madeDir, error) {
+	st, err := os.Lstat(path)
+	if err != nil {
+		return madeDir{}, err
+	}
+	if !st.IsDir() || st.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+		return madeDir{}, fmt.Errorf("%s is not a plain folder", path)
+	}
+	id, err := folderIdentity(path)
+	if err != nil {
+		return madeDir{}, err
+	}
+	return madeDir{path, id}, nil
+}
+
+// removeCreated takes back the folders a first run made, the innermost first. Each is removed only if the path still
+// leads to the very folder that was recorded when it was made, and only with a directory-only call (removeDirOnly: rmdir,
+// which never unlinks a file or a link and refuses a folder that is not empty). At the first mismatch or failure it
+// stops and leaves the rest: a path that has been swapped for a link must not make clean-up delete something elsewhere.
+func removeCreated(created []madeDir) {
 	for i := len(created) - 1; i >= 0; i-- {
-		_ = os.Remove(created[i])
+		cur, err := folderIdentity(created[i].path)
+		if err != nil || !os.SameFile(cur, created[i].id) {
+			return
+		}
+		if err := removeDirOnly(created[i].path); err != nil {
+			return
+		}
 	}
 }
 
 // confirmCreated checks that the folder that now exists is the one that was checked. The path must still resolve to
 // itself (no ancestor has become a link since it was resolved), every ancestor must still pass checkAncestors (a parent
-// somebody else made, or replaced by a link or junction, in the gap is refused), and the folder reached by the path must
-// be the same object, by identity from an open handle, as the one reached by the resolved path.
-func confirmCreated(dir string) error {
+// somebody else made, or replaced by a link or junction, in the gap is refused), and the folder the path leads to must be
+// the very folder createPrivateDir made, by the identity recorded at creation (made.id). That record is what gives the
+// comparison meaning: the path is compared with what was made, not with itself.
+func confirmCreated(dir string, made madeDir) error {
 	again, err := resolveExisting(dir)
 	if err != nil {
 		return err
@@ -461,11 +498,7 @@ func confirmCreated(dir string) error {
 	if err != nil {
 		return err
 	}
-	b, err := folderIdentity(again)
-	if err != nil {
-		return err
-	}
-	if !os.SameFile(a, b) {
+	if !os.SameFile(a, made.id) {
 		return fmt.Errorf("%s is not the folder that was made", dir)
 	}
 	return nil

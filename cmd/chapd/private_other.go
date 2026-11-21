@@ -108,3 +108,6 @@ func checkTrusted(path string) error {
 	}
 	return nil
 }
+
+// removeDirOnly removes an empty folder with rmdir, and nothing else: on a file or a link it fails instead of unlinking.
+func removeDirOnly(path string) error { return syscall.Rmdir(path) }

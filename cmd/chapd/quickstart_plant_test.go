@@ -333,6 +333,9 @@ func mustBeEmpty(t *testing.T, dir, what string) {
 // is refused, and nothing is made anywhere, the link's target included.
 func TestQuickstartRefusesALinkInTheGivenPathThatLeadsOut(t *testing.T) {
 	root, outside := rootAndOutside(t)
+	if home, err := os.UserHomeDir(); err == nil && runtime.GOOS != "windows" && within(outside, home) {
+		t.Skipf("the temp folder %s is inside the home folder %s, so the \"outside\" folder is inside the allowed root and a symlink to it is rightly accepted", outside, home)
+	}
 	link := filepath.Join(root, "lnk")
 	linkOrJunction(t, link, outside)
 	dir := filepath.Join(link, "deeper", "qs")
@@ -409,5 +412,97 @@ func TestQuickstartPrepareUsesTheResolvedPathThroughout(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(real, "qs", quickstartMarker)); err != nil {
 		t.Errorf("the folder is not where the link leads: %v", err)
+	}
+}
+
+// Clean-up must not follow a link. If a part of the path is swapped for a link between making the folders and taking them
+// back, removing by path would delete a same-named empty folder (or unlink a same-named file) somewhere else. Each folder
+// is removed only if the path still leads to the recorded folder, only with a directory-only call, and clean-up stops at
+// the first mismatch.
+func TestRemoveCreatedDoesNotFollowASwappedPath(t *testing.T) {
+	for _, what := range []string{"folder", "file"} {
+		root, outside := rootAndOutside(t)
+		dir := filepath.Join(root, "a", "b")
+		created, err := makePrivateTree(dir)
+		if err != nil || len(created) != 2 {
+			t.Fatal(created, err)
+		}
+		if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "a.away")); err != nil {
+			t.Fatal(err)
+		}
+		linkOrJunction(t, filepath.Join(root, "a"), outside)
+		victim := filepath.Join(outside, "b") // same name as the folder that was made, behind the link
+		if what == "folder" {
+			if err := os.Mkdir(victim, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := os.WriteFile(victim, []byte("mine"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		removeCreated(created)
+		if _, err := os.Lstat(victim); err != nil {
+			t.Errorf("%s: clean-up through the swapped path removed %s", what, victim)
+		}
+		if _, err := os.Stat(filepath.Join(root, "a.away", "b")); err != nil {
+			t.Errorf("%s: clean-up went on after a mismatch and removed the real folder: %v", what, err)
+		}
+	}
+}
+
+// Untouched, clean-up takes back everything that was made, innermost first.
+func TestRemoveCreatedTakesBackWhatWasMade(t *testing.T) {
+	root, _ := rootAndOutside(t)
+	created, err := makePrivateTree(filepath.Join(root, "a", "b", "c"))
+	if err != nil || len(created) != 3 {
+		t.Fatal(created, err)
+	}
+	removeCreated(created)
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("left behind: %v", entries)
+	}
+	// A folder that is not empty is not removed (and then nothing outside it is touched).
+	created, err = makePrivateTree(filepath.Join(root, "x", "y"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "x", "y", "f"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removeCreated(created)
+	if _, err := os.Stat(filepath.Join(root, "x", "y", "f")); err != nil {
+		t.Errorf("a non-empty folder was removed: %v", err)
+	}
+}
+
+// confirmCreated compares the folder the path leads to with the identity recorded when the folder was made, not with itself.
+func TestConfirmCreatedComparesWithTheRecordedIdentity(t *testing.T) {
+	root, _ := rootAndOutside(t)
+	_, dir, err := resolveFolderPath(filepath.Join(root, "p", "qs")) // confirmCreated, like prepare, is given the resolved path
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := makePrivateTree(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := confirmCreated(dir, created[len(created)-1]); err != nil {
+		t.Fatalf("the folder that was made: %v", err)
+	}
+	other, err := recordMade(filepath.Dir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := confirmCreated(dir, other); err == nil || !strings.Contains(err.Error(), "not the folder that was made") {
+		t.Errorf("a different folder's identity was accepted: %v", err)
+	}
+	// The folder itself swapped for another after it was recorded.
+	if err := os.Rename(dir, dir+".away"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := confirmCreated(dir, created[len(created)-1]); err == nil {
+		t.Error("a folder swapped after it was made was accepted")
 	}
 }
