@@ -333,11 +333,14 @@ func mustBeEmpty(t *testing.T, dir, what string) {
 // is refused, and nothing is made anywhere, the link's target included.
 func TestQuickstartRefusesALinkInTheGivenPathThatLeadsOut(t *testing.T) {
 	root, outside := rootAndOutside(t)
-	if home, err := os.UserHomeDir(); err == nil && runtime.GOOS != "windows" && within(outside, home) {
-		t.Skipf("the temp folder %s is inside the home folder %s, so the \"outside\" folder is inside the allowed root and a symlink to it is rightly accepted", outside, home)
-	}
 	link := filepath.Join(root, "lnk")
 	linkOrJunction(t, link, outside)
+	// A junction is refused whatever it leads to. A real symlink is followed once, so when the temp folder is inside the
+	// home folder (always on Windows, where a symlink needs a privilege the CI runner has) its target is inside the
+	// allowed root and accepting it is right.
+	if home, err := os.UserHomeDir(); err == nil && within(outside, home) && followedAsSymlink(link) {
+		t.Skipf("the temp folder %s is inside the home folder %s, so the \"outside\" folder is inside the allowed root and a symlink to it is rightly accepted", outside, home)
+	}
 	dir := filepath.Join(link, "deeper", "qs")
 	if _, _, err := checkQuickstartDir(dir); err == nil {
 		t.Error("check accepted a link that leads out")
@@ -505,4 +508,11 @@ func TestConfirmCreatedComparesWithTheRecordedIdentity(t *testing.T) {
 	if err := confirmCreated(dir, created[len(created)-1]); err == nil {
 		t.Error("a folder swapped after it was made was accepted")
 	}
+}
+
+// followedAsSymlink reports whether resolving link follows it to another path (a symlink), as opposed to leaving it
+// in place (a Windows junction, which the quickstart does not follow).
+func followedAsSymlink(link string) bool {
+	res, err := filepath.EvalSymlinks(link)
+	return err == nil && !samePath(res, link)
 }
