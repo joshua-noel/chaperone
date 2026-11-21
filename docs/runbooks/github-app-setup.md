@@ -188,18 +188,33 @@ The guided path records the Client ID, which GitHub recommends as the `iss` of t
 - each refusal of the callback: another host, another origin, `null` origin, another site, not a page load, a wrong or missing or repeated start key, a wrong state (and that guesses do not use up the chance), a second callback, a callback before the start page, a bad code, a wrong method, a path, that nothing is reflected, the deadline, interruption, and a port that `[::1]` does not give;
 - a code from another App with the right state, a wider permission, an event, another owner (including the same manifest and state posted from another personal account, an owner in another case, and an owner with no login) and a key that is not RSA (each stores nothing);
 - that the key, the client secret and the webhook secret are not in the output, in `chapd`'s log, in the database, in the ledger, or in any file of the folder in the clear;
+- the ledger record: two events for `github.app.connect` that verify as a chain, with the App, owner, permissions and groups; none after a refusal; and a refusal to start when the ledger cannot be written;
 - the quickstart folder going through the command and then `chapd run` configuration and a start of `chapd` on it.
 
 **Not executed:** anything against the real GitHub. In particular: that GitHub accepts the manifest as it is (no `hook_attributes`, an empty `default_events`, `public: false`, a `redirect_url` on `localhost`); that its page and its redirect behave as its documentation says (the exact `Origin` and fetch-metadata headers a real browser sends on the redirect back; if they differ, the command refuses the callback and prints the fixed reason, and the fix is a small change to the checks); that the description, permissions and `events` in its answer match the manifest exactly (a mismatch makes the command refuse and store nothing, after the App was made); that a new App's key is accepted at once; that `GET /app` and `GET /app/installations` answer as documented; how a real organization with an App-creation policy behaves. [INFERENCE] These follow GitHub's documentation ("Registering a GitHub App from a manifest"; "REST API endpoints for GitHub Apps"). The first real run needs you at a browser; do it with a throwaway account or organization first and delete the App after.
 
 **Not tested here either:** the Windows install (see the top of this page), a Linux keyring, macOS Keychain.
 
+## What the ledger records
+
+When the key is stored, the command writes two ledger events, `op.request` and `op.result`, for the op `github.app.connect`, by the orchestrator id `operator`. There is no `op.approve`: an offline command has no card, and you running it as the account that runs `chapd` is the authority (the same rule as `chapd orch issue`). The body names the App's id and slug, the account that owns it (a user or an organization), the permissions and the extra groups asked for, and `github-app-key` as the key's vault name. It never holds a key, a secret or the temporary code. A refused setup stores nothing and records nothing.
+
+The command opens the ledger before it asks GitHub for anything. If the ledger cannot be written (for example a broken chain), it stops with "Nothing was started". `-instance` names the ledger chain (default `pc`, as for `chapd run`).
+
+Find the record by the op name in the console **Ledger** page or in the evidence pack ([ledger-evidence-pack.md](ledger-evidence-pack.md)).
+
 ## Starting over
 
 The command makes a first setup only. It refuses while either of these exists, so to start over from nothing **both must go**:
 
 1. the file `github-app.json` next to the database (delete it);
-2. the vault secret `github-app-key`. `chapd` has no command that deletes a secret today. The secret is the file `<vault-dir>\github-app-key.age` and one row, with id `github-app-key`, in the table `vault_secrets` of `state.db`. The simple way that needs no edit of the database is a **new database folder with a new vault** (`chapd vault init` there). To replace only the key of an App you still use, rotate it instead: [github-app-key.md](github-app-key.md).
+2. the vault secret `github-app-key`. Delete it with `chapd vault delete --name github-app-key`, run as the account that runs `chapd`, with the same `-db`, `-vault-dir`, `-vault-key-dir` and key wrapper flags as the setup. The command shows the name, the kind and when the secret was imported (never the value), then asks you to type the name. Where there is no terminal (a script) it needs `--yes` instead. It removes the vault file and the index row in one step and writes an `op.request` and `op.result` pair for `vault.delete` to the ledger. It refuses a name the vault does not hold.
+
+   The file is **removed, not overwritten**. On a modern file system an overwrite does not destroy the old blocks, so the command does not pretend to. If the key may have leaked, delete the App on GitHub too (below): that is what makes the old key useless.
+
+   If `chapd` is running, it can no longer use the key from that moment. If the command is interrupted, `chapd` refuses the half-removed secret (and will not start on it); run the same command again to finish.
+
+   To replace only the key of an App you still use, rotate it instead: [github-app-key.md](github-app-key.md).
 
 Also delete the App on GitHub, if it is yours, at the address in the message. An App that belongs to somebody else cannot be deleted by you, and the command never stores one.
 

@@ -139,6 +139,20 @@ func TestPatternShapes(t *testing.T) {
 		{"aws-access-key-id", "AKIA" + "IOSFODNN7EXAMPLE"},
 		{"slack-token", "xoxb-" + "123456789012-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx"},
 		{"slack-token", "xoxp-" + "123456789012-1234567890123"},
+		// one made-up value per format Slack documents (docs.slack.dev, "Tokens" and "Using token rotation")
+		{"slack-token", "xoxp-" + "111-222-333-d6bc768406e5c2e6958cfc399b438004"}, // the documentation's own example
+		{"slack-token", "xoxp-" + "111-222-333-d6bc76"},                           // a short secret from before August 2016
+		{"slack-token", "xoxa-" + "2-123456789012-123456789012-0123456789abcdef"}, // legacy workspace token
+		{"slack-token", "xoxo-" + "123456789012-123456789012-0123456789abcdef"},
+		{"slack-token", "xoxr-" + "123456789012-123456789012-0123456789abcdef"},
+		{"slack-token", "xoxs-" + "123456789012-123456789012-123456789012-0123456789abcdef"},
+		{"slack-token", "xoxb-" + "1234567890-AbCdEfGhIjKlMnOpQrStUvWx"}, // an old bot token: one digit group
+		{"slack-rotating-token", "xoxe.xoxb-" + "1-" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrStUvWxYz"},
+		{"slack-rotating-token", "xoxe.xoxp-" + "1-" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrStUvWxYz"}, // also a configuration token
+		{"slack-rotating-token", "xoxe-" + "1-" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrStUvWxYz"},      // refresh token
+		{"slack-rotating-token", "xoxe.xapp-" + "1-" + "A0123456789-1234567890123-0123456789abcdef0123456789abcdef"},
+		{"slack-app-token", "xapp-" + "1-" + "A0123456789-1234567890123-0123456789abcdef0123456789abcdef"},
+		{"slack-workflow-token", "xwfp-" + "0123456789-0123456789-0123456789-0123456789abcdef"},
 		{"stripe-key", "sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc"},
 		{"stripe-key", "sk_test_" + "4eC39HqLyjWDarjtT1zdp7dc"},
 		{"jwt", "eyJ" + randB64URL(t, 30) + ".eyJ" + randB64URL(t, 60) + "." + randB64URL(t, 43)},
@@ -160,7 +174,7 @@ func TestSecretShapeRulesLeaveOrdinaryTextAlone(t *testing.T) {
 	r := NewRegistry()
 	for _, in := range []string{
 		"the sntryu_ prefix and sntrys_ short", "sntryu_tooShort", "MAKIAIOSFODNN7EXAMPLEX", "AKIA", "AKIAshort", "akiaiosfodnn7example",
-		"xoxb- and xoxz-1234567890123456", "xoxb-short", "sk_live_short", "task_live_4eC39HqLyjWDarjtT1zdp7dc", "desk_test_4eC39HqLyjWDarjtT1zdp7dc",
+		"xoxb- and xoxz-1234567890123456", "the xoxo-love-letters-collection", "xoxb-notdigits-abcdefgh", "xoxe-mail", "xoxe and xoxes", "hugs xoxe-1-love", "xapp-store-listing", "xwfp-short", "xoxe.xoxb-notdigits-abcdefghijklmnopqrstuvwxyz", "xoxb-short", "sk_live_short", "task_live_4eC39HqLyjWDarjtT1zdp7dc", "desk_test_4eC39HqLyjWDarjtT1zdp7dc",
 		"Rack and Pinion AKIRA", "ValueError: bad total (cart 4501234567)",
 	} {
 		if out, res := r.Redact(in); res.Blocked() || out != in {

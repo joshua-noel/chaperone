@@ -47,6 +47,7 @@ How to follow one thing:
 | --- | --- |
 | What happened to one request? | The `factory.request_id` (`q-...`): `op.request`, then `op.approve` if it needed a card, then `op.result` with `outcome` |
 | What did the orchestrator do while a token was live? | `factory.requester.kind = orchestrator`; the window is between the `orchestrator.issue` and `orchestrator.revoke` events (see [`orchestrator-token.md`](orchestrator-token.md)) |
+| What did the operator change at the machine, with no card? | `factory.orchestrator.id = operator`, no `op.approve`, and a `factory.op` of `vault.delete` (`chapd vault delete`), `github.app.connect` (`chapd connect github`), `orchestrator.issue` or `orchestrator.revoke`. The body says what; the `op_hash` covers the exact parameters. `chapd vault import` and `chapd connect google` are not recorded |
 | What did one run do? | Its `run_id`: `run.start`, `grant`, its ops, `run.end` or `token.revoke` |
 | Who approved? | `op.approve`: approver, channel, the op hash it bound to |
 | What was refused and why? | `denial` events: `cause_code`, the surface and target |

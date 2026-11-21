@@ -246,6 +246,10 @@ func FDPassphrase(fd int) (PassphraseSource, error) {
 // system replace it.
 var isTerminal = func(*os.File) bool { return false }
 
+// IsTerminal reports whether f is a terminal (a console on Windows). A command
+// that needs a person at the keyboard uses it to decide how to ask.
+func IsTerminal(f *os.File) bool { return isTerminal(f) }
+
 // markCloseOnExec sets close-on-exec on descriptor fd, so child processes do
 // not inherit it. The files for each operating system replace it.
 var markCloseOnExec = func(int) {}
