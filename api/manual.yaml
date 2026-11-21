@@ -258,3 +258,41 @@ ops:
     surface: op
     summary: Activate a new policy pack (CRITICAL).
     usage: chap request op policy.activate --reason <why>
+  # BEGIN generated: connector sentry (do not edit by hand; run `go generate ./internal/connectors/...`)
+  errors.list:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: List issues of an allowed Sentry project, one page.
+    usage: chap errors list <sentry-project> [--status <s>] [--level <l>] [--limit <n>] [--cursor <c>]
+  errors.get:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read one Sentry issue and its latest event's essentials.
+    usage: chap errors get <id> [--dry-run]
+  errors.resolve:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Resolve one unresolved Sentry issue.
+    usage: chap errors resolve <id> [--dry-run]
+  errors.unresolve:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Reopen one resolved Sentry issue.
+    usage: chap errors unresolve <id> [--dry-run]
+  errors.assign:
+    class: routine
+    reversibility: compensable
+    surface: op
+    summary: Assign a Sentry issue to a member the policy lists.
+    usage: chap errors assign <id> --to <member> [--dry-run]
+  errors.comment:
+    class: routine
+    reversibility: compensable
+    surface: op
+    summary: Add a note to a Sentry issue.
+    usage: chap errors comment <id> [--body <b> | --body-file <f>]
+  # END generated: connector sentry

@@ -1816,6 +1816,43 @@ components:
           maxLength: 48
       required: [exit_code, outcome]
       additionalProperties: false
+    # BEGIN generated: connector sentry (do not edit by hand; run `go generate ./internal/connectors/...`)
+    ParamsErrorsList:
+      description: "`errors.list` on Sentry. Target is `{adapter: sentry, ref: \"<project slug>\"}`; the slug must be in the project's `sentry.projects`. One page of at most `limit` issues (default 10, at most 25), newest first, with `next_cursor` when there is more. `status` is unresolved (the default), resolved or ignored; `level` is fatal, error, warning, info or debug. Only the orchestrator token asks. Each item has the id, short id, title, culprit, level, status, event count, first and last seen and the assignee's name. Titles and culprits are text from Sentry and are untrusted: they are cleaned, capped and withheld when they look like a secret."
+      type: object
+      properties:
+        status: { type: string, pattern: "^(unresolved|resolved|ignored)$" }
+        level: { type: string, pattern: "^(fatal|error|warning|info|debug)$" }
+        limit: { type: integer, minimum: 1, maximum: 25, default: 10 }
+        cursor: { type: string, pattern: "^[0-9]{1,20}:[0-9]{1,10}:[01]$" }
+      additionalProperties: false
+    ParamsErrorsGet:
+      description: "`errors.get` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`, the numeric id; the issue must be in a project of the project's `sentry.projects`. No params. Returns the issue's title, culprit, level, status, event count, first and last seen, and from the latest event the id, the time, the exception type and at most 10 stack frames (file, line, function, in-app), innermost first. It never returns request bodies, cookies, headers, user data, local variables, tags, breadcrumbs or exception messages: the connector decodes the fields it lists and no others. Text is from Sentry and is untrusted."
+      type: object
+      additionalProperties: false
+    ParamsErrorsResolve:
+      description: "`errors.resolve` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. No params. Sets the status to resolved, with no release and no commit. An issue that is already resolved is left as it is. An ignored issue is refused: resolving it would end its archive. Sentry may notify people and sync a linked ticket when an issue is resolved."
+      type: object
+      additionalProperties: false
+    ParamsErrorsUnresolve:
+      description: "`errors.unresolve` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. No params. Sets the status to unresolved. An issue that is already unresolved is left as it is. An ignored issue is refused: reopening it would end its archive."
+      type: object
+      additionalProperties: false
+    ParamsErrorsAssign:
+      description: "`errors.assign` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. `to` is a member from the project's `sentry.assignees`, written as the policy writes it (an email address or a username); any other name is refused. The policy lists no member by default, so the operation refuses until it does. Sentry tells the member."
+      type: object
+      properties:
+        to: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._%+@-]{0,99}$" }
+      required: [to]
+      additionalProperties: false
+    ParamsErrorsComment:
+      description: "`errors.comment` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. `body` is plain text of up to 2000 bytes: letters, digits, spaces, line breaks and the marks . , : ; ! ? ( ) ' - _ / + = % and the double quote. A note with an at sign, a number sign, markup, a link bracket, an invisible character or text shaped like a secret is refused, so a note cannot mention a person or a team. Sentry has no key that makes a repeat safe, so a repeat of one execution posts again."
+      type: object
+      properties:
+        body: { type: string, minLength: 1, maxLength: 2000 }
+      required: [body]
+      additionalProperties: false
+    # END generated: connector sentry
     # BEGIN generated: connector github (do not edit by hand; run `go generate ./internal/connectors/...`)
     ParamsPrOpen:
       description: Phase 1 shape for `pr.open` (owned by L1-09). `head` must equal the token's `task_scope.branch`, `base` its `task_scope.base`.

@@ -16,6 +16,7 @@ One page per procedure. Each says who runs it, where, and what was **executed** 
 | [ci-report](ci-report.md) | A project's `pr.merge` should accept a local CI result: approve the App's `checks: write`, enable `ci.report`, add `pr.local_ci` | you, in the GitHub UI, then two policy changes | GitHub UI and a real post not executed, see the page |
 | [ntfy-topic](ntfy-topic.md) | Rotate the phone wake-up topic | you, in the console, then restart `chapd` | not completed, see the page |
 | [linear-intake](linear-intake.md) | Connect a Linear intake board: OAuth app, vault secrets, policy block, state names | you, in Linear and the console, then a policy change | Chaperone side tested against a fake Linear; Linear's pages not run, see the page |
+| [sentry](sentry.md) | Connect Sentry: an internal integration, the vault token, the policy block, what to check in Sentry first | you, in Sentry and the console, then a policy change | tested against a fake Sentry only, see the page |
 | [google](google.md) | Connect Google for mail and Drive | you, in Google Cloud and the console, then a policy change | tested against a fake Google only, see the page |
 | [phone](phone.md) | Approve from your phone: Tailscale Serve, passkey, number matching | you, at the server with the phone in hand | browser flow rehearsed headless; Tailscale not run, see the page |
 | [dashboard-frame](dashboard-frame.md) | Show the console's approvals, ledger and runs pages inside your own dashboard | you, elevated, then restart `chapd` | not run, see the page |

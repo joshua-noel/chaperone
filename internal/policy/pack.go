@@ -130,7 +130,11 @@ type Effective struct {
 	// Linear is the project's `linear:` block (the operator-board intake team,
 	// label and states); nil when the project file has none, and
 	// then the intake ops refuse the project.
-	Linear  *Linear
+	Linear *Linear
+	// Sentry is the project's `sentry:` block; nil when the project file has
+	// none, and then every errors.* op refuses the project. When the block is
+	// unusable, Sentry.Invalid says why and the ops refuse with that reason.
+	Sentry  *Sentry
 	Invalid error
 }
 

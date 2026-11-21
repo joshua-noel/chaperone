@@ -38,6 +38,15 @@ ops:
   issue.label:          { enabled: false, rate_per_minute: 6 }
   issue.move:           { enabled: false, rate_per_minute: 6 }
   issue.link:           { enabled: false, rate_per_minute: 6,  rate_per_hour: 30 }
+  # Sentry (internal/connectors/sentry): all six ops are OFF until a policy change flips them. For the orchestrator token only (no
+  # profile lists them, and a custom key can never hold an errors.* op). Each refuses a project whose policy file has no valid
+  # `sentry:` block, and touches only the Sentry projects that block lists. The caps bound the load on Sentry.
+  errors.list:          { enabled: false, rate_per_minute: 12, rate_per_hour: 300 }
+  errors.get:           { enabled: false, rate_per_minute: 12, rate_per_hour: 300 }
+  errors.resolve:       { enabled: false, rate_per_minute: 6,  rate_per_hour: 60 }
+  errors.unresolve:     { enabled: false, rate_per_minute: 6,  rate_per_hour: 60 }
+  errors.assign:        { enabled: false, rate_per_minute: 6,  rate_per_hour: 30 }
+  errors.comment:       { enabled: false, rate_per_minute: 6,  rate_per_hour: 30 }
   # Read-only PR views (ADR-002 amendment 12): on since the operator's policy PR. For the orchestrator token only (no profile lists them);
   # the repository is the project's `pr.repo`. The caps bound the load on GitHub: one to three API calls and one token per call.
   pr.view:              { enabled: true,  rate_per_minute: 30, rate_per_hour: 600 }

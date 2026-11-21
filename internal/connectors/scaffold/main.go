@@ -161,6 +161,14 @@ Nothing is registered and nothing is turned on. These steps stay by hand, in thi
   6. Add the baseline rule, off, to internal/policy/data/baseline.yaml. The rate must equal the declared one:
        <op name>: { enabled: false, rate_per_minute: <rate> }
      Turning an operation on is a separate, reviewed policy change.
+  7. Describe the operations in connectors/{name}.yaml (the profile test fails without it), and, for
+     operations that only the orchestrator token may hold, add the op prefix to neverInKeyPrefixes in
+     internal/ops/keyceiling.go.
+  8. If the limits depend on the project, add a block to the project policy: a type in internal/policy,
+     its loading in project.go, a field of Effective, a line in Engine.Problems, and a PolicyFunc in
+     Config (see internal/policy/sentry.go).
+  9. Test the wiring in cmd/chapd, write docs/runbooks/{name}.md, and add rows to README.md and
+     docs/running-chapd.md.
 
 The whole walkthrough is docs/write-a-connector.md.
 `)

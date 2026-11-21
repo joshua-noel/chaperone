@@ -173,13 +173,19 @@ The tool does not do these. Each one is a decision.
    ```
 
    The operation stays off. Turning it on is a separate, reviewed policy change. That change also adds the name to `shippedEnabled` in `internal/policy/policy_test.go`.
-5. **Run the tests that look at the whole:**
+5. **Say who may hold it.** In `internal/ops/keyceiling.go`, an operation is out of reach of a custom key unless the key ceiling lists it, so a new connector fails closed already. Add the connector's op prefix to `neverInKeyPrefixes` if its operations are for the orchestrator token only, and add its names to a test like `TestNoErrorsOpCanBeInACustomKey` in `keyceiling_test.go`. The ceiling is the code, and the profile of step 6 only says what the code does.
+6. **Describe it in a profile.** Add `connectors/notes.yaml`, one line for each operation: its class, its unit, whether it is on by default, its `chap` command, whether the orchestrator token alone may hold it, and the conditions its adapter enforces. `TestC19ProfilesTieToTheCatalogTheBaselineAndTheUsage` in `internal/policy` fails for an operation of the catalog that no profile lists, and when a profile disagrees with the catalog or the baseline. Copy `connectors/linear.yaml`.
+7. **Add a block to the project policy, when the limits depend on the project.** The skeleton has no project policy. A connector whose operations act on "this team" or "these projects" needs one. It is four edits in `internal/policy`: the type with its checks (`sentry.go`, `linear.go`), the key in `narrowFile` and its loading in `project.go`, the field of `Effective` in `pack.go`, and a line in `Engine.Problems` in `engine.go`. Copy `sentry.go`, the smallest. Then add a `PolicyFunc` to the adapters' `Config`, and a start-up warning in `cmd/chapd/app.go`. Follow `policy.PR.Invalid`: a mistake in the block sets `Invalid`, and only this connector's operations refuse. A key the file format does not know still refuses the whole file. See [A connector whose server comes from the policy](#a-connector-whose-server-comes-from-the-policy).
+8. **Run the tests that look at the whole.** Run all the packages once. `./internal/ops` is the easy one to forget: `TestCatalogNarrowsToToken` there counts the operations of the catalog and the ones that ship off, so it fails for every new connector until you add your operations to its two numbers.
 
    ```
-   go test ./internal/connectors/... ./cmd/chap ./cmd/chapd ./internal/policy ./internal/mcpfront ./docs/manualgen
+   go test ./...
    ```
 
-Nothing in the first three steps changes what chapd does, until step 3 is merged. Nothing runs until step 4 is turned on.
+   or, to see the ones this page names first: `go test ./internal/connectors/... ./cmd/chap ./cmd/chapd ./internal/policy ./internal/ops ./internal/mcpfront ./docs/manualgen`.
+9. **Test the wiring, write the runbook, say it in the docs.** The conformance suite builds the adapters itself and never goes through `chapd`. Only a test in `cmd/chapd` proves the path from the vault secret, the project file and the orchestrator token to the adapter and the ledger. Copy `cmd/chapd/linear_test.go` or `sentry_test.go`. Add `docs/runbooks/<name>.md` and its row in `docs/runbooks/README.md`, a row in the table of `README.md`, and a paragraph in `docs/running-chapd.md`. The runbook says how to make the credential with the smallest scopes, what to check in the service before turning the operations on, and, plainly, whether the connector ever talked to the real service.
+
+Nothing in steps 1 and 2 changes what chapd does. Step 3 builds the adapters, and they refuse every request until the rule of step 4 is turned on.
 
 ## A write operation
 
@@ -192,6 +198,18 @@ A write needs these changes to the example:
 - Read the facts again in `Execute`, before the write. `Check` ran earlier.
 - Send a write at most once. A definite refusal by the service is a `failed` outcome. An answer that does not show whether the service acted is `unconfirmed`, and the result says what to look up. Never retry a write in the adapter.
 - Count the write route in the fake, in `WriteCalls` and in `WritesApplied`.
+
+## A connector whose server comes from the policy
+
+The skeleton fixes the service address in the client (`ClientConfig.BaseURL`). A self-hosted service, or one with a region in its name, needs the address to come from the project's policy. Then the policy decides where the credential is sent. The Sentry connector does it like this:
+
+- **A narrow rule, not a list of bad hosts.** The policy loader and the client both call one function (`policy.CheckSentryBaseURL`): an https origin with a lower-case DNS name that has a dot and is not an IP address, an optional port, and nothing after it. The client applies it before every request, so the rule does not rest on the file alone.
+- **Resolve once, use everywhere.** The adapter makes one `Scope` (server and organisation) from the policy at the start of `Check` or `Execute`. The read and the write of that call use it.
+- **No relaxed mode for tests.** The skeleton's client accepts plain http to a loopback address. Do not keep that in a client whose address comes from the policy. Make the fake an https server (`httptest.NewTLSServer`) and give the client a test HTTP client that trusts the fake's certificate and sends every request to it. Then every test goes through the strict rule. `sentrytest.Server.HTTPClient` does this.
+- **No redirect, whatever HTTP client is given.** The client copies the one it is given and sets `CheckRedirect`. A test sends a redirect and checks that the fake saw one request.
+- **Decode only the fields you list.** For a service whose answers can carry secrets (an error event can hold headers, cookies, a request body, a user's address and local variables), the client decodes into types that hold the allowed fields only. `encoding/json` drops the rest, so it is never in memory as data. Build the fake so every one of those fields holds a planted value, and test that none reaches a result.
+- **Fence the object, not only the request.** A token that reaches a whole organisation is narrowed by the policy. Read the object in `Execute`, before the write, and compare the field that names its scope (the project) with the policy by an exact match, on the service's value as it is. Print the service's text only after cleaning it, and only in a message.
+- **A state-setting write that is already true sends nothing.** `errors.resolve` on a resolved issue reads, finds the state, and sends no write. That is repeat safety without a key, and the suite sees it: the second `Execute` changes nothing.
 
 ## When a check cannot pass yet
 
@@ -222,6 +240,8 @@ The suite tests your adapter against a fake that you wrote. It does not prove:
 - **That `Check` leaves nothing behind.** It counts writes. A token that the adapter mints and does not revoke is not a write, and the suite does not see it.
 - **That the adapter is idempotent against the real service.** It proves it against the fake. The fake only refuses a repeat if you wrote it to.
 - **Limits that the declaration cannot express.** A `Pattern`, a string with `Unbounded`, a ref with a shape of its own, a policy that depends on the project: write `Invalid` samples for these.
+- **A refusal that needs a read in `Execute`.** An `Invalid` sample must be refused by `Check`. An operation whose `Check` reads nothing (a read of one issue, for example) cannot show that `Execute` refuses an issue of another project, because `Check` does not know it. Test that in your own tests, with the fake changed between the two calls.
+- **The order of your checks.** Every request that breaks a declared limit must be refused with `OP_PARAMS_INVALID`, not with a policy code. If a param has a `Pattern` and the adapter also checks it against a list from the policy, check the pattern first. The suite sends `!` for a pattern param and wants `OP_PARAMS_INVALID`.
 - **That the operation is on, or allowed.** The baseline and the policy decide that.
 - **That the fake counts honestly.** Checks 1, 2, 4 and 5 read the counters of your fake (`WriteCalls`, `WritesApplied`). A fake that counts no writes passes all four. The suite only fails an operation that is not `ReadOnly` when no valid sample changes the fake. It cannot tell that a `ReadOnly` operation really writes nothing, because the kit has no read-only fact to compare with. Count every write route, and review the `ReadOnly` flag.
 - **That `Plant` plants.** A `Plant` that does nothing proves nothing for an operation declared `NoServiceText`: the suite has no way to see it. For the other two kinds the suite checks that the planted words reach the result, and that the planted secret-shaped text leaves a trace. Read your `Plant`.

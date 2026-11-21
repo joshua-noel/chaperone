@@ -10,6 +10,7 @@ import (
 	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/connectors/kit"
 	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
+	"github.com/joshua-noel/chaperone/internal/connectors/sentry/sentryspec"
 )
 
 //go:generate go run ./gen -root ../../..
@@ -17,7 +18,7 @@ import (
 // Connectors returns the declared connectors. The regions of the catalog and
 // of the params schemas sit where the hand-written entries they replaced were.
 func Connectors() []kit.Connector {
-	return []kit.Connector{githubspec.Connector, githubspec.CI, linearspec.Connector}
+	return []kit.Connector{githubspec.Connector, githubspec.CI, linearspec.Connector, sentryspec.Connector}
 }
 
 // Ops returns every declared operation, connector by connector.

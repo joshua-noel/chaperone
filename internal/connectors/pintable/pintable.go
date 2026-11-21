@@ -33,6 +33,18 @@ var Pins = map[string]kit.Pin{
 	"issue.move":  {Class: kit.Routine, Reversibility: kit.Reversible},
 	"issue.link":  {Class: kit.Routine, Reversibility: kit.Reversible},
 
+	// Sentry. Reads are reversible. Resolve and unresolve undo each other, so they
+	// are reversible; what Sentry does besides (a notice, a linked ticket) is not
+	// undone by the other one, and docs/runbooks/sentry.md says so. Assign and
+	// comment are compensable: no operation leaves an issue unassigned again or
+	// removes a note, and the member or the people who follow the issue are told.
+	"errors.list":      {Class: kit.Routine, Reversibility: kit.Reversible},
+	"errors.get":       {Class: kit.Routine, Reversibility: kit.Reversible},
+	"errors.resolve":   {Class: kit.Routine, Reversibility: kit.Reversible},
+	"errors.unresolve": {Class: kit.Routine, Reversibility: kit.Reversible},
+	"errors.assign":    {Class: kit.Routine, Reversibility: kit.Compensable},
+	"errors.comment":   {Class: kit.Routine, Reversibility: kit.Compensable},
+
 	// GitHub. pr.merge is the one gated operation: it merges on its own when
 	// verify is green on the exact head, and a merge is undone only by a revert
 	// commit, hence compensable. Do not loosen it to routine.

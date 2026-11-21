@@ -79,6 +79,19 @@ var rules = []rule{
 		Covers: []string{"never to the Engineering team"},
 	},
 	{
+		Text:  "The Sentry connector (`chap errors`) acts only on the Sentry projects that the project's policy lists, and reads the issue again just before every write. It returns no request data, cookies, headers, user data or local variables of an event: `chapd` decodes the fields it lists and no others. It sends its token only to the one https host the policy names, and follows no redirect. It cannot delete, merge, ignore or create an issue, unassign, or delete a note, and a note cannot mention a person or a team. All six ops are off until a policy change turns them on, and nothing here ran against a real Sentry.",
+		Where: "internal/connectors/sentry: `client.go`, `base.readIssue`, `note.go`; internal/policy: `sentry.go`",
+		Tests: []testRef{
+			{"internal/connectors/sentry", "TestGetReturnsTheEssentialsAndNothingElse"},
+			{"internal/connectors/sentry", "TestProjectChangedBetweenCheckAndWriteStopsTheWrite"},
+			{"internal/connectors/sentry", "TestARedirectIsNotFollowed"},
+			{"internal/connectors/sentry", "TestTheClientSendsOnlyToAnExactHTTPSHost"},
+			{"internal/connectors/sentry", "TestOnlyTheFixedRoutesAreEverCalled"},
+			{"internal/connectors/sentry", "TestNoteRefusesWhatCouldMentionOrLinkOrHide"},
+			{"internal/policy", "TestCheckSentryBaseURL"},
+		},
+	},
+	{
 		Text:  "`chap mcp` serves the ops as MCP tools to a client on the same machine over stdio, and does nothing the command line cannot: each tool call is one request to `chapd` with the same credential, so policy, approvals and the ledger apply. It listens on nothing, and it cannot show or change an approval card: a call that needs a human returns only the op id, the approval id, the class and the time left. Text an op read from outside comes back in a field named `untrusted_result`.",
 		Where: "internal/mcpfront; cmd/chap: `mcp.go`",
 		Tests: []testRef{

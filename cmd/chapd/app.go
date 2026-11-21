@@ -101,6 +101,10 @@ type Config struct {
 	// linearEndpoints, when set, replaces Linear's production endpoints (tests
 	// point it at a fake Linear).
 	linearEndpoints *linear.Endpoints
+	// sentryHTTP, when set, is the HTTP client of the Sentry connector (tests give
+	// one that sends every request to a fake Sentry). chapd never sets it: the
+	// connector still holds every base URL to the policy rule.
+	sentryHTTP *http.Client
 	// baselineYAML, when set, replaces the embedded baseline pack (tests turn
 	// the intake ops on with it).
 	baselineYAML []byte
@@ -230,6 +234,8 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	for _, p := range a.Policy.Problems() {
 		if p.Block == "" {
 			a.log.Warn("policy: a project file is invalid, so every op of the project is refused until it is fixed", "project", p.Project, "file", p.File, "err", p.Err.Error())
+		} else if p.Block == "sentry" {
+			a.log.Warn("policy: a project file has an unusable sentry block; the Sentry operations (errors.*) are off for the project, its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
 		} else if p.Block == "linear.issues" {
 			a.log.Warn("policy: a project file has an unusable linear.issues block; the Linear issue operations (and Linear's issue.comment) are off for the project, the intake and its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
 		} else {
@@ -391,6 +397,10 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	}
 	// the operator-board intake ops; on in the baseline, refused for a project with no `linear:` block.
 	if err := a.installLinear(ads); err != nil {
+		return nil, err
+	}
+	// the six Sentry errors.* ops; off in the baseline, refused for a project with no valid `sentry:` block.
+	if err := a.installSentry(ads); err != nil {
 		return nil, err
 	}
 	// L1-15: `deploy` and chap-host's routes, only when its flags are set.

@@ -2,7 +2,7 @@
 
 A connector lets Chaperone act on one service for an agent, so the agent never holds a credential for it. This page says how a connector is put together, what rules it must follow, and how to add one operation.
 
-Status: the connector kit covers the Linear connector (the intake operations and the issue operations) and the GitHub operations. Google still uses the older layout. See [What is covered](#github-what-is-covered-and-what-stays-custom) and [What is not covered yet](#what-is-not-covered-yet). To add a connector, follow [Write a connector](write-a-connector.md). That page starts from a scaffold and ends at a passing conformance suite.
+Status: the connector kit covers the Linear connector (the intake operations and the issue operations), the GitHub operations and the Sentry connector. Google still uses the older layout. See [What is covered](#github-what-is-covered-and-what-stays-custom) and [What is not covered yet](#what-is-not-covered-yet). To add a connector, follow [Write a connector](write-a-connector.md). That page starts from a scaffold and ends at a passing conformance suite.
 
 ## The seam
 
@@ -214,6 +214,27 @@ The Linear connector declares ten operations in `internal/connectors/linear/line
 
 **The connector profiles.** `connectors/github.yaml` and `connectors/linear.yaml` (embedded by package `connectors`) list, for each built operation, what the catalog cannot hold: the unit it acts on, the conditions an adapter enforces, whether the orchestrator's token alone may hold it, and the name the connector standard gives the capability. `internal/policy/profile_test.go` ties each profile to `api/manual.yaml`, the baseline and the `chap` usage lines, so the three cannot drift apart: a new operation needs a profile entry, or a place in `unprofiledOps`. It also requires `intake_label_excluded` on every issue operation of the Linear profile. The profiles are data for review. `chapd` does not read them, and they enable nothing.
 
+## Sentry: a server that the policy names, and an allow-list of fields
+
+The Sentry connector declares six operations in `internal/connectors/sentry/sentryspec/spec.go`. It is the first connector that was built from the scaffold and the guide, and not moved onto the kit. They are for the orchestrator token (a custom key cannot hold an `errors.*` operation), they act only on the Sentry projects that the project's `sentry:` block lists, and they are off in the baseline. The facts and the reasons are in [ADR-003, amendment 8](adr/003-vault.md); the steps for the operator are in [the runbook](runbooks/sentry.md). **Nothing here ran against a real Sentry.**
+
+| Operation | Class | Reversibility | Why that class | Catalog entry, params schema, adapter binding | `chap` command |
+| --- | --- | --- | --- | --- | --- |
+| `errors.list`, `errors.get` | routine | reversible | reads | generated | generated |
+| `errors.resolve`, `errors.unresolve` | routine | reversible | each undoes the other; the issue is read first and the op is limited to the listed projects | generated | generated (`--dry-run` too) |
+| `errors.assign` | routine | compensable | no op leaves an issue unassigned again, and the member is told | generated | generated |
+| `errors.comment` | routine | compensable | no op removes a note, and the followers are told | generated | generated (`--body`, `--body-file`) |
+
+Why none is `high` or `gated`: each acts on one issue of a project that the operator listed, is rate-limited per minute and per hour, is off until the operator turns it on, and can be put back by a person in Sentry. What a resolve can start in Sentry (a notice, a linked ticket that closes, a chat or paging message) is not undone by `errors.unresolve`. The class cannot see that, so the runbook has a list to check before the ops are turned on, and the owner may decide that `errors.resolve` needs an approval. It would then be `kit.High` and `Reversibility: kit.Compensable`, and the pin, the baseline note and the profile would change with it.
+
+What is new here, compared with Linear and GitHub:
+
+- **The server comes from the policy.** `sentry.base_url` is an https origin with an exact DNS host name (`policy.CheckSentryBaseURL`), the client checks it again before every request, and no redirect is followed. A test cannot relax it: the fake is an https server and the test HTTP client sends every request to it. See [A connector whose server comes from the policy](write-a-connector.md#a-connector-whose-server-comes-from-the-policy).
+- **Fields are an allow-list.** The client decodes the fields it lists and no others, so request data, cookies, headers, user data and local variables of an event are never held.
+- **A note is plain text by a narrow allow rule.** `internal/connectors/sentry/note.go` allows letters, digits, spaces, line breaks and a short list of marks. There is no way to write a mention, markup or a link bracket, and no list of bad forms to keep up.
+- **A state-setting write is repeat-safe without a key.** A resolve of a resolved issue sends nothing. `errors.comment` is the exception, as GitHub's `issue.comment` is: Sentry has no idempotency key for a note, and a marker in the text would change what is posted. It is declared `NotRepeatable` in the connector test.
+- **Four of the five fixed routes are for one issue.** The caller gives an issue id, and the issue is fenced by the project it reports, on every write.
+
 ## The conformance suite
 
 `internal/connectors/conformance` is a test that a connector's own test calls with `conformance.Run`. It drives the real adapters against a fake service and runs seven checks for every declared operation:
@@ -226,7 +247,7 @@ The Linear connector declares ten operations in `internal/connectors/linear/line
 6. Text from the service is cleaned of control and format characters and capped (`CleanedText`), and for an operation of the strict kind it is also marked `untrusted_text` and an item that looks like a secret is withheld (`ServiceText`). Or the operation declares that it returns none, and the suite checks that it echoes none.
 7. The declared class and reversibility equal the pin.
 
-The tests that call it are `internal/connectors/linear/conformance_test.go` (ten operations, none with a `Known` entry or a `NotRepeatable` declaration) and `internal/connectors/github/conformance_test.go`. `internal/connectors/conformance/conformance_test.go` tests the suite itself: a small connector passes, and each defect (a write in `Check`, a repeat, a credential in a result in several encodings, a bad code, a missing limit, uncleaned text, and more), switched on one at a time, fails the check that is meant to catch it. [Write a connector](write-a-connector.md) says how to use it, and what it does not prove. A check that is a known gap is listed with `Known` (a reason and the text of the known problem; any other problem is an error), and `NotRepeatable` shows as a skip with its reason.
+The tests that call it are `internal/connectors/linear/conformance_test.go` (ten operations, none with a `Known` entry or a `NotRepeatable` declaration), `internal/connectors/github/conformance_test.go` and `internal/connectors/sentry/conformance_test.go` (six operations, no `Known` entry, one `NotRepeatable`: `errors.comment`). `internal/connectors/conformance/conformance_test.go` tests the suite itself: a small connector passes, and each defect (a write in `Check`, a repeat, a credential in a result in several encodings, a bad code, a missing limit, uncleaned text, and more), switched on one at a time, fails the check that is meant to catch it. [Write a connector](write-a-connector.md) says how to use it, and what it does not prove. A check that is a known gap is listed with `Known` (a reason and the text of the known problem; any other problem is an error), and `NotRepeatable` shows as a skip with its reason.
 
 ### What the conformance suite found
 
@@ -251,6 +272,7 @@ The first run of the suite found four gaps in the shipped connectors. Each was r
 - **Order of two simultaneous usage errors.** The generic command checks the params in the order they are declared, which is the order of the schema. For `pr files` that means `--page` and `--per-page` are checked before `--expected-head`; the hand-written command checked `--expected-head` first. It matters only when two flags are wrong at once.
 - **An unknown param is refused with the declared names in declaration order.** The refusal of `pr.files` lists `page, per_page, expected_head_sha`; it listed `expected_head_sha, page, per_page`.
 - **Description quoting.** The generator writes a params description plain when it is short and plain, and in double quotes otherwise (over 160 characters, or a character that YAML reads specially). This is the rule that gives the bytes the hand-written text had.
+- **Project policy is not declared.** A connector whose limits depend on the project writes a type in `internal/policy` by hand: the type and its checks, its loading in `project.go`, a field of `Effective`, a line in `Engine.Problems` and a start-up warning in `cmd/chapd/app.go`. The kit has no place to declare it, and the scaffold writes none of it. [Write a connector](write-a-connector.md) says so (step 7).
 - **Shared helpers are not shared.** The HTTP client that never logs a credential, the rate limit and retry code, and the check of text that is sent to the service (`checkText`) live in `linear`. Other connectors have their own copies. The cleaning of text that comes from the service is shared: `internal/connectors/untrusted`.
 - **The baseline is still edited by hand.** A new operation needs its one baseline line. This is deliberate for the switch that turns an operation on, but the line for a new, disabled operation could be added by the generator. *Decided for now:* no generation of the baseline, and the rate stays written in both the declaration and the baseline, with a test that they agree. The owner has not answered yet.
 - **Approval card text.** An adapter adds evidence to a card in `Check`. The declaration does not describe it.

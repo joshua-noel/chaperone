@@ -14,7 +14,7 @@ internal/approvals/           the approvals engine and the approval cards
 internal/console/             the web console; web/ holds its templates and static files
 internal/gh/, internal/gitproxy/   the GitHub App client and chapd's git proxy
 internal/ops/, internal/policy/    the operations and the policy that gates them
-internal/connectors/          third-party connectors (Google, Linear)
+internal/connectors/          third-party connectors (Google, Linear, Sentry)
 internal/mcpfront/            the local MCP server behind `chap mcp`
 internal/spec/                the contract shared with the runner: schemas and golden vectors (specdata/), strict JSON, JCS, hashes, validation
 internal/version/             build identity printed by `<binary> version`

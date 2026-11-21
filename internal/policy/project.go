@@ -80,6 +80,16 @@ type narrowFile struct {
 			Comment     bool     `yaml:"comment"`
 		} `yaml:"issues"`
 	} `yaml:"linear"`
+	// Sentry is the connector policy of the project: the Sentry server and
+	// organisation, the project slugs the errors.* ops may touch and the members
+	// errors.assign may assign to. Like `linear:` it only adds data; it never turns
+	// an op on. A mistake in it turns off the Sentry ops only (see Sentry.Invalid).
+	Sentry *struct {
+		BaseURL      string   `yaml:"base_url"`
+		Organization string   `yaml:"organization"`
+		Projects     []string `yaml:"projects"`
+		Assignees    []string `yaml:"assignees"`
+	} `yaml:"sentry"`
 }
 
 // LoadProject applies a project file to the baseline. The file may only
@@ -210,6 +220,18 @@ func (p *Pack) LoadProject(project string, data []byte, cat *Catalog) (*Effectiv
 			l.Issues = nil
 		}
 		eff.Linear = l
+	}
+	if f.Sentry != nil {
+		s := &Sentry{
+			BaseURL: f.Sentry.BaseURL, Organization: f.Sentry.Organization,
+			Projects: slices.Clone(f.Sentry.Projects), Assignees: slices.Clone(f.Sentry.Assignees),
+		}
+		// A bad block turns off the Sentry operations only, not the project: the rest of the file is fine. The fields
+		// are cleared, so a block that cannot be used is never half usable.
+		if err := s.problem(project); err != nil {
+			s = &Sentry{Invalid: err}
+		}
+		eff.Sentry = s
 	}
 	return eff, nil
 }

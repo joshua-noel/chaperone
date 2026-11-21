@@ -16,6 +16,12 @@ commands:
   dev-token          mint an interim run token into a file (orchestrator only)
   doctor             check the server's Chaperone install (from a normal, not elevated, terminal)
   drive share        share one Drive file with allowlisted recipients (needs approval)
+  errors assign      assign a Sentry issue to a member the policy lists
+  errors comment     add a note to a Sentry issue
+  errors get         read one Sentry issue and its latest event
+  errors list        list issues of an allowed Sentry project
+  errors resolve     resolve one Sentry issue
+  errors unresolve   reopen one resolved Sentry issue
   git setup          route git's GitHub traffic through chapd's git proxy
   health             read the pilot's readiness status
   intake comment     comment on a labelled operator-board item

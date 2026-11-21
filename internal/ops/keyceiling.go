@@ -50,7 +50,7 @@ func KeyCeilingOps() []string {
 // whatever its row says: they decide, issue, administer, read secrets or are
 // the orchestrator's own.
 var (
-	neverInKeyPrefixes = []string{"keys.", "people.", "roles.", "secrets.", "issue.", "intake."}
+	neverInKeyPrefixes = []string{"keys.", "people.", "roles.", "secrets.", "issue.", "intake.", "errors."}
 	neverInKeyOps      = []string{"approvers.enroll", "policy.activate", "ci.report", "repo.settings", "host.scripts.refresh"}
 )
 

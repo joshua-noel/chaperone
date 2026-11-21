@@ -36,3 +36,12 @@ linear:
     - In Progress
     - Waiting/Blocked
     - Done
+
+# Sentry (docs/runbooks/sentry.md): the server, the organisation, the Sentry projects the errors.* ops may touch,
+# and the members errors.assign may use. The ops are off in the baseline; this block alone turns nothing on. A
+# mistake in the block (not an unknown key) turns off the Sentry ops of the project only. Remove the `#` marks to use it.
+# sentry:
+#   base_url: https://sentry.example.com
+#   organization: acme
+#   projects: [web]
+#   assignees: []

@@ -56,6 +56,12 @@ The op catalog (`api/manual.yaml`). Whether an op is switched on is policy, per 
 | `data.apply` | high | compensable | op | Apply a data change after a verified backup and approval. | `chap request op data.apply --reason <why>` |
 | `deploy` | high | compensable | op | Deploy a commit to the pilot after one approval. | `chap deploy <sha>` |
 | `drive.share` | high | compensable | op | Share one Drive file with allowlisted recipients. | `chap drive share <file-id> --from <account> --name <file-name> --to <a> --role <r>` |
+| `errors.assign` | routine | compensable | op | Assign a Sentry issue to a member the policy lists. | `chap errors assign <id> --to <member> [--dry-run]` |
+| `errors.comment` | routine | compensable | op | Add a note to a Sentry issue. | `chap errors comment <id> [--body <b> \| --body-file <f>]` |
+| `errors.get` | routine | reversible | op | Read one Sentry issue and its latest event's essentials. | `chap errors get <id> [--dry-run]` |
+| `errors.list` | routine | reversible | op | List issues of an allowed Sentry project, one page. | `chap errors list <sentry-project> [--status <s>] [--level <l>] [--limit <n>] [--cursor <c>]` |
+| `errors.resolve` | routine | reversible | op | Resolve one unresolved Sentry issue. | `chap errors resolve <id> [--dry-run]` |
+| `errors.unresolve` | routine | reversible | op | Reopen one resolved Sentry issue. | `chap errors unresolve <id> [--dry-run]` |
 | `health` | routine | reversible | op | Read the pilot's readiness status. | `chap health` |
 | `host.scripts.refresh` | critical | compensable | op | Refresh the host scripts from main (CRITICAL). | `chap request op host.scripts.refresh --reason <why>` |
 | `intake.comment` | routine | compensable | op | Comment on a labelled operator-board item. | `chap intake comment <SHOP-12> --body <b>` |
@@ -104,6 +110,12 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap dev-token` | mint an interim run token into a file (orchestrator only) |
 | `chap doctor` | check the server's Chaperone install (from a normal, not elevated, terminal) |
 | `chap drive share` | share one Drive file with allowlisted recipients (needs approval) |
+| `chap errors assign` | assign a Sentry issue to a member the policy lists |
+| `chap errors comment` | add a note to a Sentry issue |
+| `chap errors get` | read one Sentry issue and its latest event |
+| `chap errors list` | list issues of an allowed Sentry project |
+| `chap errors resolve` | resolve one Sentry issue |
+| `chap errors unresolve` | reopen one resolved Sentry issue |
 | `chap git setup` | route git's GitHub traffic through chapd's git proxy |
 | `chap health` | read the pilot's readiness status |
 | `chap intake comment` | comment on a labelled operator-board item |
@@ -261,6 +273,121 @@ chap drive share <file-id> --from <account> --name <file-name> --to <a> [--to <b
 | `--request` | create the approval card for this exact op instead of running it (needs --reason) |
 | `--role <string>` | Drive role: reader, commenter or writer (required) |
 | `--to <value>` | recipient (repeat, or comma-separated) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors assign`
+
+assign a Sentry issue to a member the policy lists
+
+```
+chap errors assign <id> --to <member> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--to <string>` | a member from the policy's list: an email address or a username (required) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors comment`
+
+add a note to a Sentry issue
+
+```
+chap errors comment <id> [--body <b> | --body-file <f>] [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--body <string>` | text |
+| `--body-file <string>` | read the text from this file (- for stdin) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors get`
+
+read one Sentry issue and its latest event
+
+```
+chap errors get <id> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors list`
+
+list issues of an allowed Sentry project
+
+```
+chap errors list <sentry-project> [--status <s>] [--level <l>] [--limit <n>] [--cursor <c>] [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--cursor <string>` | the next_cursor of the previous page |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--level <string>` | only issues of this level: fatal, error, warning, info or debug |
+| `--limit <int>` | how many issues to return (default 10, at most 25) |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--status <string>` | unresolved (the default), resolved or ignored |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors resolve`
+
+resolve one Sentry issue
+
+```
+chap errors resolve <id> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors unresolve`
+
+reopen one resolved Sentry issue
+
+```
+chap errors unresolve <id> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
 | `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
 
 ### `chap git setup`
@@ -998,4 +1125,5 @@ Every rule below has a test that fails if the code stops enforcing it. `go test 
 | `chap` cannot approve. It has no approve verb, and `chapd` has no API route or verb that decides an approval: that takes a user-verified WebAuthn assertion in the console. | cmd/chap: the command table; internal/ops: the route table; internal/approvals: `Approve` | `TestChapHasNoApproveVerb` (docs/manualgen), `TestRT13ApprovalCannotBeDecidedOverTheAPI` (test/redteam) |
 | An op that policy has not enabled is refused with `OP_DISABLED`, for a run and for the orchestrator. | internal/ops: `Service.Submit`; internal/policy: `Effective.Enabled` | `TestOpDisabledByDefault` (internal/ops) |
 | The Linear intake (`chap intake`) writes two things only: a comment, and a move to a state the project's policy lists. It writes only to an item of the one policy team that carries the policy label at the moment of the write (`chapd` reads it again just before), never to the Engineering team, and it cannot remove or add a label, edit a title or description, assign, archive or delete: `chapd` sends five fixed GraphQL documents and the caller supplies no query. | internal/connectors/linear: `queries.go`, `base.guard`, `moveAdapter` | `TestOnlyTheFiveFixedDocumentsAreEverSent` (internal/connectors/linear), `TestTheDocumentsCannotChangeLabelsTextOrDelete` (internal/connectors/linear), `TestLabelRemovedBetweenCheckAndWriteStopsTheComment` (internal/connectors/linear), `TestLabelRemovedBetweenCheckAndWriteStopsTheMove` (internal/connectors/linear), `TestATeamCalledEngineeringIsNeverWrittenTo` (internal/connectors/linear), `TestMoveToAStateThePolicyDoesNotListIsRefused` (internal/connectors/linear) |
+| The Sentry connector (`chap errors`) acts only on the Sentry projects that the project's policy lists, and reads the issue again just before every write. It returns no request data, cookies, headers, user data or local variables of an event: `chapd` decodes the fields it lists and no others. It sends its token only to the one https host the policy names, and follows no redirect. It cannot delete, merge, ignore or create an issue, unassign, or delete a note, and a note cannot mention a person or a team. All six ops are off until a policy change turns them on, and nothing here ran against a real Sentry. | internal/connectors/sentry: `client.go`, `base.readIssue`, `note.go`; internal/policy: `sentry.go` | `TestGetReturnsTheEssentialsAndNothingElse` (internal/connectors/sentry), `TestProjectChangedBetweenCheckAndWriteStopsTheWrite` (internal/connectors/sentry), `TestARedirectIsNotFollowed` (internal/connectors/sentry), `TestTheClientSendsOnlyToAnExactHTTPSHost` (internal/connectors/sentry), `TestOnlyTheFixedRoutesAreEverCalled` (internal/connectors/sentry), `TestNoteRefusesWhatCouldMentionOrLinkOrHide` (internal/connectors/sentry), `TestCheckSentryBaseURL` (internal/policy) |
 | `chap mcp` serves the ops as MCP tools to a client on the same machine over stdio, and does nothing the command line cannot: each tool call is one request to `chapd` with the same credential, so policy, approvals and the ledger apply. It listens on nothing, and it cannot show or change an approval card: a call that needs a human returns only the op id, the approval id, the class and the time left. Text an op read from outside comes back in a field named `untrusted_result`. | internal/mcpfront; cmd/chap: `mcp.go` | `TestPackageImportsOnlyWhatItMay` (internal/mcpfront), `TestPendingResultHasOnlyFixedFields` (internal/mcpfront), `TestAllowedCallAndInjectedTextStaysData` (internal/mcpfront), `TestMcpTranscriptBothEras` (cmd/chap) |
