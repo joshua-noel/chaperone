@@ -107,20 +107,26 @@ func allowedRoots() ([]string, error) {
 	return append([]string{home}, quickstartTestRoots...), nil
 }
 
+// resolveFolderPath is THE resolution of a folder path, shared by checkQuickstartDir and prepareQuickstartFolder so that
+// they cannot drift: the path made absolute, and every link in the part that exists resolved once. The rule for a link in a
+// path the caller gives: it is followed up front, and the RESOLVED path must lie inside an allowed root and must itself
+// go through no link (checkAncestors refuses one). Everything after this step uses the resolved path, never the given one.
+func resolveFolderPath(dir string) (given, resolved string, err error) {
+	if given, err = filepath.Abs(dir); err != nil {
+		return "", "", err
+	}
+	resolved, err = resolveExisting(given)
+	return given, resolved, err
+}
+
 // checkAncestors decides whether dir may be made or used, as far as WHERE it is goes. It
 // must lie strictly inside an allowed root, by path text and by file identity (walking its ancestors with
 // os.SameFile until one is the root). Every ancestor from the root down to dir's parent that exists must be a
 // real folder (no link or junction below the root) and must pass ancestorSafe: nobody else may be able to
 // rename a folder out of it or into it. Folders that do not exist yet are made by this program, private.
 func checkAncestors(dir string) error {
-	// The roots are compared RESOLVED, so dir must be too. checkQuickstartDir passes a resolved path, but
-	// prepareQuickstartFolder can be called with a path as the user wrote it (on macOS the temp folder is reached through
-	// /var -> /private/var): resolving an already resolved path changes nothing, and an unresolved one is no longer
-	// judged outside the root merely because one side went through a link.
-	dir, err := resolveExisting(dir)
-	if err != nil {
-		return err
-	}
+	// It judges exactly the path it is given and resolves nothing: a link below the root in that path is refused as a
+	// link. Callers resolve once, with resolveFolderPath, and pass the result.
 	roots, err := allowedRoots()
 	if err != nil {
 		return err
@@ -239,11 +245,7 @@ func overlapsRealInstall(paths ...string) bool {
 // existing folder without the marker, even an empty one: a first run makes its own folder, so that nobody
 // can have put anything in it, or held it open, first.
 func checkQuickstartDir(dir string) (string, *quickstartState, error) {
-	given, err := filepath.Abs(dir)
-	if err != nil {
-		return "", nil, err
-	}
-	dir, err = resolveExisting(given)
+	given, dir, err := resolveFolderPath(dir)
 	if err != nil {
 		return "", nil, err
 	}
@@ -346,6 +348,12 @@ func isKnownEntry(name string) bool {
 // A later run verifies the folder is private and owned by the user, lists it, refuses any entry that is not on
 // the known list, and checks each known entry (owner; closed to others) before anything is trusted.
 func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string, now time.Time) (*quickstartFolder, error) {
+	// One path from here on: the resolved one. It is what is checked, created, locked, recorded, derived into file paths,
+	// returned and printed.
+	_, dir, err := resolveFolderPath(dir)
+	if err != nil {
+		return nil, err
+	}
 	f := &quickstartFolder{
 		Dir: dir, DB: filepath.Join(dir, "state.db"), Keys: filepath.Join(dir, "run-keys.json"),
 		PolicyDir: filepath.Join(dir, "policy"), TokenFile: filepath.Join(dir, quickstartTokenFile), LogDir: filepath.Join(dir, "logs"),
@@ -370,13 +378,14 @@ func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string
 		prepareGapHook()
 	}
 	if state == nil {
-		if err := makePrivateTree(dir); err != nil {
+		created, err := makePrivateTree(dir)
+		if err != nil {
 			return nil, err
 		}
-		// A parent that did not exist at the check may have been made by somebody else before we made ours.
-		// The ancestors are checked again now that every one of them exists, before anything is written.
-		if err := checkAncestors(dir); err != nil {
-			_ = os.Remove(dir)
+		// What was made must be what was checked: the path still resolves to itself, no ancestor is a link or open to others
+		// (a parent made or swapped in the gap), and it is the same folder by identity. If not, take back what was made.
+		if err := confirmCreated(dir); err != nil {
+			removeCreated(created)
 			return nil, err
 		}
 		if err := firstRunFiles(f, now); err != nil {
@@ -400,9 +409,9 @@ func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string
 
 // makePrivateTree creates dir and any parent that does not exist, each with createPrivateDir. dir must not
 // exist: if it does (it was made after the check) that is an error.
-func makePrivateTree(dir string) error {
+func makePrivateTree(dir string) ([]string, error) {
 	if _, err := os.Lstat(dir); err == nil {
-		return fmt.Errorf("%s already exists; the quickstart makes its own folder and never uses one that exists", dir)
+		return nil, fmt.Errorf("%s already exists; the quickstart makes its own folder and never uses one that exists", dir)
 	}
 	var missing []string
 	for cur := dir; ; cur = filepath.Dir(cur) {
@@ -415,10 +424,49 @@ func makePrivateTree(dir string) error {
 		}
 	}
 	slices.Reverse(missing)
+	var created []string
 	for _, d := range missing {
 		if err := createPrivateDir(d); err != nil {
-			return fmt.Errorf("cannot create %s as a private folder: %w (it must not exist yet)", d, err)
+			removeCreated(created)
+			return nil, fmt.Errorf("cannot create %s as a private folder: %w (it must not exist yet)", d, err)
 		}
+		created = append(created, d)
+	}
+	return created, nil
+}
+
+// removeCreated takes back the folders a first run made, the innermost first. They are empty; Remove refuses a folder that is not.
+func removeCreated(created []string) {
+	for i := len(created) - 1; i >= 0; i-- {
+		_ = os.Remove(created[i])
+	}
+}
+
+// confirmCreated checks that the folder that now exists is the one that was checked. The path must still resolve to
+// itself (no ancestor has become a link since it was resolved), every ancestor must still pass checkAncestors (a parent
+// somebody else made, or replaced by a link or junction, in the gap is refused), and the folder reached by the path must
+// be the same object, by identity from an open handle, as the one reached by the resolved path.
+func confirmCreated(dir string) error {
+	again, err := resolveExisting(dir)
+	if err != nil {
+		return err
+	}
+	if !samePath(again, dir) {
+		return fmt.Errorf("%s now leads to %s: a folder above it was replaced by a link while the quickstart was starting. Nothing was used", dir, again)
+	}
+	if err := checkAncestors(dir); err != nil {
+		return err
+	}
+	a, err := folderIdentity(dir)
+	if err != nil {
+		return err
+	}
+	b, err := folderIdentity(again)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(a, b) {
+		return fmt.Errorf("%s is not the folder that was made", dir)
 	}
 	return nil
 }
