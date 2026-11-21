@@ -382,11 +382,6 @@ func TestTheSharedMailSendAgreesWithTheCatalogAndGmail(t *testing.T) {
 	if p, ok := pins[s.Name]; !ok || p.Class != s.Class || p.Reversibility != s.Reversibility {
 		t.Errorf("the pin of %s is %+v", s.Name, p)
 	}
-	for _, o := range resendspec.Connector.Ops {
-		if o.Name == s.Name {
-			t.Errorf("%s is in resendspec.Connector: its catalog entry would be generated twice", o.Name)
-		}
-	}
 	if !slices.Contains(resendspec.Served.Names(), s.Name) {
 		t.Errorf("%s is not served", s.Name)
 	}

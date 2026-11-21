@@ -19,13 +19,10 @@ import (
 // The values every test uses. The addresses are on example domains and nowhere
 // real.
 const (
-	testSendKey   = "re_test-sending-key-0123456789abcdef0123"
-	testStatusKey = "re_test-status-key-0123456789abcdef01234"
-	testDomain    = "mail.example.com"
-	testSender    = "alerts@mail.example.com"
-	testProject   = "demo"
-	// statusEmail is an email the fake holds, sent from testSender.
-	statusEmail = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794"
+	testSendKey = "re_test-sending-key-0123456789abcdef0123"
+	testDomain  = "mail.example.com"
+	testSender  = "alerts@mail.example.com"
+	testProject = "demo"
 )
 
 // rigPolicy is the policy block every test starts from.
@@ -37,18 +34,10 @@ func rigPolicy() *policy.Resend {
 	}
 }
 
-// seed puts the keys and the email of the status samples in the fake. The send
-// key can send from one domain only and nothing else, as Resend's sending_access
-// permission is; the status key is full_access.
-func seed(f *resendtest.Server, sendKey, statusKey string) {
+// seed puts the sending key in the fake. It can send from one domain only and do
+// nothing else, as Resend's sending_access permission is.
+func seed(f *resendtest.Server, sendKey string) {
 	f.AddKey(sendKey, resendtest.SendingAccess, testDomain)
-	if statusKey != "" {
-		f.AddKey(statusKey, resendtest.FullAccess, "")
-	}
-	f.AddEmail(resendtest.Email{
-		ID: statusEmail, From: testSender, To: []string{"ops@example.com"}, Subject: "Hello", Text: "A body.",
-		LastEvent: "delivered", CreatedAt: "2026-04-03 22:13:42.674981+00",
-	})
 }
 
 // env is the real adapters over a fake Resend, as the conformance rig builds them.
@@ -66,13 +55,12 @@ type env struct {
 func newEnv(t *testing.T, change func(*policy.Resend)) *env {
 	t.Helper()
 	fake := resendtest.New(t)
-	seed(fake, testSendKey, testStatusKey)
+	seed(fake, testSendKey)
 	reg := redact.NewRegistry()
 	client, err := NewClient(ClientConfig{
-		SendKey:   func(context.Context) (string, error) { return testSendKey, nil },
-		StatusKey: func(context.Context) (string, error) { return testStatusKey, nil },
-		Registry:  reg,
-		HTTP:      fake.HTTPClient(),
+		SendKey:  func(context.Context) (string, error) { return testSendKey, nil },
+		Registry: reg,
+		HTTP:     fake.HTTPClient(),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -51,7 +51,7 @@ func KeyCeilingOps() []string {
 // the orchestrator's own.
 var (
 	neverInKeyPrefixes = []string{"keys.", "people.", "roles.", "secrets.", "issue.", "intake.", "errors."}
-	neverInKeyOps      = []string{"approvers.enroll", "policy.activate", "ci.report", "repo.settings", "host.scripts.refresh", "mail.status"}
+	neverInKeyOps      = []string{"approvers.enroll", "policy.activate", "ci.report", "repo.settings", "host.scripts.refresh"}
 )
 
 // NeverInKey reports an op that can never be in a key.

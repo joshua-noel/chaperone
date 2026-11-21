@@ -1,6 +1,6 @@
 # Runbook: send mail through Resend with Chaperone
 
-You do this once, from your own account. It lets the orchestrator (the lead agent that coordinates the other agents) send a plain-text email through Resend's API, after **you approve each message**, and read the delivery status of a message it sent. It does not turn anything on: `mail.send` and `mail.status` stay off in the baseline policy until a policy change turns them on (step 5).
+You do this once, from your own account. It lets the orchestrator (the lead agent that coordinates the other agents) send a plain-text email through Resend's API, after **you approve each message**. It does not turn anything on: `mail.send` stays off in the baseline policy until a policy change turns it on (step 4).
 
 **Status. This connector was tested only against a fake Resend** (`internal/connectors/resend/resendtest`). It never talked to the real service. The fake is written from Resend's documentation (the pages are listed at the end), not from a run. Where the documentation does not say, this page says so. Do the first real send to an address of your own.
 
@@ -19,13 +19,14 @@ The name, the class (**high**, irreversible), the approval card and the baseline
 
 | | |
 | --- | --- |
-| **What the orchestrator can do** | Send one plain-text email: from a sender you list, to people you list, with a subject up to 200 bytes and a body up to 64 KiB. Each message needs your approval, signed with your passkey. Read the last delivery event of one email it sent (`mail.status`, which needs a second key: see step 3). |
+| **What the orchestrator can do** | Send one plain-text email: from a sender you list, to people you list, with a subject up to 200 bytes and a body up to 64 KiB. Each message needs your approval, signed with your passkey. Nothing else. |
 | **What it cannot do** | Attach a file, send HTML, set a reply-to address, schedule a send, use a template, add tags or custom headers, or use Resend's batch endpoint. The connector never sets those fields of Resend's send call, and an agent has no way to set them: a request that names one is refused. |
 | **What you sign** | The card shows the sender, every recipient (to, cc and bcc), the subject and the whole body, exactly as they will be sent. It also shows evidence: the number of recipients, the SHA-256 of the body and the SHA-256 of the exact JSON that goes to Resend. When the approved message is released, `chapd` makes that evidence again and **refuses to send if it is not the same**, so a message that changed after you signed does not go. |
 | **Who may receive it** | Only addresses and domains in the project's `resend.allow_recipients`. A listed address is matched exactly. A listed domain (`@team.example.com`) matches that whole domain and **not** a subdomain of it. The total of to, cc and bcc is at most `resend.max_recipients` (5 when the block does not say; 10 at most). A refusal says which recipient failed by its place in the list, and never repeats an address. |
-| **Who may ask** | The orchestrator token only. The `host-interim` profile lists `mail.send`, and the Gmail side accepts a run that holds it. The Resend side does **not**: it refuses a run and a custom key. A custom key can never hold `mail.status`. |
+| **Who may ask** | The orchestrator token only. The `host-interim` profile lists `mail.send`, and the Gmail side accepts a run that holds it. The Resend side does **not**: it refuses a run and a custom key. |
 | **Where the credential lives** | The vault. `chapd` reads the key for each call, registers it with the redaction check so it cannot reach a log, the ledger or a result, and sends it in one header to one fixed address, `https://api.resend.com`. No policy file, flag or request can change that address. A redirect is never followed. The orchestrator and every agent never hold the key. |
 | **What is untrusted** | Whatever Resend answers. The only text of Resend's that comes back is the email id, cleaned of control characters, capped at 64 bytes and withheld if it looks like a secret. Resend's error messages are **never** returned: an error shows the HTTP status and, when it is one of Resend's documented error types, that word. |
+| **What it holds, and what it calls** | **One secret:** the sending key, `resend-api-key`. **One route:** `POST /emails`. There is no code path that sends another request to Resend, and no second key. Two tests fix this: one shows that the client has no method but `Send` and a readiness check, and that a request always goes to `POST /emails`; the other records the vault names the connector reads and finds only `resend-api-key`. |
 
 ## Step 1: the domain in Resend (browser)
 
@@ -38,40 +39,26 @@ The name, the class (**high**, irreversible), the approval card and the baseline
 1. **API keys**, **Create API key**. Name it `chaperone`.
 2. **Permission: Sending access.** Do **not** choose Full access.
 3. **Domain: the one domain from step 1.** Resend restricts a `sending_access` key to send only from that domain. Pick it; do not leave it on "all domains".
-4. Press **Add**. Resend shows the key **once** and cannot show it again. Keep the page open: you copy it into the console in step 4. Do not paste it into chat, a file or a ticket.
+4. Press **Add**. Resend shows the key **once** and cannot show it again. Keep the page open: you copy it into the console in step 3. Do not paste it into chat, a file or a ticket.
 
 What `sending_access` means, from Resend: the key "can only send emails". Anything else answers 401 `restricted_api_key`. So the key cannot read, list or delete anything, and cannot create another key.
 
-## Step 3: the status key (optional: read this before you make it)
-
-`mail.status` reads one email (`GET /emails/{id}`). **Resend gives a `sending_access` key no read at all.** Its error page says so: a restricted key answers 401 `restricted_api_key`, "This API key is restricted to only send emails", and "Make sure the API key has Full access to perform actions other than sending emails." So the status read needs a **second** key with **Full access**.
-
-A Full access key can "create, delete, get, and update any resource" in your Resend account, including sending from any domain and deleting domains. It cannot be restricted to one domain. If you store it in the vault, anyone who gets the vault gets it, and the domain limit of step 2 no longer holds for them. `chapd` uses it for one call only (`GET /emails/{id}`), never for a send, and returns only a word of a closed list and a time. **That is a promise of this code, and not a limit that Resend enforces.**
-
-Recommendation: **do not make this key.** Look at the status in Resend's dashboard (the **Emails** page) instead. Without the key `mail.status` answers that it is not available, and nothing else is affected. If you do make it:
-
-- Make it with the name `chaperone-status` and the permission **Full access**.
-- Import it as the vault secret `resend-status-key` (step 4).
-- Delete it as soon as you stop using `mail.status`.
-
-`mail.status` shows an email only when its sender is one of the project's `resend.senders`. Resend's key can read every email of the account, so the check is on the email itself, after it is read, as an exact match. A message of another sender is refused, and nothing about it is shown.
-
-## Step 4: put the keys in the vault (console, no file)
+## Step 3: put the key in the vault (console, no file)
 
 In the Chaperone console open **Secrets**, then **Import a new secret**:
 
 | Id | Kind | Value |
 | --- | --- | --- |
 | `resend-api-key` | `resend-api-key` | the sending key from step 2 |
-| `resend-status-key` | `resend-api-key` | the Full access key from step 3 (only if you made it) |
 
-Each import is the critical op `secrets.write`: press **Request approval**, read the card (it names the id and the kind, never the value) and approve it with your passkey. A value saved with a trailing newline is fine. Then close the Resend page and clear the clipboard. `chapd` reads the secrets when it needs them, so no restart is needed.
+That is the only secret the connector reads. The import is the critical op `secrets.write`: press **Request approval**, read the card (it names the id and the kind, never the value) and approve it with your passkey. A value saved with a trailing newline is fine. Then close the Resend page and clear the clipboard. `chapd` reads the secret when it needs it, so no restart is needed.
 
-## Step 5: the policy change
+
+## Step 4: the policy change
 
 One pull request, reviewed like code:
 
-1. **`internal/policy/data/baseline.yaml`:** change `enabled: false` to `enabled: true` on `mail.send` (this also turns the name on for Gmail, see above) and, if you made the status key, on `mail.status`. Only the baseline can turn an op on.
+1. **`internal/policy/data/baseline.yaml`:** change `enabled: false` to `enabled: true` on `mail.send` (this also turns the name on for Gmail, see above). Only the baseline can turn an op on.
 2. **`policy/storefront.yaml`:** add the block:
 
    ```yaml
@@ -83,13 +70,13 @@ One pull request, reviewed like code:
      max_recipients: 3                            # to + cc + bcc together; leave it out for 5; at most 10
    ```
 
-   Prefer exact addresses. An `@domain` entry lets the orchestrator write to **everyone** at that domain; never list the domain of a mailbox provider. There is no other wildcard: `*`, `@*` and `@com` are refused when the file is loaded.
+   Prefer exact addresses. An `@domain` entry lets the orchestrator write to **everyone** at that domain. **Never list the domain of a mailbox provider** (`gmail.com`, `outlook.com` and the like): that is every person who has an account there. `chapd` refuses, when the file is loaded, an `@domain` entry for a short built-in list of the largest ones (`gmail.com`, `googlemail.com`, `outlook.com`, `hotmail.com`, `live.com`, `yahoo.com`, `icloud.com`, `me.com`, `proton.me`, `protonmail.com`, `aol.com`, `gmx.com`, `yandex.com`, `mail.com`), and says that an exact address is needed. The list is a guard against the common mistake. It is not complete: a smaller provider is not on it, so the rule is yours to keep. There is no other wildcard: `*`, `@*` and `@com` are refused too.
 
    A mistake in the block turns off the **Resend side only**: Gmail, the other ops and the other blocks of the file keep working, `chapd` says so once at start (a `Warn` line that names the project, the file and the field), and the Resend ops refuse with the same reason. A key the file format does not know (a typo, or `html:`) refuses the whole file, as for every project file.
 3. After the merge, deploy as usual. The project file is re-read on change without a restart. The baseline change comes with the new `chapd`.
-4. **Give the orchestrator the ops.** Re-issue the orchestrator token with them added (see [orchestrator-token.md](orchestrator-token.md), keep the ops it already has), for example `-ops "pr.merge,pr.open,pr.update,health,logs,mail.send,mail.status"`.
+4. **Give the orchestrator the op.** Re-issue the orchestrator token with it added (see [orchestrator-token.md](orchestrator-token.md), keep the ops it already has), for example `-ops "pr.merge,pr.open,pr.update,health,logs,mail.send"`.
 
-## Step 6: send one message to yourself
+## Step 5: send one message to yourself
 
 In a normal window, with the orchestrator's token:
 
@@ -98,24 +85,23 @@ $chap = 'C:\Program Files\Chaperone\chap.exe'
 'Test from Chaperone. Nothing to do.' | & $chap mail send --via resend --from alerts@updates.example.com --to you@example.com --subject 'Chaperone test' --body-file - --project storefront
 ```
 
-`chap` prints the approval request. Open the console, read the card, check that the sender, the recipient, the subject and the body are what you meant, and approve it. The message goes once. `chap op show <id>` shows the result: the `message_id` is what Resend answered. To read the status (step 3 only):
-
-```powershell
-& $chap mail status <message_id> --project storefront
-```
+`chap` prints the approval request. Open the console, read the card, check that the sender, the recipient, the subject and the body are what you meant, and approve it. The message goes once. `chap op show <id>` shows the result: the `message_id` is what Resend answered.
 
 | You see | It means | Do |
 | --- | --- | --- |
-| `its policy file has no valid resend: block` | step 5 point 2 was not done, or the block is wrong | fix the file |
+| `its policy file has no valid resend: block` | step 4 point 2 was not done, or the block is wrong | fix the file |
+| `allow_recipients entry "@gmail.com" lists a whole public mailbox domain` | the block lists a mailbox provider's domain | list the exact addresses |
 | `sender_listed`, `recipients_allowlisted` or `recipient_cap` | the policy does not list it | change the request or, by a policy change, the block |
-| `the vault has no resend-api-key` | step 4 was not done, or the id is misspelled | repeat step 4 |
-| `mail.status is not available ... resend-status-key` | the optional key is not in the vault | see step 3, or look in Resend's dashboard |
+| `the vault has no resend-api-key` | step 3 was not done, or the id is misspelled | repeat step 3 |
 | `Resend refused the API key (HTTP 401 ...)` or `403` | the key is wrong, deleted or inactive; or the sender is not on the key's domain | check steps 1 and 2 |
-| `... restricted to sending ... Full access` | the key in `resend-status-key` is a sending key | see step 3 |
 | `HTTP 403 (validation_error)` | most likely the sender's domain is not the key's domain, or the domain is not verified | check steps 1 and 2 |
 | `Resend's rate or quota limit is used up` | see "Limits" below | wait; nothing was sent |
 | `the message may or may not have been sent` | the answer was lost (a timeout, a cut connection or an HTTP 5xx) | look in Resend's **Emails** page for the message **before** you ask again |
 | `the message to be sent is not the message that was approved` | the evidence at release differs from the card | ask again; a new card is made |
+
+### Why there is no delivery status
+
+Whether a message was delivered, bounced or opened is read in **Resend's dashboard** (the **Emails** page), not through Chaperone. This is on purpose. Reading an email is `GET /emails/{id}`, and Resend gives a `sending_access` key **no read at all**: its error page says a restricted key answers 401 `restricted_api_key` ("This API key is restricted to only send emails") and that the key needs Full access "to perform actions other than sending emails". A Full access key "can create, delete, get, and update any resource" in the account, sends from any domain, and cannot be limited to one domain. Holding that in the vault for one status word is more than the status is worth, so a status operation (`mail.status`) and a second vault secret were built, tested, and then **removed**. The connector holds one key that can do one thing.
 
 ## Repeat safety, and what Resend's window means
 
@@ -130,7 +116,7 @@ What this protects: `chapd` runs an `Execute` at most once for an execution id, 
 
 ## Limits (from Resend)
 
-- **Rate:** 10 requests per second per team, across all API keys. Over it, Resend answers 429 `rate_limit_exceeded` with `ratelimit-*` and `retry-after` headers. `chapd` reads `retry-after` for its message and does not retry. The baseline allows 3 `mail.send` and 12 `mail.status` a minute, far below that.
+- **Rate:** 10 requests per second per team, across all API keys. Over it, Resend answers 429 `rate_limit_exceeded` with `ratelimit-*` and `retry-after` headers. `chapd` reads `retry-after` for its message and does not retry. The baseline allows 3 `mail.send` a minute, far below that.
 - **Quota:** a daily quota (free plan only, resets at midnight UTC) and a monthly quota. Over them, 429 `daily_quota_exceeded` or `monthly_quota_exceeded`. Both sent and received mail count.
 - **Recipients:** Resend's page says `to` takes at most 50. This connector allows at most 10 in all, and the policy lowers it.
 
@@ -141,9 +127,8 @@ Check each one. The connector has never run against Resend.
 - [ ] The sending key has **Sending access** and a **domain** (step 2). Try a send **from another domain** with it, in the Resend API, and see it refused. The documentation says the restriction exists; this connector's tests only model it.
 - [ ] Open and click tracking are **off** on the domain (step 1).
 - [ ] The documentation does not show the JSON body of an error. `chapd` reads only the field `name` from it and falls back to the HTTP status. **check:** that an error from the real service shows an HTTP status in the message, and, in parentheses, a word of the documented list when the type is one of them.
-- [ ] `GET /emails/{id}` answers `created_at` as `2026-04-03 22:13:42.674981+00` (the documentation's example). If it differs, `created_at` is left out of the result and nothing else changes.
 - [ ] You read `allow_recipients` as "everyone in this list may be written to by an agent", and each entry is one you would accept that for.
-- [ ] You decided whether to make the status key (step 3). The recommendation is not to.
+- [ ] You know that the delivery status is read in Resend's dashboard, not through Chaperone.
 - [ ] You know that turning `mail.send` on turns on the name for Gmail as well.
 - [ ] Your alerts for a failed or unconfirmed op work (an unconfirmed send needs a person to look in Resend).
 - [ ] Rotation: Resend keys never expire by themselves. Make a new key with the same permission and domain, import it with **Rotate an existing secret**, check the **Logs** page of Resend for the new key, then delete the old one. Delete a key that has not been used in 30 days.
@@ -162,10 +147,11 @@ Check each one. The connector has never run against Resend.
 - that the body sent to Resend holds `from`, `to`, `subject`, `text` and `cc` and `bcc` when used, and nothing else;
 - the `Idempotency-Key`: one execution is one message, two executions are two, a lost answer is `unconfirmed` and a repeat does not double it, a 409 is `unconfirmed`, and after the key expires a repeat sends again;
 - that the approved evidence binds the sender, recipients, subject and body, in the unit tests and through chapd's real approval engine, with a Hello stand-in;
-- that each key is used for its own call only, that neither reaches a result, a log or the ledger, that a careless service that repeats the key in its errors is not echoed, and that no redirect is followed;
+- that the client has no method but `Send` and a readiness check, that every request is `POST /emails`, and that only the vault name `resend-api-key` is read;
+- that the key reaches no result, log or ledger, that a careless service that repeats the key in its errors is not echoed, and that no redirect is followed;
 - the policy block: each mistake turns off the Resend side only, and chapd warns once.
 
-**Not tested:** anything against the real Resend; a real passkey; that the real service answers as the fake does (the error body, the time format, the effect of a domain restriction); the second key's reach; mail landing in an inbox; Resend's behaviour at the end of the 24 hours.
+**Not tested:** anything against the real Resend; a real passkey; that the real service answers as the fake does (the error body, the time format, the effect of a domain restriction); mail landing in an inbox; Resend's behaviour at the end of the 24 hours.
 
 ## Facts and where they come from
 
@@ -173,11 +159,10 @@ Read on 2026-11-21 from Resend's documentation (`resend.com/docs`), the pages na
 
 - **API Reference, Introduction:** the base URL `https://api.resend.com`, HTTPS only; `Authorization: Bearer`; a request without a `User-Agent` is refused with 403 (`chapd` sends `chapd-resend`); the status codes; 10 requests per second per team.
 - **API Reference, Send Email:** `POST /emails`; the answer `{"id": ...}`; `from`, `to` (max 50), `subject`, `bcc`, `cc`, `text`, `html`, `attachments`, `tags`, `headers`, `template`, scheduling and reply-to fields (the ones this connector never sets); the `Idempotency-Key` header, "expire after 24 hours", at most 256 characters.
-- **API Reference, Retrieve Sent Email:** `GET /emails/{id}`; the answer holds `id`, `from`, `to`, `subject`, `html`, `text`, `last_event`, `created_at` and more. `chapd` decodes `id`, `from`, `last_event` and `created_at` only.
+- **API Reference, Retrieve Sent Email:** `GET /emails/{id}`, which the connector does not call. It is read here only to say why: a `sending_access` key cannot make this call (see "Why there is no delivery status").
 - **Dashboard, Idempotency Keys:** the 24 hours, "the same response, without actually sending the email again", the 256 characters, a UUID or an entity-based key.
 - **API Reference, Errors:** the error types and their statuses used here (`restricted_api_key` 401, `validation_error` 400, 401 and 403, `invalid_idempotency_key` 400, `invalid_idempotent_request` and `concurrent_idempotent_requests` 409, `rate_limit_exceeded`, `daily_quota_exceeded` and `monthly_quota_exceeded` 429, `application_error` 500, `service_unavailable` 503). The page lists the type, the status and the message. It does not show the JSON body.
 - **API Reference, Usage Limits:** the rate limit, its headers, the quotas.
 - **API Reference, Create API key** and **Dashboard, Manage API keys:** the permissions: `full_access` "can create, delete, get, and update any resource"; `sending_access` "can only send emails" (with Inboxes calls aside); a domain restriction that is "only used when the `permission` is set to `sending_access`"; the key value is shown once; permission and domain are edited in the dashboard.
 - **Knowledge base, How to handle API keys:** keys do not expire; rotate at least every 90 days; delete a key unused for 30 days.
-- **Dashboard, View and manage emails:** the event words (`bounced`, `canceled`, `clicked`, `complained`, `delivered`, `delivery_delayed`, `failed`, `opened`, `queued`, `scheduled`, `sent`, `suppressed`).
 - **Dashboard, Verified Domains** and **Open and Click Tracking:** subdomains; tracking is off by default and is a setting of the domain.

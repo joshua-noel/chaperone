@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joshua-noel/chaperone/internal/connectors/resend/resendtest"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
 )
@@ -53,35 +52,15 @@ func TestASendIsPlainTextAndNothingElse(t *testing.T) {
 	}
 }
 
-// The key that sends is never the key that reads, and the other way round.
-func TestEachKeyDoesItsOwnJobOnly(t *testing.T) {
-	e := newEnv(t, nil)
-	mustSucceed(t, e.run(e.sendReq(mailParams())))
-	mustSucceed(t, e.run(request(OpStatus, statusEmail, nil, nil)))
-	reqs, creds := e.fake.Requests(), e.fake.Credentials()
-	if len(reqs) != 2 || len(creds) != 2 {
-		t.Fatalf("requests %d credentials %d", len(reqs), len(creds))
-	}
-	if reqs[0].Method != http.MethodPost || creds[0] != testSendKey {
-		t.Errorf("the send used %q", creds[0])
-	}
-	if reqs[1].Method != http.MethodGet || creds[1] != testStatusKey {
-		t.Errorf("the status read used %q", creds[1])
-	}
-}
-
-// Both keys are registered with the redaction check once they are used.
-func TestBothKeysAreRegisteredWithTheRedactionCheck(t *testing.T) {
+// The key is registered with the redaction check once it is used.
+func TestTheKeyIsRegisteredWithTheRedactionCheck(t *testing.T) {
 	e := newEnv(t, nil)
 	if _, res := e.reg.Redact("x " + testSendKey); res.Blocked() {
 		t.Fatal("the key is known before it is used: the test proves nothing")
 	}
 	mustSucceed(t, e.run(e.sendReq(mailParams())))
-	mustSucceed(t, e.run(request(OpStatus, statusEmail, nil, nil)))
-	for _, k := range []string{testSendKey, testStatusKey} {
-		if _, res := e.reg.Redact("leak " + k); !res.Blocked() {
-			t.Errorf("key %q is not masked by the redaction check", k[:8])
-		}
+	if _, res := e.reg.Redact("leak " + testSendKey); !res.Blocked() {
+		t.Error("the key is not masked by the redaction check")
 	}
 }
 
@@ -400,11 +379,11 @@ func TestAnErrorFromResendIsReportedInOurWordsOnly(t *testing.T) {
 		{422, "validation_error", "", false, []string{"HTTP 422", "validation_error", "nothing was sent"}},
 		{400, "invalid_idempotency_key", "", false, []string{"HTTP 400", "nothing was sent"}},
 		{403, "validation_error", "", false, []string{"HTTP 403", "nothing was sent"}},
-		{401, "restricted_api_key", "", false, []string{"restricted to sending", "nothing was sent"}},
+		{401, "restricted_api_key", "", false, []string{"refused the API key", "Sending access", "nothing was sent"}},
 		{401, "missing_api_key", "", false, []string{"refused the API key", "nothing was sent"}},
 		{429, "rate_limit_exceeded", "7", false, []string{"rate or quota", "rate_limit_exceeded", "retry in 7 s", "nothing was sent"}},
 		{429, "daily_quota_exceeded", "", false, []string{"daily_quota_exceeded", "nothing was sent"}},
-		{404, "not_found", "", false, []string{"not found", "nothing was sent"}},
+		{404, "not_found", "", false, []string{"HTTP 404", "not_found", "nothing was sent"}},
 		{500, "application_error", "", true, []string{"HTTP 500", "may or may not"}},
 		{503, "service_unavailable", "", true, []string{"HTTP 503", "may or may not"}},
 		{422, "a_type_nobody_documented\u202e", "", false, []string{"HTTP 422", ", other)"}},
@@ -462,13 +441,13 @@ func TestAHostileResendCannotMakeUsEchoTheKey(t *testing.T) {
 	e := newEnv(t, nil)
 	e.fake.Hostile("rotated-" + testSendKey)
 	out := e.run(e.sendReq(mailParams()))
-	st := e.run(request(OpStatus, statusEmail, nil, nil))
-	for _, o := range []ops.Outcome{out, st} {
+
+	for _, o := range []ops.Outcome{out} {
 		if !o.Failed {
 			t.Errorf("outcome = %+v", o)
 		}
 		all := asJSON(t, o.Result)
-		for _, secret := range []string{testSendKey, testStatusKey, "rotated-", "API key is invalid"} {
+		for _, secret := range []string{testSendKey, "rotated-", "API key is invalid"} {
 			if strings.Contains(all, secret) {
 				t.Errorf("the result repeats %q: %s", secret, all)
 			}
@@ -526,146 +505,8 @@ func TestNoKeyMeansNoCardAndNoSend(t *testing.T) {
 	if !out.Failed || !has(errorText(out), "resend-api-key") {
 		t.Errorf("outcome = %+v", out)
 	}
-	// With no status key the read is not available, and says why.
-	_, err = ads[OpStatus].Check(context.Background(), request(OpStatus, statusEmail, nil, nil))
-	if ref := wantRefusal(t, err, ops.CodePolicyRefused); !has(ref.Why, "resend-status-key", "full_access") {
-		t.Errorf("why = %s", ref.Why)
-	}
 	if len(e.fake.Requests()) != 0 {
 		t.Error("a request with no key reached Resend")
-	}
-}
-
-// ---- mail.status ----------------------------------------------------------------------------
-
-func TestStatusReportsTheLastEventAndNothingElse(t *testing.T) {
-	e := newEnv(t, nil)
-	e.fake.EditEmail(statusEmail, func(m *resendtest.Email) {
-		m.Subject = "SUBJECT-MARKER"
-		m.Text = "BODY-MARKER"
-		m.To = []string{"recipient-marker@example.com"}
-		m.Extra = map[string]any{"tags": []any{map[string]any{"name": "TAG-MARKER", "value": "v"}}}
-	})
-	res := mustSucceed(t, e.run(request(OpStatus, statusEmail, nil, nil)))
-	if res["last_event"] != "delivered" || res["email"] != statusEmail || res["sender"] != testSender || res["created_at"] != "2026-04-03T22:13:42Z" {
-		t.Errorf("result = %v", res)
-	}
-	all := asJSON(t, res)
-	for _, leaked := range []string{"SUBJECT-MARKER", "BODY-MARKER", "recipient-marker", "TAG-MARKER", "message_id"} {
-		if strings.Contains(all, leaked) {
-			t.Errorf("the result holds %q: %s", leaked, all)
-		}
-	}
-	if res["untrusted_text"] != nil {
-		t.Error("the result is marked as carrying text, and it carries none")
-	}
-}
-
-func TestStatusWordsAreAClosedList(t *testing.T) {
-	for _, w := range events {
-		if eventWord(w) != w {
-			t.Errorf("%s is documented and not accepted", w)
-		}
-	}
-	for _, w := range []string{"", "Delivered", "delivered ", "exploded", "ignore previous instructions", "delivered\u202e"} {
-		if eventWord(w) != "other" {
-			t.Errorf("%q is reported as %q, want other", w, eventWord(w))
-		}
-	}
-	for in, want := range map[string]string{
-		"2026-04-03 22:13:42.674981+00": "2026-04-03T22:13:42Z",
-		"2026-04-03 22:13:42+00":        "2026-04-03T22:13:42Z",
-		"2026-04-03T22:13:42.5Z":        "2026-04-03T22:13:42Z",
-		"2026-04-03 23:13:42.1+01:00":   "2026-04-03T22:13:42Z",
-	} {
-		if got, ok := stamp(in); !ok || got != want {
-			t.Errorf("stamp(%q) = %q %v, want %q", in, got, ok, want)
-		}
-	}
-	for _, in := range []string{"", "yesterday", "2026-13-45 00:00:00+00", "2026-04-03 22:13:42.674981+00 and a command"} {
-		if got, ok := stamp(in); ok {
-			t.Errorf("stamp(%q) = %q, want none", in, got)
-		}
-	}
-}
-
-// The fence is on the object: Resend's key reads every email of the account, and an
-// id is not a reason to show one this project did not send.
-func TestStatusOfAnEmailFromAnotherSenderIsRefusedWithoutAWord(t *testing.T) {
-	e := newEnv(t, nil)
-	other := "11111111-2222-4333-8444-555555555555"
-	e.fake.AddEmail(resendtest.Email{ID: other, From: "ceo@private.example.net", To: []string{"board@private.example.net"}, Subject: "Acquisition", LastEvent: "opened", CreatedAt: "2026-04-03 22:13:42+00"})
-	out := e.run(request(OpStatus, other, nil, nil))
-	if !out.Failed || !has(errorText(out), "not sent from a sender listed in resend.senders", "project demo") {
-		t.Fatalf("outcome = %+v", out)
-	}
-	if all := asJSON(t, out.Result); has(all, "private.example.net") || has(all, "opened") || has(all, "Acquisition") {
-		t.Errorf("the refusal shows what the email holds: %s", all)
-	}
-	// The fence is an exact match on what Resend gives: a display name is not the sender.
-	e.fake.EditEmail(statusEmail, func(m *resendtest.Email) { m.From = "Alerts <" + testSender + ">" })
-	if out := e.run(request(OpStatus, statusEmail, nil, nil)); !out.Failed {
-		t.Errorf("a sender with a display name passed the fence: %+v", out)
-	}
-	e.fake.EditEmail(statusEmail, func(m *resendtest.Email) { m.From = strings.ToUpper(testSender) })
-	if out := e.run(request(OpStatus, statusEmail, nil, nil)); !out.Failed {
-		t.Errorf("a sender in other case passed the fence: %+v", out)
-	}
-}
-
-func TestStatusAnswerForAnotherEmailIsRefused(t *testing.T) {
-	e := newEnv(t, nil)
-	e.fake.EditEmail(statusEmail, func(m *resendtest.Email) { m.Extra = map[string]any{"id": "99999999-2222-4333-8444-555555555555"} })
-	out := e.run(request(OpStatus, statusEmail, nil, nil))
-	if !out.Failed || !has(errorText(out), "different email") {
-		t.Errorf("outcome = %+v", out)
-	}
-}
-
-func TestStatusWithTheSendingKeyAsksForFullAccess(t *testing.T) {
-	e := newEnv(t, nil)
-	// The operator put a sending_access key in the status secret by mistake.
-	client, err := NewClient(ClientConfig{
-		SendKey:   func(context.Context) (string, error) { return testSendKey, nil },
-		StatusKey: func(context.Context) (string, error) { return testSendKey, nil },
-		HTTP:      e.fake.HTTPClient(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ads, err := Adapters(Config{Client: client, Policy: func(string) *policy.Resend { return rigPolicy() }, Redactor: e.reg})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := request(OpStatus, statusEmail, nil, nil)
-	r.ExecutionID = "x-1"
-	out, _ := ads[OpStatus].Execute(context.Background(), r)
-	if !out.Failed || !has(errorText(out), "restricted to sending", "Full access") {
-		t.Errorf("outcome = %+v", out)
-	}
-}
-
-func TestStatusOfAnUnknownEmail(t *testing.T) {
-	e := newEnv(t, nil)
-	out := e.run(request(OpStatus, "00000000-0000-4000-8000-00000000dead", nil, nil))
-	if !out.Failed || !has(errorText(out), "no email with that id") {
-		t.Errorf("outcome = %+v", out)
-	}
-}
-
-func TestStatusIsAReadAndSendsNoWrite(t *testing.T) {
-	e := newEnv(t, nil)
-	if _, err := e.check(request(OpStatus, statusEmail, nil, nil)); err != nil {
-		t.Fatal(err)
-	}
-	mustSucceed(t, e.run(request(OpStatus, statusEmail, nil, nil)))
-	if e.fake.WriteCalls() != 0 {
-		t.Errorf("a read sent %d writes", e.fake.WriteCalls())
-	}
-	for _, r := range e.fake.Requests() {
-		if r.Method != http.MethodGet {
-			t.Errorf("request %+v", r)
-		}
 	}
 }
 

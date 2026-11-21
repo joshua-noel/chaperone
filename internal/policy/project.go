@@ -90,7 +90,7 @@ type narrowFile struct {
 		Projects     []string `yaml:"projects"`
 		Assignees    []string `yaml:"assignees"`
 	} `yaml:"sentry"`
-	// Resend is the connector policy of the project for mail.send and mail.status when the target adapter is
+	// Resend is the connector policy of the project for mail.send when the target adapter is
 	// `resend`: the sender addresses, who may receive mail and the cap on recipients. Like `sentry:` it only adds
 	// data; it never turns an op on. A mistake in it turns off the Resend side only (see Resend.Invalid).
 	Resend *struct {

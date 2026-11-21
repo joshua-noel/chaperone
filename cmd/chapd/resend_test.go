@@ -35,12 +35,10 @@ type resendE2E struct {
 }
 
 const (
-	resendSendKey   = "re_chapdtest-sending-key-0123456789abcdef"
-	resendStatusKey = "re_chapdtest-status-key-0123456789abcdef0"
+	resendSendKey = "re_chapdtest-sending-key-0123456789abcdef"
 	// resendBody and resendSubject are text the ledger must never hold.
 	resendBody    = "The deploy of 4f2a finished. Nothing needs doing: marker-3c9d."
 	resendSubject = "Deploy finished marker-77a1"
-	resendEmailID = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794"
 
 	resendProject = `project: acme-shop
 resend:
@@ -51,7 +49,7 @@ resend:
 )
 
 // newResendE2E builds the rig. enable switches both ops on in the test baseline;
-// keys says which vault secrets exist: "send", "status" or both.
+// keys says which vault secrets exist: "send" or none.
 func newResendE2E(t *testing.T, enable bool, keys []string, project string) *resendE2E {
 	t.Helper()
 	useTestWrapper(t)
@@ -83,11 +81,8 @@ func newResendE2E(t *testing.T, enable bool, keys []string, project string) *res
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { v.Close(); vdb.Close() })
-	for _, k := range keys {
+	for range keys {
 		id, val := resend.SecretSendKey, resendSendKey
-		if k == "status" {
-			id, val = resend.SecretStatusKey, resendStatusKey
-		}
 		if _, err := v.Import(ctx, vault.Meta{ID: id, Kind: resend.SecretKind}, []byte(val+"\n")); err != nil {
 			t.Fatal(err)
 		}
@@ -103,19 +98,14 @@ func newResendE2E(t *testing.T, enable bool, keys []string, project string) *res
 
 	fake := resendtest.New(t)
 	fake.AddKey(resendSendKey, resendtest.SendingAccess, "mail.example.com")
-	fake.AddKey(resendStatusKey, resendtest.FullAccess, "")
-	fake.AddEmail(resendtest.Email{
-		ID: resendEmailID, From: "alerts@mail.example.com", To: []string{"ops@example.com"}, Subject: resendSubject, Text: resendBody,
-		LastEvent: "delivered", CreatedAt: "2026-04-03 22:13:42.674981+00",
-	})
 	cfg := Config{
 		DBPath: db, KeysPath: runKeys, Instance: "test", PolicyDir: policyDir, testVault: v, resendHTTP: fake.HTTPClient(),
 		approvalVerifier: &helloStandIn{}, notifier: &wakeLog{},
 	}
 	if enable {
-		// The two ops ship off; this test baseline switches them on.
+		// The op ships off; this test baseline switches it on.
 		base := string(policy.BaselineBytes())
-		for _, op := range []string{"mail.send", "mail.status"} {
+		for _, op := range []string{"mail.send"} {
 			old := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(op) + `:(\s+)\{ enabled: false`)
 			if !old.MatchString(base) {
 				t.Fatalf("the baseline has no %s line to switch on", op)
@@ -332,104 +322,6 @@ func TestMailSendTargetPicksTheConnector(t *testing.T) {
 	}
 }
 
-func TestResendOpsRefuseWhenOffWithoutABlockAndWithoutAKey(t *testing.T) {
-	const sender = "alerts@mail.example.com"
-	req := func(s *resendE2E) (int, map[string]any) {
-		r := s.body("mail.send", "resend", sender, resendMail(nil))
-		r["kind"] = "op"
-		return s.call("POST", "/v0/approvals", s.token, r)
-	}
-	// The shipped baseline has both off.
-	s := newResendE2E(t, false, []string{"send", "status"}, resendProject)
-	st, body := s.ask("mail.status", "resend", resendEmailID, nil)
-	if st != 403 {
-		t.Fatalf("status %d %v", st, body)
-	}
-	mustValidDenial(t, body, "OP_DISABLED")
-	st, body = req(s)
-	if st != 403 {
-		t.Fatalf("status %d %v", st, body)
-	}
-	mustValidDenial(t, body, "OP_DISABLED")
-	if len(s.fake.Requests()) != 0 {
-		t.Error("a disabled op reached Resend")
-	}
-
-	// On, but the project's file has no resend block.
-	s = newResendE2E(t, true, []string{"send", "status"}, "project: acme-shop\n")
-	for _, st := range []func() (int, map[string]any){func() (int, map[string]any) { return req(s) }, func() (int, map[string]any) { return s.ask("mail.status", "resend", resendEmailID, nil) }} {
-		code, body := st()
-		if code != 403 {
-			t.Fatalf("status %d %v", code, body)
-		}
-		mustValidDenial(t, body, "OP_POLICY_REFUSED")
-		if !strings.Contains(body["why"].(string), "no valid resend: block") {
-			t.Errorf("why: %v", body["why"])
-		}
-	}
-
-	// On, with a block that cannot be used: the Resend side refuses with the reason.
-	s = newResendE2E(t, true, []string{"send", "status"}, strings.Replace(resendProject, "[alerts@mail.example.com]", "[Alerts@mail.example.com]", 1))
-	st, body = req(s)
-	if st != 403 {
-		t.Fatalf("status %d %v", st, body)
-	}
-	mustValidDenial(t, body, "OP_POLICY_REFUSED")
-	if why := body["why"].(string); !strings.Contains(why, "senders") || !strings.Contains(why, "acme-shop.yaml") {
-		t.Errorf("why: %v", why)
-	}
-
-	// On, with a block, but the vault holds no sending key; and no status key.
-	s = newResendE2E(t, true, nil, resendProject)
-	st, body = req(s)
-	if st != 403 {
-		t.Fatalf("status %d %v", st, body)
-	}
-	mustValidDenial(t, body, "OP_POLICY_REFUSED")
-	if !strings.Contains(body["why"].(string), "resend-api-key") {
-		t.Errorf("why: %v", body["why"])
-	}
-	st, body = s.ask("mail.status", "resend", resendEmailID, nil)
-	if st != 403 {
-		t.Fatalf("status %d %v", st, body)
-	}
-	mustValidDenial(t, body, "OP_POLICY_REFUSED")
-	if why := body["why"].(string); !strings.Contains(why, "resend-status-key") || !strings.Contains(why, "full_access") {
-		t.Errorf("why: %v", why)
-	}
-	if len(s.fake.Requests()) != 0 {
-		t.Error("an op with no key reached Resend")
-	}
-}
-
-func TestResendStatusRunsEndToEndWithTheStatusKey(t *testing.T) {
-	s := newResendE2E(t, true, []string{"send", "status"}, resendProject)
-	st, op := s.ask("mail.status", "resend", resendEmailID, nil)
-	if st != 200 || op["state"] != "succeeded" {
-		t.Fatalf("status: %d %v", st, op)
-	}
-	res := op["result"].(map[string]any)
-	if res["last_event"] != "delivered" || res["email"] != resendEmailID || res["sender"] != "alerts@mail.example.com" {
-		t.Errorf("result: %v", res)
-	}
-	if all, _ := json.Marshal(op); strings.Contains(string(all), "marker-3c9d") || strings.Contains(string(all), "marker-77a1") {
-		t.Errorf("the result holds the email's text: %s", all)
-	}
-	creds := s.fake.Credentials()
-	if len(creds) != 1 || creds[0] != resendStatusKey {
-		t.Errorf("Resend was sent %v", creds)
-	}
-	// An email of another sender is refused, in the pipeline too.
-	s.fake.AddEmail(resendtest.Email{ID: "11111111-2222-4333-8444-555555555555", From: "ceo@private.example.net", Subject: "private-subject", LastEvent: "opened"})
-	st, op = s.ask("mail.status", "resend", "11111111-2222-4333-8444-555555555555", nil)
-	if all, _ := json.Marshal(op); st != 200 || op["state"] != "failed" || strings.Contains(string(all), "private") || strings.Contains(string(all), "opened") {
-		t.Errorf("another sender's email: %d %s", st, all)
-	}
-	if blob, _ := json.Marshal(op); strings.Contains(string(blob), resendStatusKey) {
-		t.Error("the status key is in a result")
-	}
-}
-
 // installResend puts the Resend side behind the same name as Gmail's adapter and
 // turns nothing on.
 func TestInstallResendJoinsGmailBehindOneNameAndTurnsNothingOn(t *testing.T) {
@@ -470,11 +362,11 @@ func TestInstallResendJoinsGmailBehindOneNameAndTurnsNothingOn(t *testing.T) {
 	if !ok || len(by) != 2 || by["google"] != gmail || by["resend"] == nil {
 		t.Fatalf("mail.send = %T %v: want Gmail and Resend behind one name", ads["mail.send"], ads["mail.send"])
 	}
-	if ads["mail.status"] == nil || ads["drive.share"] == nil {
+	if ads["drive.share"] == nil || len(ads) != 2 {
 		t.Fatalf("adapters: %v", ads)
 	}
 	eff := a.Policy.For("storefront")
-	if eff.Enabled("mail.send") || eff.Enabled("mail.status") {
+	if eff.Enabled("mail.send") {
 		t.Fatal("installing the adapters turned an op on")
 	}
 	// Another adapter that is not Gmail's under the name stops chapd.

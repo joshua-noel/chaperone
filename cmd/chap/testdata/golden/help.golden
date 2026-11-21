@@ -46,7 +46,6 @@ commands:
   ledger verify      walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only)
   logs               read recent log lines from a fixed source
   mail send          send one email to allowlisted recipients (needs approval)
-  mail status        read the delivery status of one email sent through Resend
   manual             what this caller may ask for, with usage
   op show            show one op, optionally waiting for it to change
   pr checks          read the check runs on a PR's head commit (orchestrator only)

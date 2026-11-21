@@ -18,8 +18,6 @@
 //   - A key with the permission sending_access can send and can do nothing else:
 //     every other call answers 401 restricted_api_key. A sending_access key
 //     restricted to a domain can send only from that domain.
-//   - GET /emails/{id} answers the email with the fields Resend documents,
-//     including the subject, the body and the addresses.
 //   - An error answers {"statusCode": n, "name": "<type>", "message": "<text>"}.
 //     The body's shape is the one Resend's SDKs decode; the documentation page of
 //     the error list names the types and the statuses, not the body.
@@ -47,27 +45,19 @@ import (
 	"time"
 )
 
-// Permissions of a key, as Resend names them.
-const (
-	FullAccess    = "full_access"
-	SendingAccess = "sending_access"
-)
+// SendingAccess is the permission of a key that can send and nothing else, as Resend
+// names it.
+const SendingAccess = "sending_access"
 
-// Email is one email of the fake service. Fields beyond the ones the connector
-// reads are here so a test can plant text in them.
+// Email is one message the fake accepted.
 type Email struct {
-	ID        string
-	From      string
-	To        []string
-	Cc, Bcc   []string
-	Subject   string
-	Text      string
-	HTML      string
-	LastEvent string
-	CreatedAt string
-	// Extra is added to the answer as it is (tags, headers, anything a test wants
-	// the connector to ignore).
-	Extra map[string]any
+	ID      string
+	From    string
+	To      []string
+	Cc, Bcc []string
+	Subject string
+	Text    string
+	HTML    string
 }
 
 // Request is one request the fake received. The key is never recorded here: see
@@ -171,23 +161,6 @@ func (s *Server) RemoveKeys() {
 	s.keys = map[string]key{}
 }
 
-// AddEmail adds an email, or replaces the one with the same id.
-func (s *Server) AddEmail(e Email) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.emails[e.ID] = &e
-}
-
-// EditEmail changes an email under the fake's lock. It does nothing for an
-// unknown id.
-func (s *Server) EditEmail(id string, f func(e *Email)) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if e := s.emails[id]; e != nil {
-		f(e)
-	}
-}
-
 // NextID makes the next accepted message get this id instead of a UUID. A test
 // uses it to make Resend answer with hostile text.
 func (s *Server) NextID(id string) {
@@ -236,12 +209,12 @@ func (s *Server) ExpireIdempotencyKeys() {
 }
 
 // Hostile makes the fake behave like a careless service: it stops accepting
-// the keys it had (newToken is the only one it accepts now, as full_access), and
+// the keys it had (newToken is the only one it accepts now), and
 // its error text repeats the key it received.
 func (s *Server) Hostile(newToken string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.keys = map[string]key{newToken: {permission: FullAccess}}
+	s.keys = map[string]key{newToken: {permission: SendingAccess}}
 	s.echo = true
 }
 
@@ -328,38 +301,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == "/emails":
 		s.postEmail(w, r, k, body, fail, reply)
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/emails/"):
+	default:
+		// Resend gives a sending_access key no other call at all.
 		if k.permission == SendingAccess {
 			fail(http.StatusUnauthorized, "restricted_api_key", "This API key is restricted to only send emails.")
 			return
 		}
-		id := strings.TrimPrefix(r.URL.Path, "/emails/")
-		e := s.emails[id]
-		if e == nil {
-			fail(http.StatusNotFound, "not_found", "Email not found")
-			return
-		}
-		ans := map[string]any{
-			"object": "email", "id": e.ID, "from": e.From, "to": nonNil(e.To), "cc": nonNil(e.Cc), "bcc": nonNil(e.Bcc),
-			"subject": e.Subject, "text": e.Text, "html": e.HTML, "last_event": e.LastEvent, "created_at": e.CreatedAt,
-			"reply_to": []string{}, "scheduled_at": nil, "message_id": "<111-222-333@email.example.com>",
-		}
-		for name, v := range e.Extra {
-			ans[name] = v
-		}
-		reply(http.StatusOK, ans)
-	default:
 		fail(http.StatusNotFound, "not_found", "The requested endpoint does not exist.")
 	}
 }
-
-func nonNil(l []string) []string {
-	if l == nil {
-		return []string{}
-	}
-	return l
-}
-
 func (s *Server) postEmail(w http.ResponseWriter, r *http.Request, k key, body []byte, fail func(int, string, string), reply func(int, any)) {
 	if f := s.failNext; f != nil {
 		s.failNext = nil
@@ -417,7 +367,7 @@ func (s *Server) postEmail(w http.ResponseWriter, r *http.Request, k key, body [
 	if s.nextID != "" {
 		id, s.nextID = s.nextID, ""
 	}
-	e.ID, e.LastEvent, e.CreatedAt = id, "delivered", "2026-04-03 22:13:42.674981+00"
+	e.ID = id
 	s.applied++
 	s.emails[id] = &e
 	names := make([]string, 0, len(fields))

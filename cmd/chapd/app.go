@@ -239,7 +239,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		if p.Block == "" {
 			a.log.Warn("policy: a project file is invalid, so every op of the project is refused until it is fixed", "project", p.Project, "file", p.File, "err", p.Err.Error())
 		} else if p.Block == "resend" {
-			a.log.Warn("policy: a project file has an unusable resend block; the Resend side of mail.send and mail.status are off for the project, mail through Gmail and its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
+			a.log.Warn("policy: a project file has an unusable resend block; the Resend side of mail.send is off for the project, mail through Gmail and its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
 		} else if p.Block == "sentry" {
 			a.log.Warn("policy: a project file has an unusable sentry block; the Sentry operations (errors.*) are off for the project, its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
 		} else if p.Block == "linear.issues" {
@@ -410,7 +410,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		return nil, err
 	}
 	// the Resend side of mail.send (one name, two connectors: Gmail's adapter above and this one sit behind one
-	// ops.ByTarget) and mail.status; off in the baseline, refused for a project with no valid `resend:` block. After installGoogle.
+	// ops.ByTarget); off in the baseline, refused for a project with no valid `resend:` block. After installGoogle.
 	if err := a.installResend(ads); err != nil {
 		return nil, err
 	}

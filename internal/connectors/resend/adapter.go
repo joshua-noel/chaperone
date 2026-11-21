@@ -25,8 +25,7 @@ import (
 // so the name being on turns neither connector on by itself: this adapter
 // refuses every project whose policy file has no valid `resend:` block.
 const (
-	OpSend   = resendspec.NameSend
-	OpStatus = resendspec.NameStatus
+	OpSend = resendspec.NameSend
 )
 
 // Ops lists the op kinds the adapters serve.
@@ -83,8 +82,7 @@ func Adapters(cfg Config) (map[string]ops.Adapter, error) {
 	}
 	b := base{cfg: cfg}
 	return kit.Bind(resendspec.Served, map[string]ops.Adapter{
-		OpSend:   &sendAdapter{base: b},
-		OpStatus: &statusAdapter{base: b},
+		OpSend: &sendAdapter{base: b},
 	})
 }
 
@@ -278,7 +276,7 @@ func failed(err error, res map[string]any) ops.Outcome {
 func reason(err error) string {
 	var ae *APIError
 	switch {
-	case errors.Is(err, ErrNoSendKey), errors.Is(err, ErrNoStatusKey):
+	case errors.Is(err, ErrNoSendKey):
 		return err.Error()
 	case errors.As(err, &ae):
 		return apiReason(ae)
@@ -288,10 +286,8 @@ func reason(err error) string {
 
 func apiReason(ae *APIError) string {
 	switch {
-	case ae.Code == "restricted_api_key" && ae.Status == 401:
-		return "Resend says this API key is restricted to sending email, which cannot do what was asked: a read needs a key with the Full access permission (docs/runbooks/resend.md)"
 	case ae.Status == 401 || ae.Status == 403 && (ae.Code == "restricted_api_key" || ae.Code == "suspended_api_key" || ae.Code == "invalid_permission"):
-		return fmt.Sprintf("Resend refused the API key (HTTP %d, %s): check that it is active, that it has the permission the operation needs, and the vault secret (docs/runbooks/resend.md)", ae.Status, ae.Code)
+		return fmt.Sprintf("Resend refused the API key (HTTP %d, %s): check that it is active, that it is a Sending access key restricted to the sender's domain, and the vault secret (docs/runbooks/resend.md)", ae.Status, ae.Code)
 	case ae.Status == 429:
 		s := fmt.Sprintf("Resend's rate or quota limit is used up (%s)", ae.Code)
 		if ae.RetryAfter > 0 {
@@ -300,8 +296,6 @@ func apiReason(ae *APIError) string {
 		return s
 	case ae.Status >= 300 && ae.Status < 400:
 		return fmt.Sprintf("Resend answered with a redirect (HTTP %d), which chapd does not follow", ae.Status)
-	case ae.Status == 404:
-		return "Resend answered not found (HTTP 404)"
 	case ae.Status == 409:
 		return fmt.Sprintf("Resend answered with a conflict about the idempotency key (%s)", ae.Code)
 	case ae.Status >= 400 && ae.Status < 500:
@@ -313,7 +307,7 @@ func apiReason(ae *APIError) string {
 // credentialRefusal turns a missing key into a refusal the operator can read:
 // asking again cannot help. Any other error is returned as it is.
 func credentialRefusal(err error) error {
-	if errors.Is(err, ErrNoSendKey) || errors.Is(err, ErrNoStatusKey) {
+	if errors.Is(err, ErrNoSendKey) {
 		return policyRefused("%v", err)
 	}
 	return err

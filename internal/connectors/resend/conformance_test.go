@@ -24,14 +24,12 @@ import (
 func newRig(t testing.TB, canary string) *conformance.Rig {
 	t.Helper()
 	fake := resendtest.New(t)
-	status := canary + "-status"
-	seed(fake, canary, status)
+	seed(fake, canary)
 	reg := redact.NewRegistry()
 	client, err := NewClient(ClientConfig{
-		SendKey:   func(context.Context) (string, error) { return canary, nil },
-		StatusKey: func(context.Context) (string, error) { return status, nil },
-		Registry:  reg,
-		HTTP:      fake.HTTPClient(),
+		SendKey:  func(context.Context) (string, error) { return canary, nil },
+		Registry: reg,
+		HTTP:     fake.HTTPClient(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,12 +100,6 @@ func TestConformance(t *testing.T) {
 	bad := func(name, code, ref string, params map[string]any, change func(*ops.Request)) conformance.Sample {
 		return sample(OpSend, name, ref, params, code, change)
 	}
-	status := func(name, ref string) conformance.Sample {
-		return sample(OpStatus, name, ref, nil, "", nil)
-	}
-	statusBad := func(name, code, ref string, params map[string]any, change func(*ops.Request)) conformance.Sample {
-		return sample(OpStatus, name, ref, params, code, change)
-	}
 	conformance.Run(t, conformance.Connector{
 		Declared: resendspec.Served,
 		Pins:     pintable.Pins,
@@ -155,32 +147,6 @@ func TestConformance(t *testing.T) {
 				Plant: func(r *conformance.Rig, p conformance.Planted) {
 					id := strings.TrimSpace(p.Control + " " + p.Long + " " + p.Secret)
 					r.World.(*resendtest.Server).NextID(id)
-				},
-			},
-			OpStatus: {
-				Valid: []conformance.Sample{status("a known email", statusEmail)},
-				Invalid: []conformance.Sample{
-					statusBad("a run asks", ops.CodePolicyRefused, statusEmail, nil, asRun),
-					statusBad("a key asks", ops.CodePolicyRefused, statusEmail, nil, asKey),
-					statusBad("the Gmail target", ops.CodeParamsInvalid, statusEmail, nil, otherAdapter),
-					statusBad("a project with no resend block", ops.CodePolicyRefused, statusEmail, nil, otherProject),
-					statusBad("not a uuid", ops.CodeParamsInvalid, "not-an-id", nil, nil),
-					statusBad("a uuid in upper case", ops.CodeParamsInvalid, strings.ToUpper(statusEmail), nil, nil),
-					statusBad("a path in the id", ops.CodeParamsInvalid, statusEmail+"/../api-keys", nil, nil),
-					statusBad("a param", ops.CodeParamsInvalid, statusEmail, map[string]any{"full": true}, nil),
-				},
-				ReadOnly: true,
-				Text:     conformance.NoServiceText,
-				// The operation returns no text of Resend's: the planted text goes into
-				// every field of the email, and none of it may reach the result.
-				Plant: func(r *conformance.Rig, p conformance.Planted) {
-					r.World.(*resendtest.Server).EditEmail(statusEmail, func(e *resendtest.Email) {
-						e.LastEvent = p.Control
-						e.Subject = p.Long
-						e.Text = strings.TrimSpace(p.Long + " " + p.Secret)
-						e.HTML = p.Control
-						e.Extra = map[string]any{"tags": []any{map[string]any{"name": "x", "value": p.Control}}}
-					})
 				},
 			},
 		},

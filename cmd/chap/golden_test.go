@@ -129,8 +129,6 @@ var goldenCases = []golden{
 	{name: "mail-send-resend", args: []string{"mail", "send", "--via", "resend", "--from", "alerts@mail.example.com", "--to", "ops@example.com", "--cc", "dev@example.com", "--subject", "Launch", "--body-file", "/work/mail.txt", "--project", "acme-shop"},
 		env: env{token: "orch", fs: map[string]string{"/work/mail.txt": "We shipped.\n"}}, ans: ok202("op-mail-pending")},
 	{name: "mail-send-bad-via", args: []string{"mail", "send", "--via", "smtp", "--from", "a@example.com", "--to", "b@example.com", "--subject", "x", "--body-file", "-"}, env: env{stdin: "x\n"}},
-	{name: "mail-status", args: []string{"mail", "status", "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794", "--project", "acme-shop"}, env: env{token: "orch"}, ans: ok200("op-mail-status")},
-	{name: "mail-status-bad-id", args: []string{"mail", "status", "not-a-uuid"}, env: env{token: "orch"}},
 	{name: "drive-share", args: []string{"drive", "share", "1AbCdEf", "--from", "operator@example.com", "--name", "Q3 plan", "--to", "a@example.com", "--role", "reader", "--project", "acme-shop"},
 		env: env{token: "orch"}, ans: ok202("op-drive-pending")},
 

@@ -10,8 +10,8 @@ import (
 // `resend:`): which sender addresses mail may go out as, who may receive it, and
 // how many people one message may reach. It serves the `mail.send` operation
 // when the request's target adapter is `resend` (the same operation name that the
-// Google connector serves for `google`), and `mail.status`. Like `google:` it adds
-// data and enables nothing: the baseline keeps both ops off, and without this block
+// Google connector serves for `google`). Like `google:` it adds
+// data and enables nothing: the baseline keeps mail.send off, and without this block
 // the Resend adapters refuse the project.
 //
 // A mistake in the block turns off the Resend side only, the way a bad `sentry:`
@@ -77,6 +77,11 @@ func (r *Resend) validate() error {
 	if err := validateAllow("allow_recipients", r.AllowRecipients); err != nil {
 		return err
 	}
+	for _, e := range r.AllowRecipients {
+		if strings.HasPrefix(e, "@") && slices.Contains(ResendMailboxDomains, e[1:]) {
+			return fmt.Errorf("allow_recipients entry %q lists a whole public mailbox domain, which would let an agent write to everyone there; list the exact addresses instead", e)
+		}
+	}
 	seen = map[string]bool{}
 	for _, e := range r.AllowRecipients {
 		if seen[e] {
@@ -94,7 +99,7 @@ func (r *Resend) validate() error {
 // the file and the field, or returns nil.
 func (r *Resend) problem(project string) error {
 	if err := r.validate(); err != nil {
-		return fmt.Errorf("its policy file %s.yaml has a resend block that cannot be used, so the Resend side of mail.send and mail.status are off for project %s until it is fixed (mail through Gmail is not affected): %w", project, project, err)
+		return fmt.Errorf("its policy file %s.yaml has a resend block that cannot be used, so the Resend side of mail.send is off for project %s until it is fixed (mail through Gmail is not affected): %w", project, project, err)
 	}
 	return nil
 }
@@ -117,4 +122,15 @@ func (r *Resend) RecipientAllowed(addr string) bool {
 		}
 	}
 	return false
+}
+
+// ResendMailboxDomains is a short built-in list of the largest public mailbox
+// domains. An `@domain` entry for one of them is refused when the block is loaded:
+// it would allow mail to every person who has an account there. An exact address at
+// the domain is fine. The list is not a defence against every such domain (a smaller
+// provider is not on it); it is a guard against the common mistake, and the runbook
+// says the same for all of them.
+var ResendMailboxDomains = []string{
+	"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com",
+	"me.com", "proton.me", "protonmail.com", "aol.com", "gmx.com", "yandex.com", "mail.com",
 }

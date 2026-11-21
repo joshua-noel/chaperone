@@ -136,7 +136,7 @@ type Effective struct {
 	// unusable, Sentry.Invalid says why and the ops refuse with that reason.
 	Sentry *Sentry
 	// Resend is the project's `resend:` block; nil when the project file has
-	// none, and then the Resend side of mail.send and mail.status refuse the
+	// none, and then the Resend side of mail.send refuses the
 	// project. When the block is unusable, Resend.Invalid says why.
 	Resend  *Resend
 	Invalid error

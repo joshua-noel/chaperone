@@ -48,7 +48,7 @@ func TestResendBlockLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range []string{"mail.send", "mail.status"} {
+	for _, op := range []string{"mail.send"} {
 		if eff.Enabled(op) || eff.Enabled(op) != plain.Enabled(op) {
 			t.Errorf("%s is enabled, or the resend block changed its enablement", op)
 		}
@@ -172,5 +172,44 @@ func TestEngineProblemsNamesAnUnusableResendBlock(t *testing.T) {
 	}
 	if eff := e.For("storefront"); eff.Invalid != nil || eff.Resend == nil || eff.Resend.Invalid == nil {
 		t.Errorf("the project is invalid as a whole, or the block is not marked: %+v", eff)
+	}
+}
+
+// An `@domain` entry for a large public mailbox domain is refused when the block is
+// loaded, with a message that says an exact address is needed. An exact address at the
+// same domain, and a domain of one's own, are fine. This is the Resend block only: the
+// Gmail block's rule is not changed.
+func TestResendRefusesAWholePublicMailboxDomain(t *testing.T) {
+	want := []string{
+		"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com",
+		"me.com", "proton.me", "protonmail.com", "aol.com", "gmx.com", "yandex.com", "mail.com",
+	}
+	if strings.Join(ResendMailboxDomains, ",") != strings.Join(want, ",") {
+		t.Fatalf("the built-in list is %v", ResendMailboxDomains)
+	}
+	for _, d := range want {
+		eff, err := linearProject(t, "resend:\n  senders: [alerts@mail.example.com]\n  allow_recipients: [\"@"+d+"\"]\n")
+		if err != nil {
+			t.Errorf("@%s: the whole project was refused: %v", d, err)
+			continue
+		}
+		r := eff.Resend
+		if r == nil || r.Invalid == nil || !strings.Contains(r.Invalid.Error(), "@"+d) || !strings.Contains(r.Invalid.Error(), "exact addresses") {
+			t.Errorf("@%s: not refused with a clear reason: %+v", d, r)
+		}
+		// An exact address there is fine.
+		eff, err = linearProject(t, "resend:\n  senders: [alerts@mail.example.com]\n  allow_recipients: [\"me@"+d+"\"]\n")
+		if err != nil || eff.Resend == nil || eff.Resend.Invalid != nil || !eff.Resend.RecipientAllowed("me@"+d) || eff.Resend.RecipientAllowed("you@"+d) {
+			t.Errorf("an exact address at %s: %+v %v", d, eff.Resend, err)
+		}
+	}
+	// A subdomain and a domain of one's own are not on the list.
+	eff, err := linearProject(t, "resend:\n  senders: [alerts@mail.example.com]\n  allow_recipients: [\"@mail.gmail.com\", \"@team.example.com\"]\n")
+	if err != nil || eff.Resend.Invalid != nil {
+		t.Errorf("%+v %v", eff.Resend, err)
+	}
+	// Gmail's block is untouched.
+	if eff, err := linearProject(t, "google:\n  mail:\n    allow_recipients: [\"@gmail.com\"]\n"); err != nil || eff.Google == nil {
+		t.Errorf("the Google block changed: %v", err)
 	}
 }

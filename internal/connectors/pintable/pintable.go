@@ -65,7 +65,6 @@ var Pins = map[string]kit.Pin{
 	// table: a message that has gone cannot be recalled, and every send needs the
 	// operator's approval. Do not loosen it. The Resend side is declared in
 	// resendspec.MailSend, and a test in package declared checks that it agrees with this
-	// pin. mail.status only reads.
-	"mail.send":   {Class: kit.High, Reversibility: kit.Irreversible},
-	"mail.status": {Class: kit.Routine, Reversibility: kit.Reversible},
+	// pin.
+	"mail.send": {Class: kit.High, Reversibility: kit.Irreversible},
 }

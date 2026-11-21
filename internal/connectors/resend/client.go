@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joshua-noel/chaperone/internal/connectors/resend/resendspec"
 	"github.com/joshua-noel/chaperone/internal/redact"
 )
 
@@ -48,7 +47,6 @@ const (
 
 var (
 	idemRE    = regexp.MustCompile(`^[A-Za-z0-9._-]{1,200}$`)
-	statusRE  = regexp.MustCompile(resendspec.StatusRefPattern)
 	errCodeRE = regexp.MustCompile(`^[a-z][a-z_]{0,60}$`)
 )
 
@@ -84,21 +82,8 @@ type Message struct {
 // JSON returns the request body.
 func (m Message) JSON() ([]byte, error) { return json.Marshal(m) }
 
-// Email is what the client keeps of a retrieved email: four fields. Resend's
-// answer also holds the subject, the body, the addresses and the tags; the
-// client decodes none of them, so none can reach a result.
-type Email struct {
-	ID        string `json:"id"`
-	From      string `json:"from"`
-	LastEvent string `json:"last_event"`
-	CreatedAt string `json:"created_at"`
-}
-
-// ErrNoSendKey and ErrNoStatusKey mean the vault holds no such secret.
-var (
-	ErrNoSendKey   = errors.New("resend: not connected; the vault has no resend-api-key (docs/runbooks/resend.md)")
-	ErrNoStatusKey = errors.New("resend: mail.status is not available; the vault has no resend-status-key, which is optional and needs Resend's full_access permission (docs/runbooks/resend.md)")
-)
+// ErrNoSendKey means the vault holds no sending key.
+var ErrNoSendKey = errors.New("resend: not connected; the vault has no resend-api-key (docs/runbooks/resend.md)")
 
 // errUnreadable is a success answer that is not the JSON the client expects.
 var errUnreadable = errors.New("resend: the answer is not the expected JSON")
@@ -148,7 +133,7 @@ func Definite(err error) bool {
 	var ns *notSentError
 	var ae *APIError
 	switch {
-	case errors.As(err, &ns), errors.Is(err, ErrNoSendKey), errors.Is(err, ErrNoStatusKey):
+	case errors.As(err, &ns), errors.Is(err, ErrNoSendKey):
 		return true
 	case errors.As(err, &ae):
 		return ae.Status >= 300 && ae.Status < 500 && ae.Status != http.StatusRequestTimeout && ae.Status != http.StatusConflict
@@ -158,15 +143,12 @@ func Definite(err error) bool {
 
 // ClientConfig builds a [Client].
 type ClientConfig struct {
-	// SendKey returns the API key that sends mail. It should be a key with
-	// Resend's sending_access permission, restricted to one domain. It is
-	// called on every send, so a rotated secret is picked up, and the client
-	// keeps no copy. [VaultCredential] reads it from the vault.
+	// SendKey returns the API key that sends mail: a key with Resend's
+	// sending_access permission, restricted to one domain. It is the only secret the
+	// connector reads. It is called on every send, so a rotated secret is picked up,
+	// and the client keeps no copy. [VaultCredential] reads it from the vault.
 	SendKey func(ctx context.Context) (string, error)
-	// StatusKey returns the optional API key that reads one email. Resend gives
-	// a sending_access key no read at all, so this key needs full_access. nil
-	// means mail.status is not available. It is never used to send.
-	StatusKey func(ctx context.Context) (string, error)
+
 	// Registry, when set, learns each key the client uses, so the redaction
 	// check masks it wherever it would appear.
 	Registry *redact.Registry
@@ -198,30 +180,23 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	return &Client{cfg: cfg, hc: &c}, nil
 }
 
-// HasStatusKey reports whether the client was given a way to read the status
-// key. It says nothing about the vault.
-func (c *Client) HasStatusKey() bool { return c.cfg.StatusKey != nil }
-
-// key reads one key, trimmed, and registers it with the redaction check.
-func (c *Client) key(ctx context.Context, read func(context.Context) (string, error), redactID string, missing error) (string, error) {
-	if read == nil {
-		return "", &notSentError{missing}
-	}
-	tok, err := read(ctx)
+// key reads the sending key, trimmed, and registers it with the redaction check.
+func (c *Client) key(ctx context.Context) (string, error) {
+	tok, err := c.cfg.SendKey(ctx)
 	if err != nil {
-		if errors.Is(err, missing) {
-			return "", &notSentError{missing}
+		if errors.Is(err, ErrNoSendKey) {
+			return "", &notSentError{ErrNoSendKey}
 		}
 		return "", &notSentError{errors.New("resend: the API key could not be read from the vault")}
 	}
 	tok = strings.TrimSpace(tok)
 	if tok == "" {
-		return "", &notSentError{missing}
+		return "", &notSentError{ErrNoSendKey}
 	}
 	if c.cfg.Registry != nil {
 		// Every call: the registry may have been cleared since, and a key that is
 		// not registered would reach a log unmasked.
-		if err := c.cfg.Registry.Set(redactID, []byte(tok)); err != nil {
+		if err := c.cfg.Registry.Set(redactSendKey, []byte(tok)); err != nil {
 			return "", &notSentError{errors.New("resend: the API key cannot be registered with the redaction check")}
 		}
 	}
@@ -231,15 +206,13 @@ func (c *Client) key(ctx context.Context, read func(context.Context) (string, er
 // SendReady reads the sending key and nothing else, so Check can refuse before a
 // card is made when the vault has none. It sends nothing.
 func (c *Client) SendReady(ctx context.Context) error {
-	_, err := c.key(ctx, c.cfg.SendKey, redactSendKey, ErrNoSendKey)
+	_, err := c.key(ctx)
 	return err
 }
 
-// StatusReady is [Client.SendReady] for the status key.
-func (c *Client) StatusReady(ctx context.Context) error {
-	_, err := c.key(ctx, c.cfg.StatusKey, redactStatusKey, ErrNoStatusKey)
-	return err
-}
+// sendPath is the one route the client calls: POST /emails. There is no other
+// request in this file, and no method takes a path.
+const sendPath = "/emails"
 
 // Send posts one message. key is the Idempotency-Key header: use
 // [IdempotencyKey] of the execution id. It returns the id Resend gave the
@@ -250,77 +223,52 @@ func (c *Client) StatusReady(ctx context.Context) error {
 // Keys). Within that time a second request with the same key and the same body
 // returns the first answer and sends nothing. After it the key is forgotten and a
 // second request would send again.
-func (c *Client) Send(ctx context.Context, m Message, key string) (string, error) {
-	if key == "" {
+//
+// The key goes in the Authorization header and nowhere else. Every error is a fixed
+// sentence or an [APIError]: none holds the key, the URL or text Resend wrote.
+func (c *Client) Send(ctx context.Context, m Message, idemKey string) (string, error) {
+	if idemKey == "" {
 		return "", &notSentError{errors.New("resend: there is no idempotency key")}
 	}
 	body, err := m.JSON()
 	if err != nil {
 		return "", &notSentError{errors.New("resend: the request body could not be built")}
 	}
-	var out struct {
-		ID string `json:"id"`
-	}
-	if err := c.do(ctx, http.MethodPost, "/emails", c.cfg.SendKey, redactSendKey, ErrNoSendKey, body, key, &out); err != nil {
+	tok, err := c.key(ctx)
+	if err != nil {
 		return "", err
 	}
-	return out.ID, nil
-}
-
-// Email reads one email with the status key.
-func (c *Client) Email(ctx context.Context, id string) (Email, error) {
-	if !statusRE.MatchString(id) {
-		return Email{}, &notSentError{errors.New("resend: the email id is not a UUID")}
-	}
-	var e Email
-	err := c.do(ctx, http.MethodGet, "/emails/"+id, c.cfg.StatusKey, redactStatusKey, ErrNoStatusKey, nil, "", &e)
-	return e, err
-}
-
-// do sends one request. The key goes in the Authorization header and nowhere
-// else. Every error is a fixed sentence or an [APIError]: none holds the key, the
-// URL or text Resend wrote. On success it decodes the JSON answer into out.
-func (c *Client) do(ctx context.Context, method, path string, read func(context.Context) (string, error), redactID string, missing error, body []byte, idemKey string, out any) error {
-	tok, err := c.key(ctx, read, redactID, missing)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, APIBase+sendPath, bytes.NewReader(body))
 	if err != nil {
-		return err
-	}
-	var rd io.Reader
-	if body != nil {
-		rd = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, APIBase+path, rd)
-	if err != nil {
-		return &notSentError{errors.New("resend: the request could not be built")}
+		return "", &notSentError{errors.New("resend: the request could not be built")}
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if idemKey != "" {
-		req.Header.Set("Idempotency-Key", idemKey)
-	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", idemKey)
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return transportError(err)
+		return "", transportError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return apiError(resp)
+		return "", apiError(resp)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
 	if err != nil {
-		return errors.New("resend: the answer could not be read in full")
+		return "", errors.New("resend: the answer could not be read in full")
 	}
 	if len(data) > maxResponse {
-		return ErrTooLarge
+		return "", ErrTooLarge
 	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return errUnreadable
+	var out struct {
+		ID string `json:"id"`
 	}
-	return nil
+	if err := json.Unmarshal(data, &out); err != nil {
+		return "", errUnreadable
+	}
+	return out.ID, nil
 }
 
 // apiError makes the error of a non-success answer. It reads the type word of
