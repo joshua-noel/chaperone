@@ -68,7 +68,8 @@ func vaultDelete(ctx context.Context, v *vault.Vault, vaultDir string, db *store
 	fmt.Fprint(stdout, "The file is removed, not overwritten. On a modern file system an overwrite does not destroy the old blocks\n"+
 		"(journals, copy-on-write, SSD wear levelling, snapshots), so none is attempted and none is claimed.\n"+
 		"If the secret may have leaked, revoke it where it came from as well.\n"+
-		"If chapd is running, it can no longer use this secret from now on.\n\n")
+		"If chapd is running, it stops reading this secret at once. A token it already made from it (a GitHub installation\n"+
+		"token, a Linear access token) works until it expires, at most an hour; restart chapd to drop them.\n\n")
 
 	if terminal {
 		fmt.Fprint(stdout, "Type the name to confirm: ")
@@ -90,8 +91,11 @@ func vaultDelete(ctx context.Context, v *vault.Vault, vaultDir string, db *store
 	case errors.Is(err, vault.ErrNotFound):
 		fmt.Fprintf(stderr, "\nchapd: the secret %q is gone already (another command removed it). Nothing more to do\n", name)
 		return 1
+	case errors.Is(err, vault.ErrFileNotRemoved):
+		fmt.Fprintf(stderr, "\nchapd: nothing was removed: the file of %q could not be removed (%v). The file is most likely in use by another program, for example chapd. The secret, its index row and the ledger are unchanged. Stop chapd, or close what holds the file, and run the same command again\n", name, err)
+		return 1
 	case err != nil:
-		fmt.Fprintf(stderr, "\nchapd: could not delete %q: %v\nThe secret may be half removed: chapd refuses a secret whose file is missing. Run `chapd vault delete --name %s` again to finish, or `chapd vault list` to see what is left\n", name, err, name)
+		fmt.Fprintf(stderr, "\nchapd: could not delete %q: %v\nIf the secret is still in `chapd vault list`, nothing was changed, or the delete is half done: list marks a secret whose file is gone. Run `chapd vault delete --name %s` again to finish\n", name, err, name)
 		return 1
 	}
 	fmt.Fprintf(stdout, "\ndeleted %s (%s); the vault file and its index row are gone and the ledger has the record\n", info.ID, info.Kind)

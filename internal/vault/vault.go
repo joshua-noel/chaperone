@@ -823,6 +823,9 @@ func (v *Vault) LoadRegistry(ctx context.Context) error {
 	for _, i := range infos {
 		buf, _, err := v.decrypt(ctx, i.ID)
 		if err != nil {
+			if errors.Is(err, ErrIntegrity) && !v.FileExists(i.ID) {
+				return fmt.Errorf("%w (to finish an interrupted delete run `chapd vault delete --name %s`; to keep the secret, put its file back)", err, i.ID)
+			}
 			return err
 		}
 		err = v.reg.Set(i.ID, buf)

@@ -10,6 +10,20 @@ import (
 	"github.com/joshua-noel/chaperone/internal/store"
 )
 
+// ErrFileNotRemoved: [Vault.Delete] could not remove the ciphertext file (most often another program has it open, such as chapd
+// reading it). The transaction was rolled back: nothing was removed and nothing was recorded.
+var ErrFileNotRemoved = errors.New("vault: the secret's file could not be removed")
+
+// FileExists reports whether the ciphertext file of id is there. A row without its file is an interrupted delete: the vault
+// refuses to use it.
+func (v *Vault) FileExists(id string) bool {
+	if ValidID(id) != nil {
+		return false
+	}
+	_, err := os.Lstat(v.path(id))
+	return err == nil
+}
+
 // DeleteRecorder is called by [Vault.Delete] inside the database transaction
 // that removes the index row, before anything is removed from disk. A caller
 // uses it to write the ledger event in the same transaction: if it returns an
@@ -40,9 +54,12 @@ type DeleteRecorder func(ctx context.Context, tx *store.Tx, info Info) error
 // identity could still read it. If that matters, rotate the secret at its
 // source (revoke the key or token) as well.
 //
-// A missing id is [ErrNotFound]. The caller (chapd) may still be running on
-// the same database: it fails closed on this secret from the moment the row or
-// the file is gone.
+// A missing id is [ErrNotFound]. A file that cannot be removed is
+// [ErrFileNotRemoved], and then nothing changed at all. The caller (chapd) may
+// still be running on the same database: it stops reading this secret from
+// the moment the row or the file is gone, but a token it already made from the
+// secret (a GitHub installation token, a Linear access token) works until it
+// expires.
 func (v *Vault) Delete(ctx context.Context, id string, record DeleteRecorder) (Info, error) {
 	if err := ValidID(id); err != nil {
 		return Info{}, err
@@ -71,7 +88,7 @@ func (v *Vault) Delete(ctx context.Context, id string, record DeleteRecorder) (I
 			return err
 		}
 		if err := os.Remove(v.path(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("vault: remove the file of %s: %w", id, err)
+			return fmt.Errorf("%w: %s: %w", ErrFileNotRemoved, id, err)
 		}
 		return v.deleteHook("file-removed")
 	})

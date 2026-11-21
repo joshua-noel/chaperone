@@ -48,8 +48,11 @@ name (it refuses a name the vault does not have), shows the name, kind and impor
 terminal it needs --yes. The file is removed, not overwritten: an overwrite does not
 destroy the old blocks on a modern file system, so none is claimed. The deletion is
 written to the ledger (op vault.delete, by the operator; -instance names the chain,
-default pc). It is the way to undo a mistaken import. If chapd is running it can no
-longer use the secret at once; run the same command again if it is interrupted.
+default pc). It is the way to undo a mistaken import. If chapd is running it stops
+reading the secret at once; a token it already made from it (a GitHub installation
+token, a Linear access token) works until it expires, at most an hour, and a restart
+of chapd drops them. Run the same command again if it is interrupted;
+list marks a secret whose file is gone.
 
 recover re-keys a vault whose service identity cannot be unwrapped any more (the
 account was reset or recreated). It reads the offline recovery identity from
@@ -193,13 +196,28 @@ func vaultList(ctx context.Context, v *vault.Vault, stdout, stderr io.Writer) in
 		return 1
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tKIND\tPROJECT\tFINGERPRINT\tCREATED\tLAST USED")
+	missing := false
+	for _, i := range infos {
+		missing = missing || !v.FileExists(i.ID)
+	}
+	header := "ID\tKIND\tPROJECT\tFINGERPRINT\tCREATED\tLAST USED"
+	if missing {
+		header += "\tNOTE"
+	}
+	fmt.Fprintln(tw, header)
 	for _, i := range infos {
 		used := "never"
 		if !i.LastUsed.IsZero() {
 			used = localtime.RFC3339(i.LastUsed)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", i.ID, i.Kind, i.Project, i.Fingerprint, localtime.RFC3339(i.Created), used)
+		note := ""
+		if missing {
+			note = "\t"
+			if !v.FileExists(i.ID) {
+				note = "\tfile missing: run `chapd vault delete --name " + i.ID + "` to finish, or restore the file"
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s%s\n", i.ID, i.Kind, i.Project, i.Fingerprint, localtime.RFC3339(i.Created), used, note)
 	}
 	_ = tw.Flush()
 	return 0

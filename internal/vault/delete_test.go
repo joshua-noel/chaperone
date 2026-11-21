@@ -188,8 +188,15 @@ func TestDeleteCrashAfterTheFileIsRemovedFailsClosedAndTheSameCommandFinishes(t 
 	if !errors.Is(err, ErrIntegrity) || called {
 		t.Errorf("Use of a row without its file: %v (closure ran: %v), want ErrIntegrity and no use", err, called)
 	}
-	if err := v.LoadRegistry(bg); !errors.Is(err, ErrIntegrity) {
+	err = v.LoadRegistry(bg)
+	if !errors.Is(err, ErrIntegrity) {
 		t.Errorf("LoadRegistry: %v, want ErrIntegrity so chapd does not start on it", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "chapd vault delete --name s") {
+		t.Errorf("the start-up error does not say what to run: %v", err)
+	}
+	if v.FileExists("s") {
+		t.Error("FileExists says the file is there")
 	}
 
 	// The same command, run again, finishes the job even though the file is missing.
@@ -235,4 +242,40 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// A file that cannot be removed (on Windows, one another program holds open) rolls everything back and says so.
+// A non-empty folder in the file's place stands for it: os.Remove refuses that on every system.
+func TestDeleteWhoseFileCannotBeRemovedChangesNothing(t *testing.T) {
+	e, v := newEnv(t, newAESWrapper(t))
+	if _, err := v.Import(bg, meta("s"), []byte("secret-value-abc")); err != nil {
+		t.Fatal(err)
+	}
+	path := fileOf(e, "s")
+	saved := path + ".saved"
+	if err := os.Rename(path, saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(path, "inner"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Delete(bg, "s", markInTx); !errors.Is(err, ErrFileNotRemoved) {
+		t.Fatalf("Delete: %v, want ErrFileNotRemoved", err)
+	}
+	if hasMarker(t, e) {
+		t.Error("a record was committed for a delete that removed nothing")
+	}
+	if _, err := v.Info(bg, "s"); err != nil {
+		t.Errorf("the row went although the file could not be removed: %v", err)
+	}
+	// Put the file back: the secret is whole.
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(saved, path); err != nil {
+		t.Fatal(err)
+	}
+	if got := use(t, v, "s"); string(got) != "secret-value-abc" {
+		t.Error("the secret is not whole")
+	}
 }

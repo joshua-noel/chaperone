@@ -328,3 +328,76 @@ func TestVaultDeleteUsageIsListedAndInstanceIsChecked(t *testing.T) {
 		t.Errorf("a bad -instance: exit %d, %q; the secret must stay", code, errs)
 	}
 }
+
+func TestVaultListMarksASecretWhoseFileIsGone(t *testing.T) {
+	e := newDeleteEnv(t)
+	_, before, _ := runVault(t, "list", "-db", e.db)
+	if strings.Contains(before, "file missing") || strings.Contains(before, "NOTE") {
+		t.Fatalf("a whole vault is marked: %s", before)
+	}
+	if err := os.Remove(e.fileOf("mistake")); err != nil { // the state an interrupted delete leaves
+		t.Fatal(err)
+	}
+	code, out, errs := runVault(t, "list", "-db", e.db)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	var marked, plain int
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "mistake"):
+			if !strings.Contains(line, "file missing") || !strings.Contains(line, "chapd vault delete --name mistake") {
+				t.Errorf("the half-deleted secret is not marked with what to run: %q", line)
+			}
+			marked++
+		case strings.HasPrefix(line, "keeper"):
+			if strings.Contains(line, "file missing") {
+				t.Errorf("a whole secret is marked: %q", line)
+			}
+			plain++
+		}
+	}
+	if marked != 1 || plain != 1 {
+		t.Errorf("list:\n%s", out)
+	}
+}
+
+func TestVaultDeleteWhoseFileIsInUseSaysNothingWasRemoved(t *testing.T) {
+	e := newDeleteEnv(t)
+	piped(t)
+	path := e.fileOf("mistake")
+	if err := os.Rename(path, path+".saved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(path, "inner"), 0o700); err != nil { // a file that cannot be removed
+		t.Fatal(err)
+	}
+	code, _, errs := runVault(t, "delete", "--yes", "--name", "mistake", "-db", e.db)
+	if code != 1 || !strings.Contains(errs, "nothing was removed") || !strings.Contains(errs, "run the same command again") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if strings.Contains(errs, "half") {
+		t.Errorf("the message calls a clean rollback half done: %q", errs)
+	}
+	if !e.has(t, "mistake") {
+		t.Error("the row went")
+	}
+	if n := len(e.opEvents(t)); n != 0 {
+		t.Errorf("%d ledger events for a delete that removed nothing", n)
+	}
+	e.verifyLedger(t)
+}
+
+func TestVaultDeleteSaysWhatHappensToTokensAlreadyMade(t *testing.T) {
+	e := newDeleteEnv(t)
+	typed(t, "mistake\n")
+	_, out, _ := runVault(t, "delete", "--name", "mistake", "-db", e.db)
+	for _, want := range []string{"stops reading this secret at once", "until it expires, at most an hour", "restart chapd"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "no longer use") {
+		t.Error("the output still claims chapd can no longer use the secret")
+	}
+}

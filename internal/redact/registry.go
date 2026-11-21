@@ -74,7 +74,19 @@ var patterns = []pattern{
 	{"sentry-token", regexp.MustCompile(`sntry[us]_[A-Za-z0-9+/=_\-]{20,}`)},
 	// An AWS access key id: AKIA and 16 capitals or digits, not inside a longer word.
 	{"aws-access-key-id", regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)},
-	{"slack-token", regexp.MustCompile(`xox[abposr]-[0-9]{6,}-[A-Za-z0-9\-]{6,}`)},
+	// Slack's token formats (docs.slack.dev, "Tokens" and "Using token rotation"). Every real token has a digit group
+	// after the prefix, which keeps a word like "xoxo-love-letters" out. The rotating and app-level rules come before
+	// the base rule so a whole "xoxe.xoxb-1-..." is masked, not only the part after the dot.
+	//   rotating access "xoxe.xoxb-1-...", "xoxe.xoxp-1-...", configuration "xoxe.xoxp-...", refresh "xoxe-1-...",
+	//   rotating app-level "xoxe.xapp-1-..."
+	{"slack-rotating-token", regexp.MustCompile(`xoxe[.-](?:xox[abposr]-|xapp-)?[0-9]+-[A-Za-z0-9\-]{20,}`)},
+	//   app-level "xapp-1-..."
+	{"slack-app-token", regexp.MustCompile(`xapp-[0-9]+-[A-Za-z0-9\-]{20,}`)},
+	//   workflow "xwfp-": the documentation gives only the prefix, so any long run after it
+	{"slack-workflow-token", regexp.MustCompile(`xwfp-[A-Za-z0-9\-]{20,}`)},
+	//   bot "xoxb-", user "xoxp-", legacy "xoxa-2-", "xoxo-", "xoxr-", "xoxs-"; the docs' short-secret user token is
+	//   "xoxp-111-222-333-d6bc76"
+	{"slack-token", regexp.MustCompile(`xox[abposr]-[0-9]+-[A-Za-z0-9\-]{12,}`)},
 	{"stripe-key", regexp.MustCompile(`\bsk_(?:live|test)_[A-Za-z0-9]{16,}`)},
 	{"chaperone-key", regexp.MustCompile(`chap_key_[A-Za-z0-9_\-]{43}`)}, // ADR-008: a custom key is never in any text, with or without the registry
 }
