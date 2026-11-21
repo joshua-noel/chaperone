@@ -79,7 +79,18 @@ func (a *App) installLinear(ads map[string]ops.Adapter) error {
 		return err
 	}
 	for op, ad := range set {
-		ads[op] = ad
+		prev, taken := ads[op]
+		switch {
+		case !taken:
+			ads[op] = ad
+		case op == linear.OpIssueComment:
+			// One name, two connectors: GitHub's issue.comment (the error watcher) and
+			// Linear's. The target's adapter picks; Linear's refuses a project with no
+			// `linear.issues` block, which keeps it off while the baseline has the name on.
+			ads[op] = ops.ByTarget{"github": prev, linear.AdapterName: ad}
+		default:
+			return fmt.Errorf("chapd: op %s already has an adapter; the Linear connector would replace it", op)
+		}
 	}
 	a.linearBoard = board
 	return nil

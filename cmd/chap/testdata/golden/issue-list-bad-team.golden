@@ -1,0 +1,8 @@
+$ chap issue list --team agt
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --team must be a Linear team key such as AGT
+usage: chap issue list [--state <type>] [--label <l>] [--cursor <c>] [--team <key>] [--dry-run]

@@ -1,0 +1,157 @@
+{{define "content"}}
+<h1>Agents</h1>
+<div id="agents-status" aria-live="polite"></div>
+
+{{if not .On}}
+<p class="empty">This chapd runs without agent keys, so there is nothing to answer here.</p>
+{{else}}
+{{if .PolicyOff}}
+<div class="alert" data-tone="warning" role="status" id="keys-policy-off">
+  <p><strong>Agent keys are off.</strong> The policy turns keys.issue, keys.request and keys.extend off for every project this chapd knows, so no agent can enrol or ask for a key. A key that already exists can still be revoked here. To turn agent keys on, change the policy.</p>
+</div>
+{{end}}
+
+<div class="card" role="region" aria-labelledby="pending-heading">
+  <header>
+    <h2 id="pending-heading">Waiting for your answer</h2>
+    <p>An agent of yours asked for a key. Each request waits 24 hours. The agent writes the reason; read it as the agent's words, not as a fact. The oldest is first.</p>
+  </header>
+  <section>
+  {{if .Pending}}
+    <table class="table table-stack" id="pending-requests">
+      <caption class="sr-only">Key requests waiting for your answer</caption>
+      <thead><tr><th scope="col">Agent</th><th scope="col">Asked for</th><th scope="col">For</th><th scope="col">Reason (written by the agent)</th><th scope="col">Asked</th><th scope="col">Answer</th></tr></thead>
+      <tbody>
+      {{range .Pending}}
+        <tr>
+          <th scope="row"><code>{{.Holder}}</code><br><small>{{.Project}}</small></th>
+          <td data-label="Asked for">{{if eq .Kind "extend"}}<strong>more time</strong> for its key{{else}}{{.Ops}}{{if ne .Units "(none)"}}<br><small>on {{.Units}}</small>{{end}}{{end}}</td>
+          <td data-label="For">{{.For}}{{if eq .Kind "new"}}<br><small>at most {{.Rate}} calls an hour</small>{{end}}</td>
+          <td data-label="Reason">{{.Reason}}{{if .Needed}} <span class="badge" data-tone="warning">needed today</span>{{end}}</td>
+          <td data-label="Asked">{{template "t" .Created}}</td>
+          <td data-label="Answer"><a class="btn" data-size="sm" href="/agents/requests/{{.ID}}" aria-label="Answer the request of {{.Holder}}">Answer</a></td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <p class="empty">No agent of yours is waiting for an answer.</p>
+  {{end}}
+  </section>
+</div>
+
+<div class="card" role="region" aria-labelledby="keys-heading">
+  <header>
+    <h2 id="keys-heading">Keys</h2>
+    <p>These are the keys of your own agents, and every key an orchestrator built: you can always end one, whoever owns it. A key you granted lasts at most 30 days in all (7 if it holds a risky op). Extending adds time and nothing else: it makes a card, and the key lasts longer only when you sign that card with Windows Hello.</p>
+  </header>
+  <section>
+  {{if .Keys}}
+    <table class="table table-stack" id="agent-keys">
+      <caption class="sr-only">Keys of your agents and keys built by orchestrators</caption>
+      <thead><tr><th scope="col">Holder</th><th scope="col">Owner</th><th scope="col">State</th><th scope="col">Can do</th><th scope="col">Ends</th><th scope="col">Last used</th><th scope="col">Uses</th><th scope="col">Action</th></tr></thead>
+      <tbody>
+      {{range .Keys}}
+        <tr>
+          <th scope="row"><code>{{.Holder}}</code><br><small><code>{{.ID}}</code></small></th>
+          <td data-label="Owner">{{.Owner}}</td>
+          <td data-label="State">{{.State}}</td>
+          <td data-label="Can do">{{.Ops}}{{if ne .Units "(none)"}}<br><small>on {{.Units}}</small>{{end}}</td>
+          <td data-label="Ends">{{template "t" .Expires}}</td>
+          <td data-label="Last used">{{if .LastUsed}}{{template "t" .LastUsed}}{{else}}never{{end}}</td>
+          <td data-label="Uses">{{.Uses}}</td>
+          <td data-label="Action">
+          {{if .CanExtend}}
+            <button class="btn" data-size="sm" type="button" hx-post="/agents/keys/{{.ID}}/extend" hx-vals='{"hours":"24"}' hx-target="#agents-status" hx-swap="innerHTML"
+              aria-label="Extend the key of {{.Holder}} by 24 hours">Extend 24 hours</button>
+          {{end}}
+          {{if .CanRevoke}}{{if $.Restricted}}<span class="muted">Re-open to revoke</span>{{else}}
+            <button class="btn" data-variant="destructive" data-size="sm" type="button" hx-post="/agents/keys/{{.ID}}/revoke" hx-target="#agents-status" hx-swap="innerHTML"
+              hx-confirm="{{if .Stops}}Revoke the key of {{.Holder}}? The agent is refused from its next call and is stopped for good: it cannot be enrolled again.{{else}}Revoke the key of {{.Holder}}, built by {{.Owner}}? It is refused from its next call. {{.Owner}} may ask for a new one (each ask is a card you sign).{{end}}"
+              aria-label="Revoke the key of {{.Holder}}">Revoke</button>{{end}}
+          {{end}}
+          {{if not (or .CanExtend .CanRevoke)}}-{{end}}
+          </td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <p class="empty">None of your agents holds a key yet, and no orchestrator has built one.</p>
+  {{end}}
+  </section>
+</div>
+
+<div class="card" role="region" aria-labelledby="enrol-heading">
+  <header>
+    <h2 id="enrol-heading">Enrol an agent</h2>
+    <p>On the machine the agent runs on, it runs <code>chap agent enrol --label &lt;name&gt; --project &lt;project&gt; --out &lt;file&gt;</code>. It prints a short code. Type the code here: you will see what you are enrolling, with no access, before you sign anything.</p>
+  </header>
+  <section>
+    <form id="enrol-form" class="form" autocomplete="off" hx-post="/agents/enrol/lookup" hx-target="#enrol-status" hx-swap="innerHTML">
+      <div class="grid gap-2"><label for="enrol-code">Code the agent printed</label>
+      <input class="input" id="enrol-code" name="code" type="text" required maxlength="12" autocomplete="off" spellcheck="false" placeholder="ABCD-EFGH"></div>
+      <button class="btn" type="submit">Look up the agent</button>
+    </form>
+    <div id="enrol-status" aria-live="polite"></div>
+  </section>
+</div>
+
+{{if .Waiting}}
+<div class="card" role="region" aria-labelledby="waiting-heading">
+  <header>
+    <h2 id="waiting-heading">Agents waiting to be enrolled</h2>
+    <p>These agents started an enrolment and have not been answered. Starting one needs no credential, so any process on this machine can start one: if you do not know an agent here, cancel it. An enrolment that nobody answers ends by itself after 10 minutes.</p>
+  </header>
+  <section>
+    <table class="table table-stack" id="waiting-enrolments">
+      <caption class="sr-only">Agents waiting to be enrolled</caption>
+      <thead><tr><th scope="col">Name it asked for</th><th scope="col">Project</th><th scope="col">Waiting</th><th scope="col">Ends</th><th scope="col">Action</th></tr></thead>
+      <tbody>
+      {{range .Waiting}}
+        <tr>
+          <th scope="row"><code>{{.Label}}</code></th>
+          <td data-label="Project">{{.Project}}</td>
+          <td data-label="Waiting">{{.Age}}</td>
+          <td data-label="Ends">{{template "t" .Expires}}</td>
+          <td data-label="Action">{{if $.Restricted}}<span class="muted">Re-open to cancel</span>{{else}}
+            <button class="btn" data-variant="destructive" data-size="sm" type="button" hx-post="/agents/enrolments/{{.ID}}/cancel" hx-target="#agents-status" hx-swap="innerHTML"
+              hx-confirm="Cancel the enrolment of {{.Label}}? Its agent is told the enrolment ended."
+              aria-label="Cancel the enrolment of {{.Label}}">Cancel</button>{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+{{end}}
+
+{{if .Recent}}
+<div class="card" role="region" aria-labelledby="recent-heading">
+  <header><h2 id="recent-heading">Answered and ended</h2></header>
+  <section>
+    <table class="table table-stack">
+      <caption class="sr-only">Requests that were answered or ended</caption>
+      <thead><tr><th scope="col">Agent</th><th scope="col">Asked for</th><th scope="col">State</th><th scope="col">What happened</th><th scope="col">Asked</th></tr></thead>
+      <tbody>
+      {{range .Recent}}
+        <tr>
+          <th scope="row"><code>{{.Holder}}</code></th>
+          <td data-label="Asked for">{{if eq .Kind "extend"}}more time ({{.For}}){{else}}{{.Ops}} for {{.For}}{{end}}</td>
+          <td data-label="State">{{.State}}</td>
+          <td data-label="What happened">
+            {{if eq .State "granted"}}Granted: {{.Granted}}.{{if .Removed}} Removed: {{.Removed}}.{{end}}
+            {{else if eq .State "denied"}}Denied{{if .DenyReason}}: {{.DenyReason}}{{end}}.
+            {{else}}-{{end}}
+          </td>
+          <td data-label="Asked">{{template "t" .Created}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+{{end}}
+
+{{end}}
+{{end}}

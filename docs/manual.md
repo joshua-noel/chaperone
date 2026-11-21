@@ -56,17 +56,31 @@ The op catalog (`api/manual.yaml`). Whether an op is switched on is policy, per 
 | `data.apply` | high | compensable | op | Apply a data change after a verified backup and approval. | `chap request op data.apply --reason <why>` |
 | `deploy` | high | compensable | op | Deploy a commit to the pilot after one approval. | `chap deploy <sha>` |
 | `drive.share` | high | compensable | op | Share one Drive file with allowlisted recipients. | `chap drive share <file-id> --from <account> --name <file-name> --to <a> --role <r>` |
+| `errors.assign` | routine | compensable | op | Assign a Sentry issue to a member the policy lists. | `chap errors assign <id> --to <member> [--dry-run]` |
+| `errors.comment` | routine | compensable | op | Add a note to a Sentry issue. | `chap errors comment <id> [--body <b> \| --body-file <f>]` |
+| `errors.get` | routine | reversible | op | Read one Sentry issue and its latest event's essentials. | `chap errors get <id> [--dry-run]` |
+| `errors.list` | routine | reversible | op | List issues of an allowed Sentry project, one page. | `chap errors list <sentry-project> [--status <s>] [--level <l>] [--limit <n>] [--cursor <c>]` |
+| `errors.resolve` | routine | reversible | op | Resolve one unresolved Sentry issue. | `chap errors resolve <id> [--dry-run]` |
+| `errors.unresolve` | routine | reversible | op | Reopen one resolved Sentry issue. | `chap errors unresolve <id> [--dry-run]` |
 | `health` | routine | reversible | op | Read the pilot's readiness status. | `chap health` |
 | `host.scripts.refresh` | critical | compensable | op | Refresh the host scripts from main (CRITICAL). | `chap request op host.scripts.refresh --reason <why>` |
 | `intake.comment` | routine | compensable | op | Comment on a labelled operator-board item. | `chap intake comment <SHOP-12> --body <b>` |
 | `intake.list` | routine | reversible | op | List open board items labelled for the orchestrator. | `chap intake list [--refresh] [--closed]` |
 | `intake.move` | routine | reversible | op | Move a labelled operator-board item to a listed state. | `chap intake move <SHOP-12> --state <name>` |
 | `intake.states` | routine | reversible | op | List the board team's states and the policy's. | `chap intake states` |
-| `issue.comment` | routine | compensable | op | Comment on an issue labelled source:error-watcher. | `chap issue comment <n> --body <b>` |
+| `issue.comment` | routine | compensable | op | Comment on an issue the policy allows. | `chap issue comment <n\|AGT-12> [--body <b> \| --body-file <f>]` |
+| `issue.get` | routine | reversible | op | Read one issue of the project's issue team. | `chap issue get <AGT-12> [--dry-run]` |
+| `issue.label` | routine | reversible | op | Add or remove one label from the policy's list. | `chap issue label <AGT-12> --add <l> \| --remove <l>` |
+| `issue.link` | routine | reversible | op | Attach a link, from a listed host, to an issue. | `chap issue link <AGT-12> --url <u> [--title <t>] [--dry-run]` |
+| `issue.list` | routine | reversible | op | List issues of the issue team, one page at a time. | `chap issue list [--state <type>] [--label <l>] [--cursor <c>] [--team <key>] [--dry-run]` |
+| `issue.move` | routine | reversible | op | Move an issue to a state the policy lists. | `chap issue move <AGT-12> --state <name> [--dry-run]` |
 | `issue.open` | routine | reversible | op | Open an issue labelled source:error-watcher. | `chap issue open --title <t> --label source:error-watcher [--body <b>]` |
 | `issue.reopen` | routine | reversible | op | Reopen an issue labelled source:error-watcher. | `chap issue reopen <n>` |
+| `keys.extend` | high | compensable | op | Make an agent's key last longer, with a Hello (HIGH). | `chap key extend --for <hours> --reason <why>` |
+| `keys.issue` | high | compensable | op | Give a script or an agent a key after approval (HIGH). | `chap key create --project <p> --holder <name> --ops <op,op> [--repo owner/name] [--ttl 24h]` |
+| `keys.request` | routine | reversible | op | Ask your owner for the access a job needs. | `chap key request --ops <op,op> [--repo owner/name] [--ttl 24h] --reason <why> [--wait]` |
 | `logs` | routine | reversible | op | Read recent log lines from a fixed source. | `chap logs <web\|worker\|db\|tunnel> [--lines <n>]` |
-| `mail.send` | high | irreversible | op | Send one email to allowlisted recipients after approval. | `chap mail send --from <account> --to <a> --subject <s> --body-file <f>` |
+| `mail.send` | high | irreversible | op | Send one email to allowlisted recipients after approval. | `chap mail send --from <account> --to <a> --subject <s> --body-file <f> [--via resend]` |
 | `notion.write` | high | compensable | op | Write one Notion page after approval. | `chap request op notion.write --reason <why>` |
 | `policy.activate` | critical | compensable | op | Activate a new policy pack (CRITICAL). | `chap request op policy.activate --reason <why>` |
 | `pr.checks` | routine | reversible | op | Read the check runs on a PR's head commit. | `chap pr checks <n> [--expected-head <sha>] [--repo owner/name]` |
@@ -89,21 +103,40 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap logo` | show the CHAPERONE banner |
 | `chap mcp` | serve the ops as MCP tools over stdio (Claude Code, Codex, Cursor) |
 | `chap version` | print the build identity |
+| `chap agent enrol` | enrol this agent: print a code for its owner to type at the console, then keep a request-only key in --out (no token needed) |
 | `chap approve list` | list your own approval requests (approving is done in the console) |
 | `chap ci report` | post a finished ci run's result to GitHub as a check run (orchestrator only) |
 | `chap deploy` | deploy a commit to the pilot (needs one approval) |
 | `chap dev-token` | mint an interim run token into a file (orchestrator only) |
 | `chap doctor` | check the server's Chaperone install (from a normal, not elevated, terminal) |
 | `chap drive share` | share one Drive file with allowlisted recipients (needs approval) |
+| `chap errors assign` | assign a Sentry issue to a member the policy lists |
+| `chap errors comment` | add a note to a Sentry issue |
+| `chap errors get` | read one Sentry issue and its latest event |
+| `chap errors list` | list issues of an allowed Sentry project |
+| `chap errors resolve` | resolve one Sentry issue |
+| `chap errors unresolve` | reopen one resolved Sentry issue |
 | `chap git setup` | route git's GitHub traffic through chapd's git proxy |
 | `chap health` | read the pilot's readiness status |
 | `chap intake comment` | comment on a labelled operator-board item |
 | `chap intake list` | list the board items labelled for the orchestrator |
 | `chap intake move` | move a labelled operator-board item to a listed state |
 | `chap intake states` | list the board team's states and which a move may use |
-| `chap issue comment` | comment on an issue labelled source:error-watcher |
+| `chap issue comment` | comment on an issue (GitHub: labelled source:error-watcher; Linear: policy) |
+| `chap issue get` | read one Linear issue of the project's issue team |
+| `chap issue label` | add or remove one label from the policy's list |
+| `chap issue link` | attach a link from a listed host to a Linear issue |
+| `chap issue list` | list Linear issues of the issue team, one page at a time |
+| `chap issue move` | move a Linear issue to a state the policy lists |
 | `chap issue open` | open an issue labelled source:error-watcher |
 | `chap issue reopen` | reopen an issue labelled source:error-watcher |
+| `chap key claim` | take a granted key into --out, once (only the caller that asked for it) |
+| `chap key create` | build a key for a script or an agent: a card you sign in the console, then the key goes to --out (orchestrator only) |
+| `chap key extend` | ask your owner to make this key last longer: one tap and a Hello for them; it adds time and no access (an agent's key only) |
+| `chap key list` | list the keys you own: holder, state, ops, repositories, expiry, uses (orchestrator only) |
+| `chap key request` | ask your owner for a key: what, how long and why; wait, and the key replaces the one in CHAP_KEY_FILE (an agent's key only) |
+| `chap key revoke` | revoke a key you own at once; it does not stop the agent, only its owner does that at the console (orchestrator only) |
+| `chap key show` | show the key this process holds: what it can do and until when (a key only) |
 | `chap ledger verify` | walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only) |
 | `chap logs` | read recent log lines from a fixed source |
 | `chap mail send` | send one email to allowlisted recipients (needs approval) |
@@ -122,6 +155,22 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap request scope` | ask for a wider task scope (a the runner surface) |
 | `chap runs revoke` | revoke one run, or every active run (orchestrator only) |
 | `chap vault status` | vault state: names and counts, never a value (orchestrator only) |
+
+### `chap agent enrol`
+
+enrol this agent: print a code for its owner to type at the console, then keep a request-only key in --out (no token needed)
+
+```
+chap agent enrol --label <name> --project <p> --out <file> [--wait <s>]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+| `--label <string>` | this agent's name (lower case) |
+| `--out <string>` | the new file the request-only key is written to (it is not printed) |
+| `--project <string>` | the project the agent works in |
+| `--wait <int>` | seconds to wait for your owner, 10 to 3600 (default 600) |
 
 ### `chap approve list`
 
@@ -188,7 +237,7 @@ chap dev-token --project <p> --repo <owner/name> --branch <b> --path <glob> --op
 | `--json` | print chapd's JSON reply instead of text |
 | `--minutes <int>` | lifetime in minutes, 1 to 120 (default 60) |
 | `--op <value>` | op the token may ask for (repeat, required) |
-| `--out <string>` | file to write the token to; created 0600, never overwritten (required) |
+| `--out <string>` | file to write the token to; private to you (mode 0600, or an access list for you alone on Windows), never overwritten (required) |
 | `--path <value>` | path glob the run may change (repeat, required) |
 | `--project <string>` | project slug (required) [env CHAP_PROJECT] |
 | `--repo <string>` | owner/name the run may push to (required) |
@@ -224,6 +273,121 @@ chap drive share <file-id> --from <account> --name <file-name> --to <a> [--to <b
 | `--request` | create the approval card for this exact op instead of running it (needs --reason) |
 | `--role <string>` | Drive role: reader, commenter or writer (required) |
 | `--to <value>` | recipient (repeat, or comma-separated) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors assign`
+
+assign a Sentry issue to a member the policy lists
+
+```
+chap errors assign <id> --to <member> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--to <string>` | a member from the policy's list: an email address or a username (required) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors comment`
+
+add a note to a Sentry issue
+
+```
+chap errors comment <id> [--body <b> | --body-file <f>] [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--body <string>` | text |
+| `--body-file <string>` | read the text from this file (- for stdin) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors get`
+
+read one Sentry issue and its latest event
+
+```
+chap errors get <id> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors list`
+
+list issues of an allowed Sentry project
+
+```
+chap errors list <sentry-project> [--status <s>] [--level <l>] [--limit <n>] [--cursor <c>] [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--cursor <string>` | the next_cursor of the previous page |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--level <string>` | only issues of this level: fatal, error, warning, info or debug |
+| `--limit <int>` | how many issues to return (default 10, at most 25) |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--status <string>` | unresolved (the default), resolved or ignored |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors resolve`
+
+resolve one Sentry issue
+
+```
+chap errors resolve <id> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap errors unresolve`
+
+reopen one resolved Sentry issue
+
+```
+chap errors unresolve <id> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
 | `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
 
 ### `chap git setup`
@@ -332,10 +496,10 @@ chap intake states [--team <key>]
 
 ### `chap issue comment`
 
-comment on an issue labelled source:error-watcher
+comment on an issue (GitHub: labelled source:error-watcher; Linear: policy)
 
 ```
-chap issue comment <n> [--body <b> | --body-file <f>] [--repo owner/name]
+chap issue comment <n|AGT-12> [--body <b> | --body-file <f>] [--repo owner/name]
 ```
 
 | Flag | Meaning |
@@ -348,6 +512,105 @@ chap issue comment <n> [--body <b> | --body-file <f>] [--repo owner/name]
 | `--reason <string>` | why (shown on the approval card, never used for authorization) |
 | `--repo <string>` | owner/name (default: from the git remote origin) |
 | `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue get`
+
+read one Linear issue of the project's issue team
+
+```
+chap issue get <AGT-12> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue label`
+
+add or remove one label from the policy's list
+
+```
+chap issue label <AGT-12> --add <l> | --remove <l> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--add <string>` | a label to add (one of the policy's list) |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--remove <string>` | a label to remove (one of the policy's list) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue link`
+
+attach a link from a listed host to a Linear issue
+
+```
+chap issue link <AGT-12> --url <u> [--title <t>] [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--title <string>` | the link's title (optional) |
+| `--url <string>` | an https URL on one of the policy's hosts (required) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue list`
+
+list Linear issues of the issue team, one page at a time
+
+```
+chap issue list [--state <type>] [--label <l>] [--cursor <c>] [--team <key>] [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--cursor <string>` | the next_cursor of the previous page |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--label <string>` | only issues with this label |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--state <string>` | a workflow state type: triage, backlog, unstarted, started, completed or canceled |
+| `--team <string>` | team key (default: the project's linear issue team) |
+| `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
+
+### `chap issue move`
+
+move a Linear issue to a state the policy lists
+
+```
+chap issue move <AGT-12> --state <name> [--dry-run]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--approval <string>` | resume under this approval id (a-...) |
+| `--dry-run` | evaluate policy and preconditions only; change nothing |
+| `--json` | print chapd's JSON reply instead of text |
+| `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
+| `--reason <string>` | why (shown on the approval card, never used for authorization) |
+| `--request` | create the approval card for this exact op instead of running it (needs --reason) |
+| `--state <string>` | the state's name (one of the policy's list) (required) |
 | `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
 
 ### `chap issue open`
@@ -390,6 +653,116 @@ chap issue reopen <n> [--repo owner/name]
 | `--request` | create the approval card for this exact op instead of running it (needs --reason) |
 | `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
 
+### `chap key claim`
+
+take a granted key into --out, once (only the caller that asked for it)
+
+```
+chap key claim <k-id> --out <file>
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+| `--out <string>` | the new file the key is written to (it is not printed) |
+
+### `chap key create`
+
+build a key for a script or an agent: a card you sign in the console, then the key goes to --out (orchestrator only)
+
+```
+chap key create --project <p> --holder <name> (--agent | --person) --ops <op,op> [--repo owner/name] [--ttl 24h|7d] [--rate <n>] --out <file> [--wait <s>] [--reason <why>]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--agent` | the holder is an agent (its owner can stop it at the console) |
+| `--holder <string>` | the name of the script, person or agent that will hold the key |
+| `--json` | print chapd's JSON reply instead of text |
+| `--ops <string>` | comma-separated ops the key may use; routine ops, and risky ones that still ask each time |
+| `--out <string>` | the new file the key is written to (it is not printed) |
+| `--person` | the holder is a person or a script |
+| `--project <string>` | the project the key is bound to |
+| `--rate <int>` | calls an hour, at most 300 (default 300) |
+| `--reason <string>` | why the key is needed (shown on the card) |
+| `--repo <string>` | owner/name the key is bound to (needed for pull-request ops) |
+| `--ttl <string>` | how long it lasts: 24h by default, at most 30d, 7d for a key with a risky op (default "24h") |
+| `--wait <int>` | seconds to wait for the card to be signed, 0 to not wait (default 300) |
+
+### `chap key extend`
+
+ask your owner to make this key last longer: one tap and a Hello for them; it adds time and no access (an agent's key only)
+
+```
+chap key extend --for <1h..30d> --reason <why> [--today] [--wait <s>]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--for <string>` | how much longer you need the key: 1h to 30d |
+| `--json` | print chapd's JSON reply instead of text |
+| `--reason <string>` | why the work runs long, in a sentence (your owner reads it) |
+| `--today` | mark the request needed today (it changes no order and no limit) |
+| `--wait <int>` | seconds to wait for your owner's answer, 0 to not wait (default 300) |
+
+### `chap key list`
+
+list the keys you own: holder, state, ops, repositories, expiry, uses (orchestrator only)
+
+```
+chap key list
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+
+### `chap key request`
+
+ask your owner for a key: what, how long and why; wait, and the key replaces the one in CHAP_KEY_FILE (an agent's key only)
+
+```
+chap key request --reason <why> (--ops <op,op> [--repo owner/name] | --same-as-me-read) [--ttl 24h|7d] [--rate <n>] [--today] [--wait <s>] | --status <kr-id> | --withdraw <kr-id>
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+| `--ops <string>` | comma-separated ops you need |
+| `--rate <int>` | calls an hour you need, at most 300 (default 300) |
+| `--reason <string>` | why you need it, in a sentence (your owner reads it) |
+| `--repo <string>` | owner/name the ops are for (needed for pull-request ops) |
+| `--same-as-me-read` | ask for what your owner can read, read-only, instead of naming ops |
+| `--status <string>` | show the state of request <kr-id> instead of asking |
+| `--today` | mark the request needed today (it changes no order and no limit) |
+| `--ttl <string>` | how long you need it: 24h by default, at most 30d (7d with a risky op) (default "24h") |
+| `--wait <int>` | seconds to wait for your owner's answer, 0 to not wait (default 300) |
+| `--withdraw <string>` | take back the waiting request <kr-id> instead of asking |
+
+### `chap key revoke`
+
+revoke a key you own at once; it does not stop the agent, only its owner does that at the console (orchestrator only)
+
+```
+chap key revoke <k-id>
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+
+### `chap key show`
+
+show the key this process holds: what it can do and until when (a key only)
+
+```
+chap key show
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | print chapd's JSON reply instead of text |
+
 ### `chap ledger verify`
 
 walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only)
@@ -429,7 +802,7 @@ chap logs <web|worker|db|tunnel> [--lines <n>]
 send one email to allowlisted recipients (needs approval)
 
 ```
-chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f>
+chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f> [--via resend]
 ```
 
 | Flag | Meaning |
@@ -438,13 +811,14 @@ chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --sub
 | `--bcc <value>` | blind-copy recipient (repeat, or comma-separated) |
 | `--body-file <string>` | file with the message text, - for stdin (required) |
 | `--cc <value>` | copy recipient (repeat, or comma-separated) |
-| `--from <string>` | the Google account that sends, the address chapd connect google status prints (required) |
+| `--from <string>` | the sender: the Google account (the address chapd connect google status prints), or with --via resend one of the project's resend.senders (required) |
 | `--json` | print chapd's JSON reply instead of text |
 | `--project <string>` | project slug (the orchestrator must name one; a run's is its token's) [env CHAP_PROJECT] |
 | `--reason <string>` | why (shown on the approval card, never used for authorization) |
 | `--request` | create the approval card for this exact op instead of running it (needs --reason) |
 | `--subject <string>` | subject line (required) |
 | `--to <value>` | recipient (repeat, or comma-separated) |
+| `--via <string>` | the service that sends: google (Gmail, the default) or resend (default "google") |
 | `--wait <value>` | seconds to wait for a final state, 0 to 55 (default: chapd's) |
 
 ### `chap manual`
@@ -745,11 +1119,12 @@ Every rule below has a test that fails if the code stops enforcing it. `go test 
 | `chap` takes its credential from `CHAP_RUN_TOKEN`, else the orchestrator token file. No flag accepts a token or any other secret. | cmd/chap: `loadToken`, and every flag set | `TestNoFlagAcceptsASecret` (cmd/chap), `TestTokenPrecedence` (cmd/chap), `TestNoFlagNamesACredential` (docs/manualgen) |
 | `chap` sends its token only to a loopback `chapd`: a `CHAP_URL` anywhere else is refused, and a redirect is not followed. | cmd/chap: `baseURL`, the HTTP client's `CheckRedirect` | `TestBaseURL` (cmd/chap), `TestRedirectIsNotFollowed` (cmd/chap) |
 | Everything `chap` prints is masked: the token in use, and anything shaped like an orchestrator token, a JWT, a GitHub or API key or a PEM block. A request or denial that holds a registered secret is refused by `chapd` (`REDACTION_BLOCKED`) before it is stored or echoed. | cmd/chap: `app.scrub`; internal/redact; internal/ops: `submissionLeaks` | `TestScrubMasksSecretShapes` (cmd/chap), `TestRT26CanaryNeverAppearsAnywhere` (test/redteam), `TestRT26AgentSuppliedSecret` (test/redteam) |
-| `chap dev-token` writes the token it mints to a new file and prints nothing of it. It creates the file exclusively, so an existing file is refused, not overwritten. The mode is 0600 where the system has file modes; on Windows the file takes the ACL of its folder, which is why the default place is your own profile. | cmd/chap: `createPrivateFile` (`O_EXCL`), `cmdDevToken` | `TestDevTokenWritesFileOnly` (cmd/chap) |
+| `chap dev-token` writes the token it mints to a new file and prints nothing of it. It creates the file exclusively, so an existing file is refused, not overwritten. The file is private to you from the moment it exists: mode 0600 where the system has file modes, and on Windows, where the mode means nothing, a protected access list for your user alone that is given in the same call that creates the file, so it does not take the access of its folder. A link at the path is refused, not followed. | cmd/chap: `createPrivateFile`, `cmdDevToken`; internal/privfile: `Create` | `TestDevTokenWritesFileOnly` (cmd/chap), `TestKeyFilesArePrivateFromCreation` (cmd/chap), `TestCreateIsOwnerOnlyByIcacls` (internal/privfile), `TestCreateIsMode0600` (internal/privfile), `TestCreateDoesNotFollowALink` (internal/privfile) |
 | `chap vault status` shows secret names and counts only. No chapd route, `chap` command or ledger field returns a secret value; the vault's only reader is `Vault.Use`, which hands the value to one adapter closure. | internal/vault: `Use`; internal/ops: the vault status route | `TestNoFunctionReturnsASecret` (internal/vault), `TestRT26CanaryNeverAppearsAnywhere` (test/redteam) |
 | The `--reason` text is for the approver to read. The card shows it in a box labelled as written by the requester and untrusted, and it is recorded. It is not part of the op hash an approval binds to, and no policy or adapter code reads it. | internal/spec: `OpHash`; internal/approvals: `card.go` | `TestReasonIsNotPartOfTheOpHash` (docs/manualgen), `TestNoAdapterOrPolicyReadsTheReason` (docs/manualgen) |
 | A high or critical op always needs one approval bound to the exact request (`OP_APPROVAL_REQUIRED` until it is approved); a changed parameter is a new card (`APPROVAL_HASH_MISMATCH`). | internal/ops: `service.go` (`Class.NeedsApproval`); internal/approvals | `TestApprovalFlow` (internal/ops), `TestRT24DemoEmail` (test/redteam) |
 | `chap` cannot approve. It has no approve verb, and `chapd` has no API route or verb that decides an approval: that takes a user-verified WebAuthn assertion in the console. | cmd/chap: the command table; internal/ops: the route table; internal/approvals: `Approve` | `TestChapHasNoApproveVerb` (docs/manualgen), `TestRT13ApprovalCannotBeDecidedOverTheAPI` (test/redteam) |
 | An op that policy has not enabled is refused with `OP_DISABLED`, for a run and for the orchestrator. | internal/ops: `Service.Submit`; internal/policy: `Effective.Enabled` | `TestOpDisabledByDefault` (internal/ops) |
 | The Linear intake (`chap intake`) writes two things only: a comment, and a move to a state the project's policy lists. It writes only to an item of the one policy team that carries the policy label at the moment of the write (`chapd` reads it again just before), never to the Engineering team, and it cannot remove or add a label, edit a title or description, assign, archive or delete: `chapd` sends five fixed GraphQL documents and the caller supplies no query. | internal/connectors/linear: `queries.go`, `base.guard`, `moveAdapter` | `TestOnlyTheFiveFixedDocumentsAreEverSent` (internal/connectors/linear), `TestTheDocumentsCannotChangeLabelsTextOrDelete` (internal/connectors/linear), `TestLabelRemovedBetweenCheckAndWriteStopsTheComment` (internal/connectors/linear), `TestLabelRemovedBetweenCheckAndWriteStopsTheMove` (internal/connectors/linear), `TestATeamCalledEngineeringIsNeverWrittenTo` (internal/connectors/linear), `TestMoveToAStateThePolicyDoesNotListIsRefused` (internal/connectors/linear) |
+| The Sentry connector (`chap errors`) acts only on the Sentry projects that the project's policy lists, and reads the issue again just before every write. It returns no request data, cookies, headers, user data or local variables of an event: `chapd` decodes the fields it lists and no others. It sends its token only to the one https host the policy names, and follows no redirect. It cannot delete, merge, ignore or create an issue, unassign, or delete a note, and a note cannot mention a person or a team. All six ops are off until a policy change turns them on, and nothing here ran against a real Sentry. | internal/connectors/sentry: `client.go`, `base.readIssue`, `note.go`; internal/policy: `sentry.go` | `TestGetReturnsTheEssentialsAndNothingElse` (internal/connectors/sentry), `TestProjectChangedBetweenCheckAndWriteStopsTheWrite` (internal/connectors/sentry), `TestARedirectIsNotFollowed` (internal/connectors/sentry), `TestTheClientSendsOnlyToAnExactHTTPSHost` (internal/connectors/sentry), `TestOnlyTheFixedRoutesAreEverCalled` (internal/connectors/sentry), `TestNoteRefusesWhatCouldMentionOrLinkOrHide` (internal/connectors/sentry), `TestCheckSentryBaseURL` (internal/policy) |
 | `chap mcp` serves the ops as MCP tools to a client on the same machine over stdio, and does nothing the command line cannot: each tool call is one request to `chapd` with the same credential, so policy, approvals and the ledger apply. It listens on nothing, and it cannot show or change an approval card: a call that needs a human returns only the op id, the approval id, the class and the time left. Text an op read from outside comes back in a field named `untrusted_result`. | internal/mcpfront; cmd/chap: `mcp.go` | `TestPackageImportsOnlyWhatItMay` (internal/mcpfront), `TestPendingResultHasOnlyFixedFields` (internal/mcpfront), `TestAllowedCallAndInjectedTextStaysData` (internal/mcpfront), `TestMcpTranscriptBothEras` (cmd/chap) |

@@ -73,7 +73,7 @@ func (a *app) tokenFilePath() string {
 }
 
 // loadToken returns the credential: CHAP_RUN_TOKEN first (ADR-007 item 6),
-// else the orchestrator token file. No flag takes a token. Error text never
+// else the key file named by CHAP_KEY_FILE (ADR-008), else the orchestrator token file. No flag takes a token. Error text never
 // contains token bytes.
 func (a *app) loadToken() (string, error) {
 	a.tokMu.Lock()
@@ -82,6 +82,17 @@ func (a *app) loadToken() (string, error) {
 		return a.token, nil
 	}
 	tok, from := strings.TrimSpace(a.getenv("CHAP_RUN_TOKEN")), "CHAP_RUN_TOKEN"
+	if kf := strings.TrimSpace(a.getenv("CHAP_KEY_FILE")); tok == "" && kf != "" {
+		// A key (ADR-008) comes before the orchestrator file: a script or an agent holds a key and nothing else.
+		data, err := a.readFile(kf)
+		if err != nil {
+			return "", failure(exitAuth, "no token: CHAP_KEY_FILE names %s, which cannot be read", clean(kf))
+		}
+		tok, from = strings.TrimSpace(string(data)), "the key file "+kf
+		if tok == "" {
+			return "", failure(exitAuth, "no token: the key file %s is empty", clean(kf))
+		}
+	}
 	if tok == "" {
 		path := a.tokenFilePath()
 		data, err := a.readFile(path)
@@ -160,13 +171,25 @@ func (a *app) call(method, path string, q url.Values, body any) (*reply, error) 
 // callCtx is call that stops when ctx is done (`chap mcp` cancels a call the
 // client gave up on).
 func (a *app) callCtx(ctx context.Context, method, path string, q url.Values, body any) (*reply, error) {
+	return a.send(ctx, method, path, q, body, true)
+}
+
+// callAnon sends a call with no credential: only the agent enrolment routes take one, because the agent has
+// none yet. The reply of a poll can hold a key; the caller registers it with the scrubber.
+func (a *app) callAnon(method, path string, body any) (*reply, error) {
+	return a.send(context.Background(), method, path, nil, body, false)
+}
+
+func (a *app) send(ctx context.Context, method, path string, q url.Values, body any, auth bool) (*reply, error) {
 	base, err := a.baseURL()
 	if err != nil {
 		return nil, err
 	}
-	tok, err := a.loadToken()
-	if err != nil {
-		return nil, err
+	var tok string
+	if auth {
+		if tok, err = a.loadToken(); err != nil {
+			return nil, err
+		}
 	}
 	target := base + path
 	if len(q) > 0 {
@@ -184,7 +207,9 @@ func (a *app) callCtx(ctx context.Context, method, path string, q url.Values, bo
 	if err != nil {
 		return nil, failure(exitFail, "cannot build the request: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+tok)
+	if auth {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "chap/"+version.Version)
 	if body != nil {
@@ -303,6 +328,9 @@ func (a *app) refused(asJSON bool, r *reply) int {
 			"\nrequest: not possible, policy does not allow asking\n" +
 			"check CHAP_RUN_TOKEN or the orchestrator token file\n"
 		code = exitAuth
+	case head.Type == "enrol_refused":
+		text = "NOT ENROLLED\nwhy: " + clean(head.Why) + "\n"
+		code = exitDenied
 	case head.Type == "unavailable":
 		kind := "not retryable as is"
 		if head.Retryable {

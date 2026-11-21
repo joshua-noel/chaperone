@@ -68,7 +68,36 @@ type narrowFile struct {
 		Team   string   `yaml:"team"`
 		Label  string   `yaml:"label"`
 		States []string `yaml:"states"`
+		// Issues is the optional block of the generic issue ops (never the
+		// operator board; see LinearIssues).
+		Issues *struct {
+			Team        string   `yaml:"team"`
+			Label       string   `yaml:"label"`
+			States      []string `yaml:"states"`
+			Labels      []string `yaml:"labels"`
+			LinkHosts   []string `yaml:"link_hosts"`
+			MaxMentions int      `yaml:"max_mentions"`
+			Comment     bool     `yaml:"comment"`
+		} `yaml:"issues"`
 	} `yaml:"linear"`
+	// Sentry is the connector policy of the project: the Sentry server and
+	// organisation, the project slugs the errors.* ops may touch and the members
+	// errors.assign may assign to. Like `linear:` it only adds data; it never turns
+	// an op on. A mistake in it turns off the Sentry ops only (see Sentry.Invalid).
+	Sentry *struct {
+		BaseURL      string   `yaml:"base_url"`
+		Organization string   `yaml:"organization"`
+		Projects     []string `yaml:"projects"`
+		Assignees    []string `yaml:"assignees"`
+	} `yaml:"sentry"`
+	// Resend is the connector policy of the project for mail.send when the target adapter is
+	// `resend`: the sender addresses, who may receive mail and the cap on recipients. Like `sentry:` it only adds
+	// data; it never turns an op on. A mistake in it turns off the Resend side only (see Resend.Invalid).
+	Resend *struct {
+		Senders         []string `yaml:"senders"`
+		AllowRecipients []string `yaml:"allow_recipients"`
+		MaxRecipients   *int     `yaml:"max_recipients"`
+	} `yaml:"resend"`
 }
 
 // LoadProject applies a project file to the baseline. The file may only
@@ -169,6 +198,8 @@ func (p *Pack) LoadProject(project string, data []byte, cat *Catalog) (*Effectiv
 		if err := pr.validate(); err != nil {
 			return nil, fmt.Errorf("policy: project %s: pr: %w", project, err)
 		}
+		// A bad tier glob turns off the merge ops only, not the project: the rest of the file is fine.
+		pr.Invalid = pr.tierProblem(project)
 		eff.PR = pr
 	}
 	if f.Google != nil {
@@ -183,10 +214,47 @@ func (p *Pack) LoadProject(project string, data []byte, cat *Catalog) (*Effectiv
 	}
 	if f.Linear != nil {
 		l := &Linear{Team: f.Linear.Team, Label: f.Linear.Label, States: slices.Clone(f.Linear.States)}
+		if in := f.Linear.Issues; in != nil {
+			l.Issues = &LinearIssues{
+				Team: in.Team, Label: in.Label, States: slices.Clone(in.States), Labels: slices.Clone(in.Labels),
+				LinkHosts: slices.Clone(in.LinkHosts), MaxMentions: in.MaxMentions, Comment: in.Comment,
+			}
+		}
 		if err := l.validate(); err != nil {
 			return nil, fmt.Errorf("policy: project %s: linear: %w", project, err)
 		}
+		// A bad issues block turns off the Linear issue operations only, not the project and not the intake.
+		if l.IssuesInvalid = l.issuesProblem(project); l.IssuesInvalid != nil {
+			l.Issues = nil
+		}
 		eff.Linear = l
+	}
+	if f.Sentry != nil {
+		s := &Sentry{
+			BaseURL: f.Sentry.BaseURL, Organization: f.Sentry.Organization,
+			Projects: slices.Clone(f.Sentry.Projects), Assignees: slices.Clone(f.Sentry.Assignees),
+		}
+		// A bad block turns off the Sentry operations only, not the project: the rest of the file is fine. The fields
+		// are cleared, so a block that cannot be used is never half usable.
+		if err := s.problem(project); err != nil {
+			s = &Sentry{Invalid: err}
+		}
+		eff.Sentry = s
+	}
+	if f.Resend != nil {
+		r := &Resend{
+			Senders: slices.Clone(f.Resend.Senders), AllowRecipients: slices.Clone(f.Resend.AllowRecipients),
+			MaxRecipients: ResendDefaultMaxRecipients,
+		}
+		if f.Resend.MaxRecipients != nil {
+			r.MaxRecipients = *f.Resend.MaxRecipients
+		}
+		// A bad block turns off the Resend side only, not the project and not mail through Gmail. The fields are
+		// cleared, so a block that cannot be used is never half usable.
+		if err := r.problem(project); err != nil {
+			r = &Resend{Invalid: err}
+		}
+		eff.Resend = r
 	}
 	return eff, nil
 }

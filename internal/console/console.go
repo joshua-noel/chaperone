@@ -2,6 +2,7 @@ package console
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -44,6 +45,7 @@ type Console struct {
 	pages       map[string]*template.Template
 	now         func() time.Time
 	emitFn      func(Event)
+	authn       Authenticators // Config.Authenticators, never empty
 	log         *slog.Logger
 	sessionIdle time.Duration
 	sessionMax  time.Duration
@@ -80,6 +82,7 @@ func New(cfg Config) (*Console, error) {
 		sessionIdle: cfg.SessionIdle,
 		sessionMax:  cfg.SessionMax,
 		ceremonyTTL: cfg.CeremonyTTL,
+		authn:       cmp.Or(cfg.Authenticators, AuthenticatorsPlatform),
 		// a copy: the guard puts it in a response header, so nothing may change it after validation
 		frameAncestors: append([]string(nil), cfg.FrameAncestors...),
 	}
@@ -112,10 +115,11 @@ func New(cfg Config) (*Console, error) {
 				RPDisplayName:         name,
 				RPOrigins:             []string{o.URL},
 				AttestationPreference: protocol.PreferNoAttestation,
-				// ADR-004 section 1: a platform authenticator (Windows Hello, a
-				// phone passkey), a discoverable key, user verification required.
+				// ADR-004 section 1 and amendment 15: a discoverable key and user verification, always. Platform
+				// authenticators only (Windows Hello, Touch ID, a phone's own passkey) unless Config.Authenticators
+				// is "any", which leaves the attachment open so the browser also offers a security key and a phone.
 				AuthenticatorSelection: protocol.AuthenticatorSelection{
-					AuthenticatorAttachment: protocol.Platform,
+					AuthenticatorAttachment: c.registrationAttachment(),
 					RequireResidentKey:      protocol.ResidentKeyRequired(),
 					ResidentKey:             protocol.ResidentKeyRequirementRequired,
 					UserVerification:        protocol.VerificationRequired,
@@ -220,6 +224,39 @@ func IssueEnrollment(ctx context.Context, db *store.DB, approverID *int64, ttl t
 	return token, nil
 }
 
+// IssueFirstEnrollment is the one-time address of a scratch console's first
+// passkey (`chapd quickstart`). In one transaction it first spends every
+// earlier first-approver token that was never used (a restarted quickstart
+// leaves only the address it printed last alive, not the ones still in the
+// terminal's history), and then
+//
+//   - returns "" and issues nothing when an approver already exists, so the
+//     caller offers sign-in and no enrolment address exists at all, or
+//   - issues a new token.
+//
+// The token is single use (saveEnrollment) and dies at now+ttl.
+func IssueFirstEnrollment(ctx context.Context, db *store.DB, ttl time.Duration, now time.Time) (string, error) {
+	var token string
+	err := db.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE console_enrollments SET used_at = ? WHERE approver_id IS NULL AND used_at IS NULL`,
+			now.UTC().Format(timeFormat)); err != nil {
+			return err
+		}
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM approvers`).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return nil
+		}
+		var err error
+		token, err = issueEnrollmentTx(ctx, tx, nil, ttl, now)
+		return err
+	})
+	return token, err
+}
+
 // issueEnrollmentTx is [IssueEnrollment] inside the caller's transaction, so an
 // approval can be spent in the same commit that issues the address.
 func issueEnrollmentTx(ctx context.Context, tx *store.Tx, approverID *int64, ttl time.Duration, now time.Time) (string, error) {
@@ -253,6 +290,7 @@ type page struct {
 	Credentials []credView
 	Message     string
 	Phone       bool // the page is served at a phone origin (wording only; the guard decides nothing from it)
+	Roaming     bool // Config.Authenticators allows a security key or a phone (wording only)
 	Framed      bool // see Console.framed: no header, no nav
 }
 
@@ -285,6 +323,7 @@ func (c *Console) render(w http.ResponseWriter, r *http.Request, status int, nam
 	p.CSRF = c.csrfToken(st)
 	p.Origin = st.rp.URL
 	p.Phone = st.rp.RPID != LocalOrigin.RPID
+	p.Roaming = c.authn == AuthenticatorsAny
 	p.Framed = st.framed
 	var buf bytes.Buffer
 	if err := c.pages[name].ExecuteTemplate(&buf, "layout", p); err != nil {

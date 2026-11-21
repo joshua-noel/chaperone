@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/untrusted"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -426,7 +427,7 @@ func addCheck(v *PRVerdict, name string, passed bool, detail string) {
 }
 
 func failedOutcome(msg string) Outcome {
-	return Outcome{Failed: true, Result: map[string]any{"error": clip(msg, 300)}}
+	return Outcome{Failed: true, Result: map[string]any{"error": clip(untrusted.Line(msg), 300)}}
 }
 
 // finish adds the post-deploy health and the blast-radius times (HH:MM).

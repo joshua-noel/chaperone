@@ -222,3 +222,58 @@ func TestRunEnrollRefusals(t *testing.T) {
 		t.Fatalf("timeout: %v", err)
 	}
 }
+
+// The browser is sent to localhost, which may mean ::1: `chapd enroll` holds
+// [::1]:PORT too, and refuses to start when another program is on it.
+func TestRunEnrollHoldsIPv6Loopback(t *testing.T) {
+	probe, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skip("no IPv6 loopback on this machine")
+	}
+	probe.Close()
+	var port int
+	var squatter net.Listener
+	for range 50 { // a port free on both stacks
+		port = freePort(t)
+		if squatter, err = net.Listen("tcp6", fmt.Sprintf("[::1]:%d", port)); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer squatter.Close()
+	err = RunEnroll(context.Background(), EnrollOptions{
+		DBPath: filepath.Join(t.TempDir(), "a.db"), Addr: fmt.Sprintf("127.0.0.1:%d", port),
+		Origin: Origin{RPID: "localhost", URL: fmt.Sprintf("http://localhost:%d", port)},
+	})
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("[::1]:%d", port)) || !strings.Contains(err.Error(), "Another program") {
+		t.Fatalf("started with another program on [::1]: %v", err)
+	}
+	squatter.Close()
+
+	// Free again: the console answers on both addresses, to Host localhost only.
+	opt := EnrollOptions{
+		DBPath: filepath.Join(t.TempDir(), "b.db"), Addr: fmt.Sprintf("127.0.0.1:%d", port),
+		Origin: Origin{RPID: "localhost", URL: fmt.Sprintf("http://localhost:%d", port)}, TTL: time.Minute,
+	}
+	out := &syncBuf{}
+	opt.Out = out
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- RunEnroll(ctx, opt) }()
+	waitForText(t, out, regexp.MustCompile(`/enroll#\S+`), done)
+	for _, addr := range []string{fmt.Sprintf("127.0.0.1:%d", port), fmt.Sprintf("[::1]:%d", port)} {
+		req, _ := http.NewRequest("GET", "http://"+addr+"/enroll", nil)
+		req.Host = fmt.Sprintf("localhost:%d", port)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil || res.StatusCode != 200 {
+			t.Errorf("%s: %v %v", addr, res, err)
+		}
+		if res != nil {
+			res.Body.Close()
+		}
+	}
+	cancel()
+	<-done
+}

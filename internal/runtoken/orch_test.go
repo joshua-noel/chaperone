@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -266,7 +267,7 @@ func TestOrchIssueValidation(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
 	bad := []IssueParams{
-		{ID: "Main", Scope: mainScope},
+		{ID: "Mixed-Case", Scope: mainScope},
 		{ID: "", Scope: mainScope},
 		{ID: "main", Scope: OrchScope{}},
 		{ID: "main", Scope: OrchScope{Projects: []string{"acme-shop"}}},
@@ -299,5 +300,85 @@ func TestOrchList(t *testing.T) {
 	}
 	if rows[0].Live(e.clock.Add(25 * time.Hour)) {
 		t.Fatal("an expired token is live")
+	}
+}
+
+// The id "key.<id>" is how a custom key reaches the spec's ledger (spec.KeyRequester): no orchestrator may be
+// called by it, or its events would pass for a key's.
+func TestOrchestratorIdsCannotStartWithTheKeyPrefix(t *testing.T) {
+	e := newEnv(t)
+	o := e.orch
+	for _, id := range []string{"key.k-0123456789abcdef", "key.x"} {
+		_, err := o.Issue(context.Background(), IssueParams{ID: id, Scope: OrchScope{Projects: []string{"acme-shop"}, Ops: []string{"pr.merge"}}})
+		if err == nil || !strings.Contains(err.Error(), "reserved for keys") {
+			t.Errorf("%s: %v", id, err)
+		}
+	}
+	if _, err := o.Issue(context.Background(), IssueParams{ID: "keymaker", Scope: OrchScope{Projects: []string{"acme-shop"}, Ops: []string{"pr.merge"}}}); err != nil {
+		t.Errorf("an id that merely starts with key: %v", err)
+	}
+}
+
+// The reserved ids are refused when a token is issued and again when it is verified: a row that got there another
+// way (a database from before the ids were reserved, or an insert) never acts as the console's own identity
+// ("operator" passes the gates that only a person's own Hello may pass) or as a name chapd records for keys, people,
+// agents and enrolments.
+func TestReservedOrchestratorIdsAreRefusedAtVerifyToo(t *testing.T) {
+	ctx := context.Background()
+	for _, id := range []string{"operator", "chapd", "key.k-0123456789abcdef", "person.operator", "agent.operator.scout", "enrol.en-0123456789abcdef"} {
+		e := newEnv(t)
+		r := e.issueOrch("main", mainScope, 0)
+		if _, err := e.orch.Verify(ctx, r.Token); err != nil {
+			t.Fatalf("control: %v", err)
+		}
+		if _, err := e.db.SQL().Exec(`UPDATE orchestrators SET id = ?`, id); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		_, err := e.orch.Verify(ctx, r.Token)
+		if re := wantCode(t, err, CauseTokenInvalid); !strings.Contains(re.Error(), "reserved") && !strings.Contains(re.Error(), "must not start") {
+			t.Errorf("%s: %v", id, re)
+		}
+		// Issue still refuses them.
+		if _, err := e.orch.Issue(ctx, IssueParams{ID: id, Scope: mainScope}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("issue %s: %v", id, err)
+		}
+	}
+}
+
+// Issuing a token tells the owner of the keys, in the same transaction and before the old token is rotated out, the
+// scope the new token will have, so that what it no longer reaches (a project, an operation) can be revoked with it.
+func TestIssueGivesTheKeyOwnerTheNewScopeInTheSameTransaction(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	var seen []string
+	var err error
+	e.orch, err = NewOrchestrators(OrchConfig{
+		DB: e.db, Appender: e.led, Now: func() time.Time { return e.clock },
+		PolicyVersion: func() string { return e.policy },
+		TxReissue: func(_ context.Context, tx *store.Tx, id string, sc OrchScope) error {
+			var live int
+			_ = tx.QueryRowContext(ctx, `SELECT count(*) FROM orchestrators WHERE id = ? AND revoked_at IS NULL`, id).Scan(&live)
+			seen = append(seen, id+":"+strings.Join(sc.Projects, "+")+":"+strings.Join(sc.Ops, "+")+":live="+strconv.Itoa(live))
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.issueOrch("main", OrchScope{Projects: []string{"acme-shop", "acme-blog"}, Ops: []string{"pr.merge", "pr.view"}}, 0)
+	e.issueOrch("main", OrchScope{Projects: []string{"acme-shop"}, Ops: []string{"pr.merge"}}, 0)
+	want := []string{"main:acme-shop+acme-blog:pr.merge+pr.view:live=0", "main:acme-shop:pr.merge:live=1"}
+	if strings.Join(seen, "|") != strings.Join(want, "|") {
+		t.Errorf("the hook saw %v, want %v", seen, want)
+	}
+	// A hook that fails stops the issue and leaves the old token live.
+	e.orch.cfg.TxReissue = func(context.Context, *store.Tx, string, OrchScope) error { return errors.New("no") }
+	if _, err := e.orch.Issue(ctx, IssueParams{ID: "main", Scope: mainScope}); err == nil {
+		t.Fatal("an issue went on after its hook failed")
+	}
+	var live int
+	e.db.SQL().QueryRow(`SELECT count(*) FROM orchestrators WHERE id = 'main' AND revoked_at IS NULL`).Scan(&live)
+	if live != 1 {
+		t.Errorf("%d live tokens after the failed issue, want the old one", live)
 	}
 }

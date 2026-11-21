@@ -1,0 +1,8 @@
+$ chap issue get 301
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: the issue must be a Linear identifier such as AGT-12
+usage: chap issue get <AGT-12> [--dry-run]

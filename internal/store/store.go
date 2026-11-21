@@ -83,6 +83,12 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		return nil, fmt.Errorf("store: database path %q contains '?' or '#'", path)
 	}
 
+	// Owner-only files on Unix (a no-op on Windows). Done before SQLite creates
+	// anything, so the -wal and -shm files it makes inherit the mode.
+	if err := prepareDBFile(path); err != nil {
+		return nil, err
+	}
+
 	// busy_timeout comes first so the journal_mode switch waits for a lock
 	// instead of failing. database/sql opens many connections; the DSN
 	// applies every pragma to each of them.
@@ -97,6 +103,10 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	}
 	d := &DB{sql: sdb, path: path, gate: make(chan struct{}, 1)}
 	if err := d.verifyPragmas(ctx); err != nil {
+		_ = sdb.Close()
+		return nil, err
+	}
+	if err := restrictSidecars(path); err != nil {
 		_ = sdb.Close()
 		return nil, err
 	}

@@ -142,3 +142,41 @@ Try the mistakes as well: a state that is not in the policy (`OP_POLICY_REFUSED`
 - **Rotate the secret:** in Linear, *Rotate secret* on the app (this ends every token `chapd` holds; the next call makes a new one after you import the new value in the console).
 - **Switch the connector off at once:** a policy change that sets the four ops back to `enabled: false`, or delete the two secrets, or delete the app in Linear.
 - **Rules about GitHub:** the orchestrator never writes `Fixes`, `Closes` or `Resolves` with a Linear identifier in a PR title, body or branch name: Linear would move the item by itself, outside this policy.
+
+## The generic issue ops (optional, off; ADR-003 amendment 7)
+
+Six more ops use the same two vault secrets and the same Linear app: `issue.get`, `issue.list`, `issue.comment`, `issue.label`, `issue.move` and `issue.link`. They are for the orchestrator token (a custom key cannot hold an `issue.*` operation) and they are **separate from the operator board**: they work in one other Linear team and never touch an item that is in the intake team or carries the intake label. Nothing about the operator board above changes. **Nothing in Linear was tried: the first real run is a live test on a scratch workspace, before the policy change below.**
+
+| What | Where |
+| --- | --- |
+| Off by default | `issue.get`, `issue.list`, `issue.label`, `issue.move`, `issue.link` are `enabled: false` in the baseline. `issue.comment` is one name for two connectors (the GitHub error watcher, ADR-002 amendment 11, and this one), so the name is on; the Linear side is off for every project whose policy file has no `linear.issues` block |
+| Turn on | A policy change flips the five names in `internal/policy/data/baseline.yaml` (and `shippedEnabled` in the policy test), and the project's file gets the block below |
+| Never | Opening or editing an issue (`issue.open`, `issue.update` are not built: they wait for the operator's yes), assigning, archiving, deleting, another team, an operator-board item |
+
+The project file's block (inside `linear:`; all of it is checked when the file loads, and a mistake refuses the whole file):
+
+```yaml
+linear:
+  team: SHOP           # the operator board (unchanged)
+  label: agent         # the operator board (unchanged)
+  states: [In Progress, Waiting/Blocked, Done]
+  issues:
+    team: AGT          # the one team the issue ops work in; must not be the board's team
+    label: ai-ok       # a write acts only on an issue that carries this label now; must not be the board's label
+    states: [In Progress, Done]   # what issue.move may set
+    labels: [bug, triaged]        # what issue.label may add or remove (not the two labels above)
+    link_hosts: [github.com]      # issue.link: exact host names, https only; linear.app is refused
+    comment: false                # Linear comments are off unless this is true (issue.comment is on for GitHub)
+    max_mentions: 0               # people a comment may mention
+```
+
+How to see it work (after the policy change, with a token that holds `issue.*`): `chap issue list --project <p>`, `chap issue get AGT-12`, `chap issue move AGT-12 --state Done`. An item of the operator board comes back refused with `intake_label_excluded` in the reason.
+
+**Comments need their own switch.** `issue.comment` is one name for GitHub's error watcher and for Linear, and it is on in the baseline. A `linear.issues` block alone does not let anyone comment on Linear: the block must also say `comment: true`. The two share one rate budget (6 a minute, 20 an hour per caller): a Linear comment counts against the error watcher's GitHub comments. A comment, a link URL or a link title that names an issue of the intake team (`SHOP-12`, in any case, however it is escaped or dressed in markdown or HTML), that holds `linear.app`, that has an invisible character (an emoji's variation selector is fine), or that has an identifier-shaped word mixing Latin with look-alike letters (Cyrillic, Greek) is refused, and `link_hosts` may not list `linear.app`. **This is a best-effort guard against accidental and simple references, not a barrier.** An agent can always describe an item in words ("the second item on the board"), and nothing here was tried against real Linear. The real protection is that the operations cannot act on the board: every read and every write of an issue is refused for an item of the intake team or with the intake label, whatever a comment says. **A mistake in the `linear.issues` block turns off only the Linear issue operations** (and Linear's `issue.comment`) for that project: chapd logs a warning at start, each refusal names the project, the file and the field, and the intake and everything else keep working until the file is fixed (a key the file format does not know still refuses the whole file).
+
+**Before turning `issue.move`, `issue.label` and `issue.link` on, check in Linear** (nothing in Chaperone can check these, and none of them was run against real Linear):
+
+- The `linear.issues.team` has **no two-way GitHub sync**. A move to a done state can close the linked GitHub issue; only the Engineering mirror is blocked by name.
+- No **webhook** or integration on that team starts a deploy, a build or another action when an issue changes state, gets a label or an attachment. A move notifies subscribers and fires webhooks and Slack.
+- The **provenance label is not in a label group**. In Linear only one label of a group can be on an issue, so adding another label of that group could remove the provenance label, and the agent would lose the right to write to that issue.
+- A parent issue may close by itself when its last sub-issue is moved to a done state.

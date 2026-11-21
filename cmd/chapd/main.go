@@ -1,6 +1,6 @@
 // Command chapd: the daemon (HTTP API, policy, op lifecycle), `chapd orch` for the
-// orchestrator token, `chapd vault` for the secrets vault, and `chapd enroll` for
-// the first passkey.
+// orchestrator token, `chapd vault` for the secrets vault, `chapd enroll` for
+// the first passkey and `chapd quickstart` for a first try on any system.
 package main
 
 import (
@@ -18,7 +18,7 @@ func main() {
 // run executes one invocation and returns the process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: chapd version | run [flags] | svc [flags] | orch issue|revoke|list | vault init|import|list | profile add|digest | connect google | host keygen | ledger keygen | enroll [flags]")
+		fmt.Fprintln(stderr, "usage: chapd version | run [flags] | svc [flags] | orch issue|revoke|list | vault init|import|list | profile add|digest | connect google|github | host keygen | ledger keygen | enroll [flags] | quickstart [flags]")
 		return 2
 	}
 	switch args[0] {
@@ -26,6 +26,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return connectCmd(args[1:], stdout, stderr)
 	case "enroll":
 		return enrollCmd(args[1:], stdout, stderr)
+	case "quickstart":
+		return quickstartCmd(args[1:], stdout, stderr)
 	case "run":
 		return runCmd(args[1:], stdout, stderr)
 	case "svc":
@@ -51,7 +53,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	default:
-		fmt.Fprintf(stderr, "chapd: unknown command %q (known: version, run, svc, orch, vault, profile, connect, host, ledger, enroll)\n", args[0])
+		fmt.Fprintf(stderr, "chapd: unknown command %q (known: version, run, svc, orch, vault, profile, connect, host, ledger, enroll, quickstart)\n", args[0])
 		return 2
 	}
 }

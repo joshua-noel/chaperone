@@ -89,9 +89,12 @@ type Server struct {
 	installs map[int64]*Installation
 	tokens   map[string]*tokenRec
 	log      []Request
+	logMax   int // 0: keep every request
+	bodyMax  int // 0: keep whole bodies
 	faults   []*fault
 	before   []*hook
 	mintAll  bool
+	web      manifestState // the app-manifest flow (manifest.go)
 }
 
 // New starts the fake on a loopback port and stops it when the test ends. The
@@ -133,6 +136,16 @@ func (s *Server) Now() time.Time {
 func (s *Server) Advance(d time.Duration) {
 	s.mu.Lock()
 	s.now = s.now.Add(d)
+	s.mu.Unlock()
+}
+
+// SkipIDs moves the id counter forward by n, before anything is created. Commit
+// SHAs come from that counter, so a caller that runs the fake outside a test
+// (the quickstart playground) gets SHAs that differ from run to run and no
+// operation of an earlier run matches one of this run.
+func (s *Server) SkipIDs(n int64) {
+	s.mu.Lock()
+	s.seq += n
 	s.mu.Unlock()
 }
 
@@ -274,6 +287,7 @@ type Installation struct {
 	Granted map[string]string
 	s       *Server
 	repos   map[string]*Repo
+	app     *App // the App made through the manifest flow that this belongs to; nil: the fake's own App
 }
 
 // AddInstallation registers an installation of the App on account with the
@@ -323,27 +337,32 @@ func (s *Server) newTokenValue() string {
 // verifyJWT checks the App JWT the way GitHub does (RS256, iss, exp within 10
 // minutes of now, iat not in the future). Returns "" if good, else GitHub's message.
 func (s *Server) verifyJWT(authz string) string {
+	_, msg := s.verifyApp(authz)
+	return msg
+}
+
+// verifyApp is verifyJWT that also says which App signed: nil for the fake's own
+// App ([OwnAppID], signed with [TestKey]), else an App made through the manifest
+// flow (see [Server.Apps]), found by its numeric id or its client id in `iss`.
+func (s *Server) verifyApp(authz string) (*App, string) {
+	const undecodable = "A JSON web token could not be decoded"
 	tok, ok := strings.CutPrefix(authz, "Bearer ")
 	if !ok {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
 	sig, err1 := base64.RawURLEncoding.DecodeString(parts[2])
 	hdr, err2 := base64.RawURLEncoding.DecodeString(parts[0])
 	claimsRaw, err3 := base64.RawURLEncoding.DecodeString(parts[1])
 	if err1 != nil || err2 != nil || err3 != nil {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
 	var h struct{ Alg string }
 	if json.Unmarshal(hdr, &h) != nil || h.Alg != "RS256" {
-		return "A JSON web token could not be decoded"
-	}
-	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if rsa.VerifyPKCS1v15(&TestKey().PublicKey, crypto.SHA256, digest[:], sig) != nil {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
 	var c struct {
 		Iss json.RawMessage `json:"iss"`
@@ -351,23 +370,32 @@ func (s *Server) verifyJWT(authz string) string {
 		Exp int64           `json:"exp"`
 	}
 	if json.Unmarshal(claimsRaw, &c) != nil {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
-	if strings.Trim(string(c.Iss), `"`) != s.appID {
-		return "A JSON web token could not be decoded"
+	iss := strings.Trim(string(c.Iss), `"`)
+	pub, app := &TestKey().PublicKey, (*App)(nil)
+	if iss != s.appID {
+		if app = s.appByIss(iss); app == nil {
+			return nil, undecodable
+		}
+		pub = &app.key.PublicKey
+	}
+	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	if rsa.VerifyPKCS1v15(pub, crypto.SHA256, digest[:], sig) != nil {
+		return nil, undecodable
 	}
 	s.mu.Lock()
 	now := s.now.Unix()
 	s.mu.Unlock()
 	switch {
 	case c.Iat > now:
-		return "'Issued at' claim ('iat') must be an Integer representing the time that the assertion was issued"
+		return nil, "'Issued at' claim ('iat') must be an Integer representing the time that the assertion was issued"
 	case c.Exp <= now:
-		return "'Expiration time' claim ('exp') must be a numeric value representing the future time at which the assertion expires"
+		return nil, "'Expiration time' claim ('exp') must be a numeric value representing the future time at which the assertion expires"
 	case c.Exp > now+600:
-		return "'Expiration time' claim ('exp') is too far in the future"
+		return nil, "'Expiration time' claim ('exp') is too far in the future"
 	}
-	return ""
+	return app, ""
 }
 
 func bearer(r *http.Request) string {
@@ -413,4 +441,30 @@ func (s *Server) nextID() int64 {
 func hexSHA(n int64, salt string) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s/%d", salt, n)))
 	return fmt.Sprintf("%x", sum[:20])
+}
+
+// CapLog bounds the request log: at most maxEntries requests are kept (the
+// oldest are dropped) and each body is cut to maxBody bytes. Without it the log
+// keeps every request whole, which suits a test and not a long-running fake (the
+// quickstart playground, whose loopback port any local process can call).
+// Count and Requests then see only what is kept.
+func (s *Server) CapLog(maxEntries, maxBody int) {
+	s.mu.Lock()
+	s.logMax, s.bodyMax = maxEntries, maxBody
+	s.mu.Unlock()
+}
+
+// record appends to the log under s.mu, honouring CapLog. The body is cut before it
+// becomes a string, so the log keeps a copy of at most bodyMax bytes and not the
+// whole request body (a substring of a large string would keep all of it alive).
+func (s *Server) record(method, path, query string, body []byte) {
+	if s.bodyMax > 0 && len(body) > s.bodyMax {
+		body = body[:s.bodyMax]
+	}
+	s.log = append(s.log, Request{Method: method, Path: path, Query: query, Body: string(body)})
+	if s.logMax > 0 && len(s.log) > s.logMax {
+		n := copy(s.log, s.log[len(s.log)-s.logMax:])
+		clear(s.log[n:]) // drop the references the old tail still holds
+		s.log = s.log[:n]
+	}
 }

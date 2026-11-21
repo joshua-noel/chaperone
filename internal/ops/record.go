@@ -45,7 +45,9 @@ type record struct {
 	ResultJSON    string
 	ChecksJSON    string
 	DenialJSON    string
-	ScopeJSON     string // the run's task scope at request time; "" for an orchestrator
+	ScopeJSON     string // the requester's scope at request time (a run's task scope, a key's units, an orchestrator's ops)
+	KeyID         string // requester_kind key: the key's id
+	OwnerID       string // requester_kind key: who the key acts for
 }
 
 const recordColumns = `id, state, op, project, target_adapter, target_ref, params_json, op_hash,
@@ -53,7 +55,8 @@ const recordColumns = `id, state, op, project, target_adapter, target_ref, param
     class, reversibility, policy_version, COALESCE(reason,''), COALESCE(traceparent,''),
     requested_at, expires_at, updated_at,
     COALESCE(approval_id,''), COALESCE(execution_id,''), COALESCE(outcome,''), COALESCE(cause_code,''),
-    COALESCE(external_ref,''), COALESCE(result_json,''), COALESCE(checks_json,''), COALESCE(denial_json,''), COALESCE(scope_json,'')`
+    COALESCE(external_ref,''), COALESCE(result_json,''), COALESCE(checks_json,''), COALESCE(denial_json,''), COALESCE(scope_json,''),
+    COALESCE(key_id,''), COALESCE(owner_id,'')`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -66,7 +69,7 @@ func scanRecord(r rowScanner) (*record, error) {
 		&rec.Class, &rec.Reversibility, &rec.PolicyVersion, &rec.Reason, &rec.Traceparent,
 		&req, &exp, &upd,
 		&rec.ApprovalID, &rec.ExecutionID, &rec.Outcome, &rec.CauseCode,
-		&rec.ExternalRef, &rec.ResultJSON, &rec.ChecksJSON, &rec.DenialJSON, &rec.ScopeJSON)
+		&rec.ExternalRef, &rec.ResultJSON, &rec.ChecksJSON, &rec.DenialJSON, &rec.ScopeJSON, &rec.KeyID, &rec.OwnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,12 +107,12 @@ func insertRecord(ctx context.Context, tx *store.Tx, r *record) error {
 func insertRow(ctx context.Context, tx *store.Tx, r *record) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO ops (id, state, op, project, target_adapter, target_ref, params_json, op_hash,
         requester_kind, requester_key, run_id, orchestrator_id, profile, token_jti,
-        class, reversibility, policy_version, reason, traceparent, requested_at, expires_at, updated_at, scope_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        class, reversibility, policy_version, reason, traceparent, requested_at, expires_at, updated_at, scope_json, key_id, owner_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, string(r.State), r.Op, r.Project, r.TargetAdapter, r.TargetRef, r.ParamsJSON, r.OpHash,
 		r.RequesterKind, r.RequesterKey, nullable(r.RunID), nullable(r.OrchID), nullable(r.Profile), nullable(r.TokenJTI),
 		r.Class, r.Reversibility, r.PolicyVersion, nullable(r.Reason), nullable(r.Traceparent),
-		r.RequestedAt.Unix(), r.ExpiresAt.Unix(), r.UpdatedAt.Unix(), nullable(r.ScopeJSON))
+		r.RequestedAt.Unix(), r.ExpiresAt.Unix(), r.UpdatedAt.Unix(), nullable(r.ScopeJSON), nullable(r.KeyID), nullable(r.OwnerID))
 	return err
 }
 
@@ -183,27 +186,69 @@ type runScope struct {
 	Paths  []string `json:"paths,omitempty"`
 }
 
-// scopeJSON is the stored form of a run caller's scope, "" for any other caller.
+// keyScope is the same for a key: the repositories it is bound to, and who
+// holds it. The key's ops are not kept: the op was in scope when it was asked.
+type keyScope struct {
+	Units  []string `json:"units"`
+	Holder string   `json:"holder,omitempty"`
+	Kind   string   `json:"holder_kind,omitempty"`
+}
+
+// orchScope is the same for an orchestrator: the ops its token held when it asked. keys.issue reads it, at the
+// release of an approved op too, when the token is not at hand: a key built directly never reaches past the ops
+// of the orchestrator that asked for it. A row from before this was stored has none, and then holds no op.
+type orchScope struct {
+	Ops []string `json:"ops"`
+}
+
+// scopeJSON is the stored form of a caller's scope; an unknown kind has none to store.
 func scopeJSON(c *Caller) string {
-	if c.Kind != KindRun {
+	var v any
+	switch c.Kind {
+	case KindRun:
+		v = runScope{Repo: c.Repo, Base: c.Base, Branch: c.Branch, Paths: c.Paths}
+	case KindKey:
+		v = keyScope{Units: nonNilStrings(c.KeyUnits), Holder: c.KeyHolder, Kind: c.KeyHolderKind}
+	case KindOrchestrator:
+		v = orchScope{Ops: nonNilStrings(c.ScopeOps)}
+	default:
 		return ""
 	}
-	b, err := json.Marshal(runScope{Repo: c.Repo, Base: c.Base, Branch: c.Branch, Paths: c.Paths})
+	b, err := json.Marshal(v)
 	if err != nil {
 		return "" // cannot happen: strings only
 	}
 	return string(b)
 }
 
-// caller rebuilds the identity and, for a run, the task scope of the op's
-// requester. The token itself is not kept (it may be gone by now).
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+// caller rebuilds the identity and the scope of the op's requester: for a run its task scope, for a key its units
+// and holder, for an orchestrator the ops it held. The token itself is not kept (it may be gone by now).
 func (r *record) caller() *Caller {
 	c := &Caller{Kind: r.RequesterKind, RunID: r.RunID, OrchID: r.OrchID, Profile: r.Profile, JTI: r.TokenJTI}
-	if r.RequesterKind == KindRun {
+	switch r.RequesterKind {
+	case KindRun:
 		c.Project = r.Project
 		var s runScope
 		if r.ScopeJSON != "" && json.Unmarshal([]byte(r.ScopeJSON), &s) == nil {
 			c.Repo, c.Base, c.Branch, c.Paths = s.Repo, s.Base, s.Branch, s.Paths
+		}
+	case KindKey:
+		c.Project, c.KeyID, c.KeyOwner = r.Project, r.KeyID, r.OwnerID
+		var s keyScope
+		if r.ScopeJSON != "" && json.Unmarshal([]byte(r.ScopeJSON), &s) == nil {
+			c.KeyUnits, c.KeyHolder, c.KeyHolderKind = s.Units, s.Holder, s.Kind
+		}
+	case KindOrchestrator:
+		var s orchScope
+		if r.ScopeJSON != "" && json.Unmarshal([]byte(r.ScopeJSON), &s) == nil {
+			c.ScopeOps = s.Ops
 		}
 	}
 	return c

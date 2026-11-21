@@ -50,6 +50,7 @@
 
   function failure(e) {
     if (e && e.name === 'NotAllowedError') return 'Cancelled, or your passkey did not verify you.';
+    if (e && e.code === 'attachment_not_allowed') return 'This kind of passkey is not allowed here: this console accepts only a passkey built into this computer, unless its operator allows a security key or a phone.';
     if (e && e.code === 'no_approver') return 'No approver is enrolled. Run chapd enroll.';
     return 'Refused: ' + (e && (e.code || e.message) || 'unknown error');
   }

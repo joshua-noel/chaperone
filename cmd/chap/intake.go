@@ -2,11 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
-	"flag"
 	"fmt"
-	"regexp"
 	"strings"
+
+	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
 )
 
 // `chap intake list|comment|move|states`: the orchestrator reads the operator
@@ -15,120 +14,11 @@ import (
 // an issue identifier, a comment text or a state name, and print the answer.
 // The team, the label and the states a move may use are chapd's policy, not
 // chap's: a request for anything else is refused there.
-
-var (
-	intakeIssueRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$`)
-	intakeTeamRE  = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
-)
-
-// intakeBoard is the target ref that means "the project's team".
-const intakeBoard = "board"
-
-func intakeTeam(a *app, c *command, team string) (string, error) {
-	if team == "" {
-		return intakeBoard, nil
-	}
-	if !intakeTeamRE.MatchString(team) {
-		return "", errors.New("--team must be a Linear team key such as SHOP")
-	}
-	return team, nil
-}
-
-func cmdIntakeList(a *app, c *command, args []string) int {
-	var co common
-	var team string
-	var refresh, closed bool
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	fs.StringVar(&team, "team", "", "team key (default: the project's linear team)")
-	fs.BoolVar(&refresh, "refresh", false, "read Linear now instead of the cache (chapd still answers from the cache when the last read is under 30 s old)")
-	fs.BoolVar(&closed, "closed", false, "also list completed and canceled items")
-	if _, code, done := a.parse(c, fs, args, 0, 0); done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	ref, err := intakeTeam(a, c, team)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	params := map[string]any{}
-	if refresh {
-		params["refresh"] = true
-	}
-	if closed {
-		params["closed"] = true
-	}
-	return a.ask(&co, opReq{op: "intake.list", target: target{"linear", ref}, params: params})
-}
-
-func cmdIntakeStates(a *app, c *command, args []string) int {
-	var co common
-	var team string
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	fs.StringVar(&team, "team", "", "team key (default: the project's linear team)")
-	if _, code, done := a.parse(c, fs, args, 0, 0); done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	ref, err := intakeTeam(a, c, team)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	return a.ask(&co, opReq{op: "intake.states", target: target{"linear", ref}, params: map[string]any{}})
-}
-
-func cmdIntakeComment(a *app, c *command, args []string) int {
-	var co common
-	var tf textFlags
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	tf.register(fs)
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	if !intakeIssueRE.MatchString(pos[0]) {
-		return a.usageErr(c, "the issue must be an identifier such as SHOP-12")
-	}
-	text, has, err := tf.resolve(a)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	if !has {
-		return a.usageErr(c, "--body or --body-file is required")
-	}
-	return a.ask(&co, opReq{op: "intake.comment", target: target{"linear", pos[0]}, params: map[string]any{"body": text}})
-}
-
-func cmdIntakeMove(a *app, c *command, args []string) int {
-	var co common
-	var state string
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	fs.StringVar(&state, "state", "", "the state's name, as `chap intake states` shows it (required)")
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	if !intakeIssueRE.MatchString(pos[0]) {
-		return a.usageErr(c, "the issue must be an identifier such as SHOP-12")
-	}
-	if strings.TrimSpace(state) == "" {
-		return a.usageErr(c, "--state is required")
-	}
-	return a.ask(&co, opReq{op: "intake.move", target: target{"linear", pos[0]}, params: map[string]any{"state": state}})
-}
+//
+// The four commands are not written here. They are built from the connector's
+// declaration (internal/connectors/linear/linearspec) by kitcmd.go. What this
+// file keeps is the part that is real logic: how the answers of intake.list and
+// intake.states are printed.
 
 // ---- rendering ---------------------------------------------------------------
 
@@ -136,10 +26,14 @@ func cmdIntakeMove(a *app, c *command, args []string) int {
 // reports whether it did; any other result is left to renderResult.
 func renderIntake(b *strings.Builder, opName string, raw json.RawMessage) bool {
 	switch opName {
-	case "intake.list":
+	case linearspec.NameList:
 		return renderIntakeList(b, raw)
-	case "intake.states":
+	case linearspec.NameStates:
 		return renderIntakeStates(b, raw)
+	case "issue.get":
+		return renderIssueGet(b, raw)
+	case "issue.list":
+		return renderIssueList(b, raw)
 	}
 	return false
 }

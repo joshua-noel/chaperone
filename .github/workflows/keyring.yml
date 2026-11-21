@@ -1,0 +1,253 @@
+name: keyring
+
+# Runs the vault's key wrappers against the real system tools, which the unit
+# tests only fake: `security` and a keychain on macOS, `secret-tool` and a
+# Secret Service keyring on Linux, and the passphrase prompt on a real terminal
+# on both. Each wrapper has its own step, so the name of a failed step names the
+# wrapper. See docs/adr/003-vault.md (amendment 6) and
+# internal/vault/*_integration_test.go.
+#
+# These tests are opt-in by environment variable and are skipped everywhere
+# else, so nothing here can touch a developer's own keychain by accident. A hosted
+# runner is a throwaway VM, and each job also makes its own keychain or keyring.
+on:
+  # Only a change to the vault, or to this file, can break what these jobs test.
+  # go.mod and go.sum are here because a new vault dependency changes the code.
+  pull_request:
+    branches: [main]
+    paths:
+      - "internal/vault/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/keyring.yml"
+  push:
+    branches: [main]
+    paths:
+      - "internal/vault/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/keyring.yml"
+  # The runner images change `security`, GNOME Keyring and the D-Bus setup under
+  # us. Wednesdays 05:41 UTC finds that within a week.
+  schedule:
+    - cron: "41 5 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a PR cancels that PR's older run. Runs on main always finish.
+concurrency:
+  group: keyring-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  # macos-latest is an Apple silicon (arm64) runner.
+  macos:
+    name: macos keychain
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # The wrapper cannot name a keychain: `security` writes to the user's
+      # default one. So the runner gets a keychain of its own, unlocked, with no
+      # idle lock, as the only keychain and the default. The test never touches
+      # the runner's login keychain, and the keychain is deleted at the end.
+      # The password is random and exists only for this step (unlock-keychain
+      # takes it as an argument, which is fine for a keychain that holds
+      # nothing but a test item on a VM that is thrown away).
+      - name: throwaway keychain
+        run: |
+          set -euo pipefail
+          kc="$RUNNER_TEMP/chaperone-test.keychain-db"
+          pw="$(openssl rand -hex 24)"
+          echo "::add-mask::$pw"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          security list-keychains -d user -s "$kc"
+          security default-keychain -d user -s "$kc"
+          case "$(security default-keychain -d user)" in
+            *chaperone-test.keychain-db*) ;;
+            *)
+              echo "::error::the throwaway keychain did not become the default keychain"
+              exit 1
+              ;;
+          esac
+          echo "default keychain is the throwaway keychain; search list:"
+          security list-keychains -d user
+
+      - name: compile the vault tests
+        working-directory: internal/vault
+        run: go test -c -o "$RUNNER_TEMP/vault.test" .
+
+      - name: keychain-macos wrapper (real security tool)
+        timeout-minutes: 5
+        working-directory: internal/vault
+        env:
+          CHAPERONE_TEST_REAL_KEYCHAIN: "1"
+        run: |
+          "$RUNNER_TEMP/vault.test" -test.run '^TestRealKeychainMacOS$' -test.v -test.count=1 -test.timeout=4m
+
+      # `script` gives the test binary a pseudo-terminal as its /dev/tty. The
+      # phrase is the fixed one the test expects. It is typed 4 seconds after
+      # the start, so the prompt has turned echo off by then; the step then
+      # fails if the phrase shows in the terminal output.
+      - name: age-passphrase wrapper on a real terminal (script)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        working-directory: internal/vault
+        env:
+          VAULT_TEST_REAL_TTY: "1"
+        run: |
+          set -uo pipefail
+          pp='correct horse battery staple'
+          out="$RUNNER_TEMP/tty-typescript.txt"
+          { sleep 4; printf '%s\n%s\n' "$pp" "$pp"; sleep 4; } |
+            script -q "$out" "$RUNNER_TEMP/vault.test" -test.run TestTerminalPassphraseOnARealTerminal -test.v -test.count=1
+          echo "script exit status: $?"
+          # The exit status of script is not the same on every system; the
+          # test's own verdict is what counts.
+          if ! tr -d '\r' < "$out" | grep -q -- '--- PASS: TestTerminalPassphraseOnARealTerminal'; then
+            echo "::error::the real-terminal test did not pass (see the output above; a skip also fails this step)"
+            exit 1
+          fi
+          if grep -qF -- "$pp" "$out"; then
+            echo "::error::the passphrase was echoed to the terminal"
+            exit 1
+          fi
+
+      - name: delete the throwaway keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/chaperone-test.keychain-db" || true
+
+  # ubuntu-latest has no desktop session, so the job starts the pieces a desktop
+  # login would: a private D-Bus session and GNOME Keyring with an unlocked
+  # keyring, in a helper that wraps each command (see the next step).
+  linux:
+    name: linux secret service
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: install secret-tool, GNOME Keyring and D-Bus
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libsecret-tools gnome-keyring dbus openssl util-linux
+          command -v secret-tool gnome-keyring-daemon dbus-run-session dbus-send script
+
+      # Every call of this helper makes its own D-Bus session and its own empty
+      # keyring folder with a random password, so no step depends on a daemon
+      # that an earlier step left running.
+      - name: write the keyring session helper
+        run: |
+          cat > "$RUNNER_TEMP/with-keyring" <<'SH'
+          #!/usr/bin/env bash
+          # Runs the command given as arguments inside a private D-Bus session
+          # that has an unlocked GNOME Keyring on it.
+          set -euo pipefail
+          if [ -z "${CHAPERONE_KEYRING_SESSION:-}" ]; then
+            export CHAPERONE_KEYRING_SESSION=1
+            exec dbus-run-session -- "$0" "$@"
+          fi
+
+          # A fresh runtime and data folder: no daemon, socket or login keyring
+          # (which would hold another password) is left over from an earlier call.
+          XDG_RUNTIME_DIR="$(mktemp -d)"
+          XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_RUNTIME_DIR XDG_DATA_HOME
+          log="$XDG_RUNTIME_DIR/keyring-daemon.log"
+
+          # --unlock reads the keyring password from standard input, creates the
+          # login keyring with it when there is none, and starts the daemon with
+          # only the secrets component (no ssh or pkcs11 agents). Its output goes
+          # to a file, so the daemon never holds this step's pipes open.
+          pw="$(openssl rand -hex 16)"
+          printf '%s' "$pw" | gnome-keyring-daemon --unlock --components=secrets > /dev/null 2> "$log"
+          unset pw
+
+          ready=""
+          for _ in $(seq 1 50); do
+            if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+                 org.freedesktop.DBus.NameHasOwner string:org.freedesktop.secrets 2> /dev/null | grep -q 'boolean true'; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          if [ -z "$ready" ]; then
+            echo "::error::keyring session: nothing owns org.freedesktop.secrets on the private bus after 10 s"
+            cat "$log" || true
+            exit 1
+          fi
+
+          # A throwaway item proves the keyring is unlocked and usable before any
+          # Chaperone code runs, so a failure after this point is the wrapper's.
+          printf 'probe' | secret-tool store --label=chaperone-ci-probe service chaperone-ci-probe id probe \
+            || { echo "::error::keyring session: secret-tool store failed on the private session (the keyring is not unlocked or not reachable)"; cat "$log" || true; exit 1; }
+          [ "$(secret-tool lookup service chaperone-ci-probe id probe)" = probe ] \
+            || { echo "::error::keyring session: the probe item did not read back"; exit 1; }
+          secret-tool clear service chaperone-ci-probe id probe
+
+          exec "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/with-keyring"
+
+      - name: keyring session self-check (no Chaperone code)
+        run: |
+          "$RUNNER_TEMP/with-keyring" true
+
+      - name: compile the vault tests
+        working-directory: internal/vault
+        run: go test -c -o "$RUNNER_TEMP/vault.test" .
+
+      - name: secret-service wrapper (real secret-tool, GNOME Keyring)
+        timeout-minutes: 5
+        working-directory: internal/vault
+        env:
+          CHAPERONE_TEST_REAL_SECRET_SERVICE: "1"
+        run: |
+          "$RUNNER_TEMP/with-keyring" "$RUNNER_TEMP/vault.test" -test.run '^TestRealSecretServiceLinux$' -test.v -test.count=1 -test.timeout=4m
+
+      # `script` gives the test binary a pseudo-terminal as its /dev/tty. The
+      # phrase is the fixed one the test expects. It is typed 4 seconds after
+      # the start, so the prompt has turned echo off by then; the step then
+      # fails if the phrase shows in the terminal output.
+      - name: age-passphrase wrapper on a real terminal (script)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        working-directory: internal/vault
+        env:
+          VAULT_TEST_REAL_TTY: "1"
+        run: |
+          set -uo pipefail
+          pp='correct horse battery staple'
+          out="$RUNNER_TEMP/tty-typescript.txt"
+          cmd="$RUNNER_TEMP/vault.test -test.run TestTerminalPassphraseOnARealTerminal -test.v -test.count=1"
+          { sleep 4; printf '%s\n%s\n' "$pp" "$pp"; sleep 4; } | script -qec "$cmd" "$out"
+          echo "script exit status: $?"
+          if ! tr -d '\r' < "$out" | grep -q -- '--- PASS: TestTerminalPassphraseOnARealTerminal'; then
+            echo "::error::the real-terminal test did not pass (see the output above; a skip also fails this step)"
+            exit 1
+          fi
+          if grep -qF -- "$pp" "$out"; then
+            echo "::error::the passphrase was echoed to the terminal"
+            exit 1
+          fi

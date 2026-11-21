@@ -1,0 +1,8 @@
+$ chap issue move AGT-12
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --state is required
+usage: chap issue move <AGT-12> --state <name> [--dry-run]

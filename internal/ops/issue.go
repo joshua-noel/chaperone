@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -37,9 +38,9 @@ import (
 
 // The op kinds.
 const (
-	OpIssueOpen    = "issue.open"
-	OpIssueComment = "issue.comment"
-	OpIssueReopen  = "issue.reopen"
+	OpIssueOpen    = githubspec.NameIssueOpen
+	OpIssueComment = githubspec.NameIssueComment
+	OpIssueReopen  = githubspec.NameIssueReopen
 )
 
 // IssueLabel is the label every issue of the error watcher carries. It is the
@@ -47,10 +48,10 @@ const (
 const IssueLabel = "source:error-watcher"
 
 const (
-	issueTitleMax  = 200
-	issueBodyMax   = 10000
-	issueLabelsMax = 10
-	issueLabelMax  = 50
+	issueTitleMax  = githubspec.TitleMax
+	issueBodyMax   = githubspec.IssueBodyMax
+	issueLabelsMax = githubspec.IssueLabelsMax
+	issueLabelMax  = githubspec.IssueLabelMax
 )
 
 // IssueAPI is the part of *[gh.Client] that the issue ops use.
@@ -108,10 +109,17 @@ type issueParams struct {
 
 func (a *IssueAdapter) hasNumber() bool { return a.op != OpIssueOpen }
 
+// issueNames are the params each issue op takes: the declared ones.
+var issueNames = map[string][]string{
+	OpIssueOpen:    githubspec.IssueOpen.ParamNames(),
+	OpIssueComment: githubspec.IssueComment.ParamNames(),
+	OpIssueReopen:  githubspec.IssueReopen.ParamNames(),
+}
+
 var issueKeys = map[string]map[string]bool{
-	OpIssueOpen:    {"title": true, "body": true, "labels": true},
-	OpIssueComment: {"body": true},
-	OpIssueReopen:  {},
+	OpIssueOpen:    keySet(issueNames[OpIssueOpen]),
+	OpIssueComment: keySet(issueNames[OpIssueComment]),
+	OpIssueReopen:  keySet(issueNames[OpIssueReopen]),
 }
 
 // parse validates the request. A failure is a *Refusal.
@@ -119,7 +127,7 @@ func (a *IssueAdapter) parse(req *Request) (issueParams, error) {
 	bad := func(why string) (issueParams, error) {
 		return issueParams{}, &Refusal{Code: CodeParamsInvalid, Why: why}
 	}
-	if req.Target.Adapter != "github" {
+	if req.Target.Adapter != githubspec.Adapter {
 		return bad("target.adapter must be github")
 	}
 	ref, num, hasNum := strings.Cut(req.Target.Ref, "#")
@@ -199,13 +207,10 @@ func (a *IssueAdapter) parse(req *Request) (issueParams, error) {
 }
 
 func issueParamList(op string) string {
-	switch op {
-	case OpIssueOpen:
-		return "title, body, labels"
-	case OpIssueComment:
-		return "body"
+	if len(issueNames[op]) == 0 {
+		return "no params"
 	}
-	return "no params"
+	return strings.Join(issueNames[op], ", ")
 }
 
 func hasLabel(labels []string, want string) bool {
@@ -312,7 +317,7 @@ func (a *IssueAdapter) Check(ctx context.Context, req *Request) (CheckResult, er
 	if err != nil {
 		return CheckResult{}, err
 	}
-	return CheckResult{Checks: append(checks, Check{Name: "issue", Passed: true, Detail: "#" + strconv.Itoa(p.number) + " is " + is.State})}, nil
+	return CheckResult{Checks: append(checks, Check{Name: "issue", Passed: true, Detail: checkDetail("#" + strconv.Itoa(p.number) + " is " + is.State)})}, nil
 }
 
 // Execute implements [Adapter].
@@ -348,26 +353,26 @@ func (a *IssueAdapter) Execute(ctx context.Context, req *Request) (Outcome, erro
 		if err != nil {
 			return a.fromGitHub(err)
 		}
-		return Outcome{ExternalRef: clamp(is.HTMLURL, 300),
-			Result: map[string]any{"number": float64(is.Number), "url": clamp(is.HTMLURL, 300)}}, nil
+		return Outcome{ExternalRef: safeURL(is.HTMLURL, 300),
+			Result: map[string]any{"number": float64(is.Number), "url": safeURL(is.HTMLURL, 300)}}, nil
 	case OpIssueComment:
 		cm, err := a.gh.CreateIssueComment(ctx, tok, p.repo, p.number, p.body)
 		if err != nil {
 			return a.fromGitHub(err)
 		}
-		return Outcome{ExternalRef: clamp(cm.HTMLURL, 300),
-			Result: map[string]any{"number": float64(p.number), "comment_id": float64(cm.ID), "url": clamp(cm.HTMLURL, 300)}}, nil
+		return Outcome{ExternalRef: safeURL(cm.HTMLURL, 300),
+			Result: map[string]any{"number": float64(p.number), "comment_id": float64(cm.ID), "url": safeURL(cm.HTMLURL, 300)}}, nil
 	default: // OpIssueReopen
 		if cur.State == "open" {
-			return Outcome{ExternalRef: clamp(cur.HTMLURL, 300),
-				Result: map[string]any{"number": float64(p.number), "url": clamp(cur.HTMLURL, 300), "reopened": false}}, nil
+			return Outcome{ExternalRef: safeURL(cur.HTMLURL, 300),
+				Result: map[string]any{"number": float64(p.number), "url": safeURL(cur.HTMLURL, 300), "reopened": false}}, nil
 		}
 		is, err := a.gh.ReopenIssue(ctx, tok, p.repo, p.number)
 		if err != nil {
 			return a.fromGitHub(err)
 		}
-		return Outcome{ExternalRef: clamp(is.HTMLURL, 300),
-			Result: map[string]any{"number": float64(p.number), "url": clamp(is.HTMLURL, 300), "reopened": true}}, nil
+		return Outcome{ExternalRef: safeURL(is.HTMLURL, 300),
+			Result: map[string]any{"number": float64(p.number), "url": safeURL(is.HTMLURL, 300), "reopened": true}}, nil
 	}
 }
 

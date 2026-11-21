@@ -298,7 +298,7 @@ func cmdDevToken(a *app, c *command, args []string) int {
 	fs.Var(&paths, "path", "path glob the run may change (repeat, required)")
 	fs.Var(&ops, "op", "op the token may ask for (repeat, required)")
 	fs.IntVar(&minutes, "minutes", 60, "lifetime in minutes, 1 to 120")
-	fs.StringVar(&out, "out", "", "file to write the token to; created 0600, never overwritten (required)")
+	fs.StringVar(&out, "out", "", "file to write the token to; private to you (mode 0600, or an access list for you alone on Windows), never overwritten (required)")
 	if _, code, done := a.parse(c, fs, args, 0, 0); done {
 		return code
 	}

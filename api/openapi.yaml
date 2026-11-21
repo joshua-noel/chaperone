@@ -206,6 +206,7 @@ tags:
   - name: ops
   - name: approvals
   - name: runs
+  - name: keys
   - name: catalog
   - name: ledger
   - name: host
@@ -574,6 +575,221 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthError"
         "404": { $ref: "#/components/responses/NotFound" }
+  /v0/keys:
+    get:
+      tags: [keys]
+      operationId: listKeys
+      summary: "`chap key list`: the keys the orchestrator token owns in its projects, or only the caller's own (a key)."
+      responses:
+        "200":
+          description: The keys, newest first. No token and no hash.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Key" }
+                required: [items]
+                additionalProperties: false
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/keys/{id}:
+    parameters:
+      - $ref: "#/components/parameters/KeyIdParam"
+    get:
+      tags: [keys]
+      operationId: getKey
+      summary: "`chap key show`: one key; the id `self` is the key making the call. A key may read only itself."
+      responses:
+        "200":
+          description: The key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/keys/{id}/claim:
+    parameters:
+      - $ref: "#/components/parameters/KeyIdParam"
+    post:
+      tags: [keys]
+      operationId: claimKey
+      summary: "`chap key claim <key>`: take a granted key, once (the caller that asked for it)."
+      description: |
+        The key is made here and only its SHA-256 is kept. It is in this one
+        response body and nowhere else: not in a header, a log line, a ledger
+        event, an op result or an error. A second claim, a claim by another
+        caller, or a claim after the claim deadline (one hour after approval)
+        gets nothing; a key not claimed by its deadline is revoked.
+      responses:
+        "200":
+          description: The key, once.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyClaim"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v0/keys/{id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/KeyIdParam"
+    post:
+      tags: [keys]
+      operationId: revokeKey
+      summary: "`chap key revoke <key>`: revoke at once (orchestrator token: a key it owns, in its projects; a key: itself)."
+      description: |
+        Removes authority, so it needs no approval. The key's pending cards and
+        waiting ops are cancelled in the same transaction. A caller sees only what
+        it owns: another owner's key is `404`. A revoke with a token never stops
+        an agent. Only the owner's revoke at the console (Agents, Revoke) does: no
+        key can be issued for that agent again until its owner resumes it.
+      responses:
+        "200":
+          description: The key, revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v0/keys/requests:
+    get:
+      tags: [keys]
+      operationId: listKeyRequests
+      summary: "`chap key request --status`: an agent's own requests (its key), or the requests of the agents an orchestrator token owns, in its projects."
+      responses:
+        "200":
+          description: The requests, newest first. No token and no hash.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/KeyRequest" }
+                required: [items]
+                additionalProperties: false
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /v0/keys/requests/{id}:
+    parameters:
+      - $ref: "#/components/parameters/KeyRequestIdParam"
+    get:
+      tags: [keys]
+      operationId: getKeyRequest
+      summary: "`chap key request --status <id>`: one request, with what was granted and what was removed from it."
+      responses:
+        "200":
+          description: The request. A granted request names the key to claim (`key_id`) or, for an extension, the key that now lasts longer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyRequest"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/keys/requests/{id}/withdraw:
+    parameters:
+      - $ref: "#/components/parameters/KeyRequestIdParam"
+    post:
+      tags: [keys]
+      operationId: withdrawKeyRequest
+      summary: "`chap key request --withdraw <id>`: an agent takes back a request that still waits."
+      responses:
+        "200":
+          description: The request, withdrawn.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyRequest"
+        "401": { $ref: "#/components/responses/DeniedOrUnauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v0/agents/enrolments:
+    post:
+      tags: [keys]
+      operationId: startAgentEnrolment
+      summary: "`chap agent enrol`: start the device-code enrolment of an agent. No credential: the agent has none yet."
+      description: |
+        The answer holds a short `user_code` the agent prints for its owner and a
+        `device_code` only the agent keeps. The owner types the short code at the
+        console, sees "enrol agent X, no access", and signs a card with Windows
+        Hello. Bounded instead of authenticated: only a project whose policy turns
+        `keys.request` on, at most five enrolments waiting, one per label, ten
+        minutes each. Neither code is stored; only its SHA-256.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project: { type: string, pattern: "^[a-z][a-z0-9-]{1,38}$" }
+                label: { type: string, pattern: "^[a-z][a-z0-9._-]{0,39}$" }
+              required: [project, label]
+              additionalProperties: false
+      responses:
+        "201":
+          description: The enrolment waits for its owner.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentEnrolStart"
+        "400": { $ref: "#/components/responses/EnrolRefused" }
+        "403": { $ref: "#/components/responses/EnrolRefused" }
+        "409": { $ref: "#/components/responses/EnrolRefused" }
+        "429": { $ref: "#/components/responses/EnrolRefused" }
+  /v0/agents/enrolments/{id}/poll:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, pattern: "^en-[0-9a-f]{16}$" }
+    post:
+      tags: [keys]
+      operationId: pollAgentEnrolment
+      summary: "`chap agent enrol`: the agent asks whether its owner signed. The signed answer carries the request-only key, once."
+      description: |
+        The key is in this one response body and nowhere else, sent with
+        no-store, and only to the holder of the device code. A wrong device code
+        is a 404, never a hint that the enrolment exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_code: { type: string, minLength: 43, maxLength: 43 }
+              required: [device_code]
+              additionalProperties: false
+      responses:
+        "200":
+          description: The state of the enrolment.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentEnrolPoll"
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/EnrolRefused" }
   /v0/runs/{id}/revoke:
     parameters:
       - $ref: "#/components/parameters/RunId"
@@ -985,6 +1201,16 @@ components:
       in: path
       required: true
       schema: { type: string, pattern: "^q-[0-9a-z]{6,32}$" }
+    KeyIdParam:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^(k-[0-9a-f]{16}|self)$" }
+    KeyRequestIdParam:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^kr-[0-9a-f]{16}$" }
     RunId:
       name: id
       in: path
@@ -1092,6 +1318,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/NotFound"
+    EnrolRefused:
+      description: "An enrolment call the rules turn down (a caller's mistake): the reason is the answer."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/EnrolRefused"
     Unavailable:
       description: |
         chapd failed closed: the ledger (or the approval store) could not commit, so nothing ran.
@@ -1152,6 +1384,13 @@ components:
       type: object
       properties:
         type: { const: not_found }
+        why: { type: string, minLength: 1, maxLength: 500 }
+      required: [type, why]
+      additionalProperties: false
+    EnrolRefused:
+      type: object
+      properties:
+        type: { const: enrol_refused }
         why: { type: string, minLength: 1, maxLength: 500 }
       required: [type, why]
       additionalProperties: false
@@ -1308,6 +1547,15 @@ components:
             kind: { const: orchestrator }
             orchestrator_id: { type: string, pattern: "^[a-z][a-z0-9._-]{0,62}$" }
           required: [kind, orchestrator_id]
+          additionalProperties: false
+        - type: object
+          description: "A custom key (ADR-008): the key, the owner it acts for and what holds it. In the ledger a key is the orchestrator `key.<id>`; here it is a key."
+          properties:
+            kind: { const: key }
+            key_id: { $ref: "#/components/schemas/KeyId" }
+            owner: { type: string, minLength: 1, maxLength: 63 }
+            holder: { type: string, minLength: 1, maxLength: 63 }
+          required: [kind, key_id, owner]
           additionalProperties: false
     ApprovalSummary:
       description: What the requester may see of an approval. Never the card text, nonce or challenge.
@@ -1568,14 +1816,52 @@ components:
           maxLength: 48
       required: [exit_code, outcome]
       additionalProperties: false
+    # BEGIN generated: connector sentry (do not edit by hand; run `go generate ./internal/connectors/...`)
+    ParamsErrorsList:
+      description: "`errors.list` on Sentry. Target is `{adapter: sentry, ref: \"<project slug>\"}`; the slug must be in the project's `sentry.projects`. One page of at most `limit` issues (default 10, at most 25), newest first, with `next_cursor` when there is more. `status` is unresolved (the default), resolved or ignored; `level` is fatal, error, warning, info or debug. Only the orchestrator token asks. Each item has the id, short id, title, culprit, level, status, event count, first and last seen and the assignee's name. Titles and culprits are text from Sentry and are untrusted: they are cleaned, capped and withheld when they look like a secret."
+      type: object
+      properties:
+        status: { type: string, pattern: "^(unresolved|resolved|ignored)$" }
+        level: { type: string, pattern: "^(fatal|error|warning|info|debug)$" }
+        limit: { type: integer, minimum: 1, maximum: 25, default: 10 }
+        cursor: { type: string, pattern: "^[0-9]{1,20}:[0-9]{1,10}:[01]$" }
+      additionalProperties: false
+    ParamsErrorsGet:
+      description: "`errors.get` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`, the numeric id; the issue must be in a project of the project's `sentry.projects`. No params. Returns the issue's title, culprit, level, status, event count, first and last seen, and from the latest event the id, the time, the exception type and at most 10 stack frames (the last two parts of the file name, line, function, in-app), innermost first. It never returns request bodies, cookies, headers, user data, local variables, tags, breadcrumbs or exception messages: the connector decodes the fields it lists and no others. Text is from Sentry and is untrusted."
+      type: object
+      additionalProperties: false
+    ParamsErrorsResolve:
+      description: "`errors.resolve` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. No params. Sets the status to resolved, with no release and no commit. An issue that is already resolved is left as it is. An ignored issue is refused: resolving it would end its archive. Sentry may notify people and sync a linked ticket when an issue is resolved."
+      type: object
+      additionalProperties: false
+    ParamsErrorsUnresolve:
+      description: "`errors.unresolve` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. No params. Sets the status to unresolved. An issue that is already unresolved is left as it is. An ignored issue is refused: reopening it would end its archive."
+      type: object
+      additionalProperties: false
+    ParamsErrorsAssign:
+      description: "`errors.assign` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. `to` is a member from the project's `sentry.assignees`, written as the policy writes it (an email address or a username); any other name is refused. The policy lists no member by default, so the operation refuses until it does. Sentry tells the member."
+      type: object
+      properties:
+        to: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._%+@-]{0,99}$" }
+      required: [to]
+      additionalProperties: false
+    ParamsErrorsComment:
+      description: "`errors.comment` on Sentry. Target is `{adapter: sentry, ref: \"<issue id>\"}`; the issue must be in a project of the project's `sentry.projects`. `body` is plain text of up to 2000 bytes: letters, digits, spaces, line breaks and the marks . , : ; ! ? ( ) ' - _ / + = % and the double quote. A note with an at sign, a number sign, markup, a link bracket, a web address (`://` or `www.`), an invisible character or text shaped like a secret is refused, so a note cannot mention a person or a team. Sentry has no key that makes a repeat safe, so a repeat of one execution posts again."
+      type: object
+      properties:
+        body: { type: string, minLength: 1, maxLength: 2000 }
+      required: [body]
+      additionalProperties: false
+    # END generated: connector sentry
+    # BEGIN generated: connector github (do not edit by hand; run `go generate ./internal/connectors/...`)
     ParamsPrOpen:
       description: Phase 1 shape for `pr.open` (owned by L1-09). `head` must equal the token's `task_scope.branch`, `base` its `task_scope.base`.
       type: object
       properties:
         title: { type: string, minLength: 1, maxLength: 200 }
         body: { type: string, maxLength: 20000 }
-        head: { type: string }
-        base: { type: string }
+        head: { type: string, maxLength: 255 }
+        base: { type: string, maxLength: 255 }
         draft: { type: boolean }
       required: [title, head, base]
       additionalProperties: false
@@ -1594,30 +1880,10 @@ components:
       description: "Phase 1 shape for `pr.merge` (owned by L1-10; the spec's reference example). Target is `{adapter: github, ref: \"owner/repo#N\"}`."
       type: object
       properties:
-        base: { type: string }
+        base: { type: string, maxLength: 255 }
         head_sha: { type: string, pattern: "^[0-9a-f]{40}$" }
         method: { const: squash }
       required: [base, head_sha, method]
-      additionalProperties: false
-    ParamsIssueOpen:
-      description: "Phase 1 shape for `issue.open`. Target is `{adapter: github, ref: \"owner/repo\"}`; the repository must be the project's. `labels` must include `source:error-watcher`. Only the orchestrator token asks."
-      type: object
-      properties:
-        title: { type: string, minLength: 1, maxLength: 200 }
-        body: { type: string, maxLength: 10000 }
-        labels: { type: array, minItems: 1, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
-      required: [title, labels]
-      additionalProperties: false
-    ParamsIssueComment:
-      description: "Phase 1 shape for `issue.comment`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`."
-      type: object
-      properties:
-        body: { type: string, minLength: 1, maxLength: 10000 }
-      required: [body]
-      additionalProperties: false
-    ParamsIssueReopen:
-      description: "Phase 1 shape for `issue.reopen`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`. No params."
-      type: object
       additionalProperties: false
     ParamsPrView:
       description: "Phase 1 shape for `pr.view` (ADR-002 amendment 12). Target is `{adapter: github, ref: \"owner/repo#N\"}`; the repository must be the project's. No params. Read-only; only the orchestrator token asks. The result holds number, title, body (cut at 64 KiB, `body_truncated`), state, draft, merged, author, labels, head {ref, sha, repo, fork}, base {ref, sha}, mergeable (null while GitHub computes it), mergeable_state, url and the counts."
@@ -1643,6 +1909,164 @@ components:
         per_page: { type: integer, minimum: 1, maximum: 100, default: 30 }
         expected_head_sha: { type: string, pattern: "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" }
       additionalProperties: false
+    ParamsIssueOpen:
+      description: "Phase 1 shape for `issue.open`. Target is `{adapter: github, ref: \"owner/repo\"}`; the repository must be the project's. `labels` must include `source:error-watcher`. Only the orchestrator token asks."
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        body: { type: string, maxLength: 10000 }
+        labels: { type: array, minItems: 1, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
+      required: [title, labels]
+      additionalProperties: false
+    ParamsIssueComment:
+      description: "Phase 1 shape for `issue.comment`. One name for two connectors, picked by `target.adapter`. GitHub: target `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`; `body` up to 10000. Linear: target `{adapter: linear, ref: \"<issue identifier>\"}`, for example `AGT-12`; the issue must be in the project's `linear.issues.team`, carry `linear.issues.label` when the comment is posted, and never be an operator-board item (`intake_label_excluded`), and the block must set `linear.issues.comment: true`; `body` up to 4000 bytes."
+      type: object
+      properties:
+        body: { type: string, minLength: 1, maxLength: 10000 }
+      required: [body]
+      additionalProperties: false
+    ParamsIssueReopen:
+      description: "Phase 1 shape for `issue.reopen`. Target is `{adapter: github, ref: \"owner/repo#N\"}`; issue N must carry `source:error-watcher`. No params."
+      type: object
+      additionalProperties: false
+    # END generated: connector github
+    ParamsKeysIssue:
+      description: "Target is `{adapter: chaperone, ref: \"key:<holder>\"}`. Class high: every key is a card the operator signs with Windows Hello, so the request is made with `POST /v0/approvals`. Orchestrator only; a key never issues a key. The `ops` must all be ops the asking orchestrator token itself holds. `ops` are routine ops, or risky ones the key holds ask-only (every use raises its own card); never a critical op and never an op that decides, issues or administers. `ops` and `units` are sorted, lower case and without repeats, and both numbers are required: what is signed is what is granted. `units` are the repositories (needed for pull-request ops). At most 30 days, and at most 7 days for a key with a risky op. The result holds `key_id`, `expires_at`, `claim_deadline` and the next step; it never holds the key."
+      type: object
+      properties:
+        holder: { type: string, pattern: "^[a-z][a-z0-9._-]{0,39}$" }
+        holder_kind: { enum: [person, agent] }
+        ops: { type: array, minItems: 1, maxItems: 16, items: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$" } }
+        units: { type: array, maxItems: 8, items: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,99}/[a-z0-9._-]{1,100}$" } }
+        ttl_hours: { type: integer, minimum: 1, maximum: 720 }
+        rate_per_hour: { type: integer, minimum: 1, maximum: 300 }
+      required: [holder, holder_kind, ops, ttl_hours, rate_per_hour]
+      additionalProperties: false
+    KeyId:
+      type: string
+      pattern: "^k-[0-9a-f]{16}$"
+    Key:
+      description: "A custom key as the API shows it. Never the token and never its hash."
+      type: object
+      properties:
+        id: { $ref: "#/components/schemas/KeyId" }
+        state: { enum: [granted, live, expired, revoked] }
+        project: { type: string }
+        owner: { type: string }
+        holder_kind: { enum: [person, agent] }
+        holder: { type: string }
+        ops: { type: array, items: { type: string } }
+        units: { type: array, items: { type: string } }
+        sensitive: { type: boolean }
+        grant_kind: { enum: [approved, self, bootstrap], description: "approved: a script's owner; self: an owner granted their own agent; bootstrap: a request-only key that holds no op" }
+        rate_per_hour: { type: integer, minimum: 1, maximum: 300 }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        claim_deadline: { type: string, format: date-time }
+        claimed_at: { type: string, format: date-time }
+        fingerprint: { type: string, description: "First 8 hex of the token's SHA-256" }
+        granted_by: { type: string }
+        approval_id: { type: string }
+        request_id: { type: string }
+        revoked_at: { type: string, format: date-time }
+        revoked_by: { type: string }
+        revoke_reason: { type: string }
+        stopped_by_human: { type: boolean, description: "The owner revoked this agent's key at the console, so the agent stays stopped until its owner resumes it. A revoke with a token never sets it" }
+        last_used_at: { type: string, format: date-time }
+        uses: { type: integer }
+      required: [id, state, project, owner, holder_kind, holder, ops, units, sensitive, grant_kind, rate_per_hour, issued_at, expires_at, granted_by, approval_id, request_id, uses]
+      additionalProperties: false
+    KeyClaim:
+      description: "The one answer that carries a key. Sent with Cache-Control no-store. Only the caller that asked for the key gets it, once."
+      type: object
+      properties:
+        token: { type: string, pattern: "^chap_key_[A-Za-z0-9_-]{43}$" }
+        key: { $ref: "#/components/schemas/Key" }
+      required: [token, key]
+      additionalProperties: false
+    KeyRequestId:
+      type: string
+      pattern: "^kr-[0-9a-f]{16}$"
+    KeyRequestGrant:
+      description: "What was granted of a request, or what was removed from it."
+      type: object
+      properties:
+        ops: { type: array, items: { type: string } }
+        units: { type: array, items: { type: string } }
+        ttl_hours: { type: integer }
+        rate_per_hour: { type: integer }
+      required: [ops, units, ttl_hours, rate_per_hour]
+      additionalProperties: false
+    KeyRequest:
+      description: "A key request as the API shows it. The requester sees exactly what was granted and what was removed. Never a token."
+      type: object
+      properties:
+        id: { $ref: "#/components/schemas/KeyRequestId" }
+        kind: { enum: [new, extend] }
+        state: { enum: [pending, granted, denied, withdrawn, expired, cancelled] }
+        project: { type: string }
+        owner: { type: string }
+        holder: { type: string }
+        ops: { type: array, items: { type: string } }
+        units: { type: array, items: { type: string } }
+        ttl_hours: { type: integer, description: "For an extension: the hours added." }
+        rate_per_hour: { type: integer }
+        reason: { type: string }
+        needed_today: { type: boolean }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        extends_key: { $ref: "#/components/schemas/KeyId" }
+        decided_at: { type: string, format: date-time }
+        decided_by: { type: string }
+        deny_reason: { type: string }
+        granted: { $ref: "#/components/schemas/KeyRequestGrant" }
+        removed: { $ref: "#/components/schemas/KeyRequestGrant" }
+        key_id: { $ref: "#/components/schemas/KeyId" }
+        issue_op: { type: string }
+      required: [id, kind, state, project, owner, holder, ops, units, ttl_hours, rate_per_hour, reason, needed_today, created_at, expires_at]
+      additionalProperties: false
+    AgentEnrolStart:
+      type: object
+      properties:
+        id: { type: string, pattern: "^en-[0-9a-f]{16}$" }
+        user_code: { type: string, pattern: "^[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$" }
+        device_code: { type: string, minLength: 43, maxLength: 43 }
+        expires_at: { type: string, format: date-time }
+        interval: { type: integer, description: "Seconds between polls." }
+      required: [id, user_code, device_code, expires_at, interval]
+      additionalProperties: false
+    AgentEnrolPoll:
+      type: object
+      properties:
+        state: { enum: [pending, claimed, expired] }
+        token: { type: string, pattern: "^chap_key_[A-Za-z0-9_-]{43}$" }
+        key: { $ref: "#/components/schemas/Key" }
+      required: [state]
+      additionalProperties: false
+    ParamsKeysRequest:
+      description: "Target is `{adapter: chaperone, ref: key-request}`. Class routine: it only writes the ask down; the owner answers at the console. An agent's key only (its own holder is the one who asks). `reason` is the request's `reason` member and is required. Either `ops` (and `units`, the repositories) or `preset: same-as-me-read`; `ttl_hours` defaults to 24 and `rate_per_hour` to 300. `kind: extend` with `key: self` and `ttl_hours` (the hours to add) asks to make the agent's own key last longer. Asking for the same thing twice returns the request that waits; a stopped agent, a denied exact ask, and the caps (3 waiting per agent, 6 new an hour, 10 per owner, 20 in all) are refused. The result holds `request_id`, `state`, `deduplicated` and the next step."
+      type: object
+      properties:
+        kind: { enum: [new, extend] }
+        ops: { type: array, minItems: 1, maxItems: 16, items: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$" } }
+        units: { type: array, maxItems: 8, items: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}$" } }
+        preset: { const: same-as-me-read }
+        key: { const: self }
+        ttl_hours: { type: integer, minimum: 1, maximum: 720 }
+        rate_per_hour: { type: integer, minimum: 1, maximum: 300 }
+        needed_today: { type: boolean }
+      additionalProperties: false
+    ParamsKeysExtend:
+      description: "Target is `{adapter: chaperone, ref: \"key:<k-id>\"}`. Class high: a card the key's owner signs with Windows Hello at the console; only the console starts it, and a key never extends a key. It changes the expiry and nothing else, within the cap that counts from the day the key was made (30 days in all, 7 with a risky op). The card shows the old and the new expiry."
+      type: object
+      properties:
+        key: { $ref: "#/components/schemas/KeyId" }
+        extend_hours: { type: integer, minimum: 1, maximum: 720 }
+        owner: { type: string }
+        holder: { type: string }
+        request: { $ref: "#/components/schemas/KeyRequestId" }
+      required: [key, extend_hours, owner, holder]
+      additionalProperties: false
     ParamsHealth:
       type: object
       additionalProperties: false
@@ -1654,6 +2078,7 @@ components:
         lines: { type: integer, minimum: 1, maximum: 500 }
       required: [source]
       additionalProperties: false
+    # BEGIN generated: connector ci (do not edit by hand; run `go generate ./internal/connectors/...`)
     ParamsCiReport:
       description: "ADR-002 amendment 10. Target is `{adapter: runner, ref: \"<run_id>\"}`, the same run ID as `run_id`. Chaperone reads the repository, the exact commit and the outcome from its own record of the run; the request carries nothing else. Orchestrator only; a `ci` run that has ended."
       type: object
@@ -1661,6 +2086,8 @@ components:
         run_id: { type: string, pattern: "^r-[0-9a-z]{4,32}$" }
       required: [run_id]
       additionalProperties: false
+    # END generated: connector ci
+    # BEGIN generated: connector linear (do not edit by hand; run `go generate ./internal/connectors/...`)
     ParamsIntakeList:
       description: "Phase 1 shape for `intake.list`. Target is `{adapter: linear, ref: \"<team key>\"}`; the team must be the project's `linear.team`. Only the orchestrator token asks. `refresh` asks for a live read (answered from the cache when the last read is under 30 s old); `closed` also returns completed and canceled items (always a live read). Titles, descriptions and comments in the result are untrusted text."
       type: object
@@ -1686,6 +2113,41 @@ components:
       description: "Phase 1 shape for `intake.states`. Target is `{adapter: linear, ref: \"<team key>\"}`. No params."
       type: object
       additionalProperties: false
+    ParamsIssueGet:
+      description: "`issue.get` on Linear. Target is `{adapter: linear, ref: \"<issue identifier>\"}` in the project's `linear.issues.team`. No params. Read-only. An operator-board item (the intake team or label) is refused. The result is untrusted text (`untrusted_text: true`): title, description and comments are capped and withheld if they look like a secret."
+      type: object
+      additionalProperties: false
+    ParamsIssueList:
+      description: "`issue.list` on Linear. Target is `{adapter: linear, ref: \"<team key>\"}`, or `team` for the project's `linear.issues.team`. One page of at most 25 issues, newest change first, with `next_cursor` when there is more. Operator-board items never appear. `state` is a workflow state type (triage, backlog, unstarted, started, completed or canceled); `label` must not be the operator-board label. Text in the result is untrusted."
+      type: object
+      properties:
+        state: { type: string, pattern: "^(triage|backlog|unstarted|started|completed|canceled)$" }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        cursor: { type: string, pattern: "^[A-Za-z0-9+/=_.:-]{1,200}$" }
+      additionalProperties: false
+    ParamsIssueLabel:
+      description: "`issue.label` on Linear. Target is `{adapter: linear, ref: \"<issue identifier>\"}`. Exactly one of `add` and `remove`: a name from the project's `linear.issues.labels`. The provenance label and the operator-board label are never added or removed. Linear adds or removes that one label; other labels are not touched."
+      type: object
+      properties:
+        add: { type: string, minLength: 1, maxLength: 80 }
+        remove: { type: string, minLength: 1, maxLength: 80 }
+      additionalProperties: false
+    ParamsIssueMove:
+      description: "`issue.move` on Linear. Target is `{adapter: linear, ref: \"<issue identifier>\"}`. `state` must be one of the project's `linear.issues.states` and a state of the issue's team."
+      type: object
+      properties:
+        state: { type: string, minLength: 1, maxLength: 80 }
+      required: [state]
+      additionalProperties: false
+    ParamsIssueLink:
+      description: "`issue.link` on Linear. Target is `{adapter: linear, ref: \"<issue identifier>\"}`. `url` is an https URL whose host is in the project's `linear.issues.link_hosts` (exact match, no port, no user name); one attachment per issue and URL."
+      type: object
+      properties:
+        url: { type: string, minLength: 1, maxLength: 300 }
+        title: { type: string, minLength: 1, maxLength: 120 }
+      required: [url]
+      additionalProperties: false
+    # END generated: connector linear
     ParamsDeploy:
       description: "Owned by L1-15. Target is `{adapter: wsl-host, ref: \"<target>\"}`."
       type: object

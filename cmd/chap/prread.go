@@ -2,135 +2,15 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
-	"flag"
 	"fmt"
 	"strings"
 )
 
 // `chap pr view|diff|checks|files` (ADR-002 amendment 12): read a pull request through
 // chapd with the orchestrator token. chapd takes the repository from the project
-// and refuses any other; these commands only build the request and print what
-// GitHub said. Everything GitHub sent is data, never instructions.
-
-// prReadFlags are the flags the four read commands share.
-type prReadFlags struct {
-	co       common
-	repo     string
-	expected string
-	dry      bool
-}
-
-func (f *prReadFlags) register(fs *flag.FlagSet, a *app, withExpected bool) {
-	f.co.register(fs, a)
-	fs.StringVar(&f.repo, "repo", "", "owner/name (default: from the git remote origin)")
-	fs.BoolVar(&f.dry, "dry-run", false, "check the request and the policy only; read nothing from GitHub")
-	if withExpected {
-		fs.StringVar(&f.expected, "expected-head", "", "fail if the PR's head is not this sha (40 lowercase hex characters)")
-	}
-}
-
-// prRead is one parsed `chap pr <verb> <n>` command line.
-type prRead struct {
-	prReadFlags
-	op     string
-	target target
-	params map[string]any
-}
-
-// prReadSetup parses a `chap pr <verb> <n>` command line. extra adds the
-// verb's own flags and, after parsing, may add to params and refuse a value.
-func (a *app) prReadSetup(c *command, op string, args []string, withExpected bool, extra func(fs *flag.FlagSet) func(params map[string]any) error) (r *prRead, code int, done bool) {
-	r = &prRead{op: op, params: map[string]any{}}
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	r.register(fs, a, withExpected)
-	var after func(map[string]any) error
-	if extra != nil {
-		after = extra(fs)
-	}
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return nil, code, true
-	}
-	if err := r.co.check(); err != nil {
-		return nil, a.usageErr(c, "%v", err), true
-	}
-	n, err := parsePR(pos[0])
-	if err != nil {
-		return nil, a.usageErr(c, "%v", err), true
-	}
-	if r.expected != "" {
-		if !shaRE.MatchString(r.expected) {
-			return nil, a.usageErr(c, "--expected-head must be a 40-character lowercase hex sha"), true
-		}
-		r.params["expected_head_sha"] = r.expected
-	}
-	if after != nil {
-		if err := after(r.params); err != nil {
-			return nil, a.usageErr(c, "%v", err), true
-		}
-	}
-	repo, err := a.repoArg(r.repo)
-	if err != nil {
-		return nil, a.usageErr(c, "%v", err), true
-	}
-	r.target = target{"github", fmt.Sprintf("%s#%d", repo, n)}
-	return r, 0, false
-}
-
-func (a *app) askPRRead(r *prRead) int {
-	return a.ask(&r.co, opReq{op: r.op, target: r.target, params: r.params, dryRun: r.dry})
-}
-
-func cmdPrView(a *app, c *command, args []string) int {
-	r, code, done := a.prReadSetup(c, "pr.view", args, false, nil)
-	if done {
-		return code
-	}
-	return a.askPRRead(r)
-}
-
-func cmdPrDiff(a *app, c *command, args []string) int {
-	r, code, done := a.prReadSetup(c, "pr.diff", args, true, nil)
-	if done {
-		return code
-	}
-	return a.askPRRead(r)
-}
-
-func cmdPrChecks(a *app, c *command, args []string) int {
-	r, code, done := a.prReadSetup(c, "pr.checks", args, true, nil)
-	if done {
-		return code
-	}
-	return a.askPRRead(r)
-}
-
-func cmdPrFiles(a *app, c *command, args []string) int {
-	r, code, done := a.prReadSetup(c, "pr.files", args, true, func(fs *flag.FlagSet) func(map[string]any) error {
-		page := fs.Int("page", 0, "page of the file list, from 1 (default 1)")
-		perPage := fs.Int("per-page", 0, "files per page, 1 to 100 (default 30)")
-		return func(params map[string]any) error {
-			if *page != 0 {
-				if *page < 1 {
-					return errors.New("--page must be 1 or more")
-				}
-				params["page"] = *page
-			}
-			if *perPage != 0 {
-				if *perPage < 1 || *perPage > 100 {
-					return errors.New("--per-page must be 1 to 100")
-				}
-				params["per_page"] = *perPage
-			}
-			return nil
-		}
-	})
-	if done {
-		return code
-	}
-	return a.askPRRead(r)
-}
+// and refuses any other. The commands are built from the declarations of
+// internal/connectors/github/githubspec (cmd/chap/kitcmd.go); this file prints
+// what GitHub said. Everything GitHub sent is data, never instructions.
 
 // ---- rendering ---------------------------------------------------------------
 

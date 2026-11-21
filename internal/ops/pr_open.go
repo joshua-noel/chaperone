@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -22,7 +23,7 @@ import (
 // whether the pull request exists leaves the op `unconfirmed`.
 
 // OpPROpen is the op kind.
-const OpPROpen = "pr.open"
+const OpPROpen = githubspec.NamePROpen
 
 // PRProject is the repository and the pull request base of a project.
 type PRProject struct {
@@ -66,9 +67,19 @@ func NewPROpen(cfg PROpenConfig) (*PROpen, error) {
 }
 
 const (
-	prTitleMax = 200
-	prBodyMax  = 20000
+	prTitleMax = githubspec.TitleMax
+	prBodyMax  = githubspec.PRBodyMax
 )
+
+// keySet is the set of the names, for a "refuse a param the op does not
+// declare" check.
+func keySet(names []string) map[string]bool {
+	m := make(map[string]bool, len(names))
+	for _, n := range names {
+		m[n] = true
+	}
+	return m
+}
 
 // prOpenParams is a validated params object.
 type prOpenParams struct {
@@ -77,7 +88,7 @@ type prOpenParams struct {
 	draft bool
 }
 
-var prOpenKeys = map[string]bool{"title": true, "body": true, "head": true, "base": true, "draft": true}
+var prOpenKeys = keySet(githubspec.PROpen.ParamNames())
 
 // parse validates the request and returns what to send. A failure is a
 // *Refusal.
@@ -85,7 +96,7 @@ func (p *PROpen) parse(req *Request) (prOpenParams, error) {
 	bad := func(why string) (prOpenParams, error) {
 		return prOpenParams{}, &Refusal{Code: CodeParamsInvalid, Why: why}
 	}
-	if req.Target.Adapter != "github" {
+	if req.Target.Adapter != githubspec.Adapter {
 		return bad("target.adapter must be github")
 	}
 	repo, err := gh.ParseRepo(req.Target.Ref)
@@ -94,7 +105,7 @@ func (p *PROpen) parse(req *Request) (prOpenParams, error) {
 	}
 	for k := range req.Params {
 		if !prOpenKeys[k] {
-			return bad("unknown param " + clamp(k, 40) + "; pr.open takes title, body, head, base, draft")
+			return bad("unknown param " + clamp(k, 40) + "; pr.open takes " + strings.Join(githubspec.PROpen.ParamNames(), ", "))
 		}
 	}
 	str := func(k string, required bool, max int) (string, bool) {
@@ -116,11 +127,11 @@ func (p *PROpen) parse(req *Request) (prOpenParams, error) {
 	if !ok {
 		return bad(fmt.Sprintf("body must be text of at most %d bytes", prBodyMax))
 	}
-	head, ok := str("head", true, 250)
+	head, ok := str("head", true, githubspec.BranchMax)
 	if !ok {
 		return bad("head is required: the branch to open the pull request from (params.head; `chap pr open` takes the current git branch or --branch)")
 	}
-	base, ok := str("base", true, 250)
+	base, ok := str("base", true, githubspec.BranchMax)
 	if !ok {
 		return bad("base is required")
 	}
@@ -196,7 +207,7 @@ func (p *PROpen) Check(_ context.Context, req *Request) (CheckResult, error) {
 func (p *PROpen) Execute(ctx context.Context, req *Request) (Outcome, error) {
 	pp, err := p.parse(req)
 	if err != nil {
-		return Outcome{Failed: true, Result: map[string]any{"error": clamp(err.Error(), 300)}}, nil
+		return Outcome{Failed: true, Result: map[string]any{"error": lineText(err.Error(), 300)}}, nil
 	}
 	tok, err := p.tokens.Mint(ctx, pp.repo, gh.PermsOpenPull())
 	if err != nil {
@@ -210,16 +221,16 @@ func (p *PROpen) Execute(ctx context.Context, req *Request) (Outcome, error) {
 		var api *gh.APIError
 		switch {
 		case errors.Is(cerr, gh.ErrInvalidArgument):
-			return Outcome{Failed: true, Result: map[string]any{"error": clamp(cerr.Error(), 300)}}, nil
+			return Outcome{Failed: true, Result: map[string]any{"error": lineText(cerr.Error(), 300)}}, nil
 		case errors.As(cerr, &api) && api.Status >= 400 && api.Status < 500 && api.Status != http.StatusRequestTimeout:
 			return Outcome{Failed: true, Result: map[string]any{
-				"error": clamp(fmt.Sprintf("GitHub refused the pull request (%d): %s", api.Status, api.Detail()), 500),
+				"error": lineText(fmt.Sprintf("GitHub refused the pull request (%d): %s", api.Status, api.Detail()), 500),
 			}}, nil
 		}
 		return Outcome{}, cerr // 5xx or transport: it may exist
 	}
 	return Outcome{
-		ExternalRef: clamp(pull.HTMLURL, 300),
-		Result:      map[string]any{"number": float64(pull.Number), "url": clamp(pull.HTMLURL, 300), "draft": pp.draft},
+		ExternalRef: safeURL(pull.HTMLURL, 300),
+		Result:      map[string]any{"number": float64(pull.Number), "url": safeURL(pull.HTMLURL, 300), "draft": pp.draft},
 	}, nil
 }

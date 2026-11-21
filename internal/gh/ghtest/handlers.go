@@ -29,6 +29,11 @@ func (s *Server) routes() http.Handler {
 	h("POST /app/installations/{id}/access_tokens", s.mint)
 	h("GET /repos/{owner}/{repo}/installation", s.findInstallation)
 	h("DELETE /installation/token", s.revoke)
+	h("POST /settings/apps/new", s.newAppPage)
+	h("POST /organizations/{org}/settings/apps/new", s.newAppPage)
+	h("POST /app-manifests/{code}/conversions", s.convertManifest)
+	h("GET /app", s.getApp)
+	h("GET /app/installations", s.listAppInstallations)
 	rp("GET /repos/{owner}/{repo}/pulls/{n}", (*Server).getPull, need{"pull_requests", "read", false})
 	rp("GET /repos/{owner}/{repo}/pulls/{n}/files", (*Server).listFiles, need{"pull_requests", "read", false})
 	rp("POST /repos/{owner}/{repo}/pulls", (*Server).createPull, need{"pull_requests", "write", false}, need{"contents", "read", true})
@@ -54,7 +59,7 @@ func (s *Server) wrap(next http.HandlerFunc) http.HandlerFunc {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 
 		s.mu.Lock()
-		s.log = append(s.log, Request{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Body: string(body)})
+		s.record(r.Method, r.URL.Path, r.URL.RawQuery, body)
 		var run []func()
 		keep := s.before[:0]
 		for _, hk := range s.before {
@@ -145,15 +150,16 @@ func page(r *http.Request, n int) (int, int) {
 // ---- App endpoints ----
 
 func (s *Server) findInstallation(w http.ResponseWriter, r *http.Request) {
-	if msg := s.verifyJWT(bearer(r)); msg != "" {
+	app, msg := s.verifyApp(bearer(r))
+	if msg != "" {
 		refuse(w, 401, msg)
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, in := range s.installs {
-		if in.Account == r.PathValue("owner") && in.repos[r.PathValue("repo")] != nil {
-			jsonOut(w, 200, map[string]any{"id": in.ID, "app_id": OwnAppID, "account": map[string]any{"login": in.Account}})
+		if in.app == app && in.Account == r.PathValue("owner") && in.repos[r.PathValue("repo")] != nil {
+			jsonOut(w, 200, map[string]any{"id": in.ID, "app_id": appNumericID(app), "account": map[string]any{"login": in.Account}})
 			return
 		}
 	}
@@ -161,7 +167,8 @@ func (s *Server) findInstallation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) mint(w http.ResponseWriter, r *http.Request) {
-	if msg := s.verifyJWT(bearer(r)); msg != "" {
+	app, msg := s.verifyApp(bearer(r))
+	if msg != "" {
 		refuse(w, 401, msg)
 		return
 	}
@@ -177,7 +184,7 @@ func (s *Server) mint(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	in := s.installs[id]
-	if in == nil {
+	if in == nil || in.app != app {
 		refuse(w, 404, "Not Found")
 		return
 	}
@@ -542,6 +549,9 @@ func (s *Server) listCheckRuns(w http.ResponseWriter, req *http.Request, r *Repo
 		} else {
 			m["conclusion"] = nil
 		}
+		if c.ExternalID != "" {
+			m["external_id"] = c.ExternalID
+		}
 		if c.AppID != 0 {
 			m["app"] = map[string]any{"id": c.AppID}
 		} else {
@@ -584,6 +594,7 @@ func (s *Server) createCheckRun(w http.ResponseWriter, req *http.Request, r *Rep
 		HeadSHA    string `json:"head_sha"`
 		Status     string `json:"status"`
 		Conclusion string `json:"conclusion"`
+		ExternalID string `json:"external_id"`
 		Output     struct {
 			Title   string `json:"title"`
 			Summary string `json:"summary"`
@@ -601,10 +612,10 @@ func (s *Server) createCheckRun(w http.ResponseWriter, req *http.Request, r *Rep
 		refuse(w, 422, "Validation Failed")
 		return
 	}
-	c := &checkRun{id: s.nextID(), Check: Check{Name: b.Name, AppID: OwnAppID, Status: "completed", Conclusion: b.Conclusion, Title: b.Output.Title, Summary: b.Output.Summary}, sha: b.HeadSHA}
+	c := &checkRun{id: s.nextID(), Check: Check{Name: b.Name, AppID: OwnAppID, Status: "completed", Conclusion: b.Conclusion, Title: b.Output.Title, Summary: b.Output.Summary, ExternalID: b.ExternalID}, sha: b.HeadSHA}
 	r.checks = append(r.checks, c)
 	jsonOut(w, 201, map[string]any{"id": c.id, "name": c.Name, "head_sha": c.sha, "status": c.Status, "conclusion": c.Conclusion,
-		"html_url": "https://github.test/" + r.FullName() + "/runs/" + strconv.FormatInt(c.id, 10), "app": map[string]any{"id": OwnAppID}})
+		"html_url": "https://github.test/" + r.FullName() + "/runs/" + strconv.FormatInt(c.id, 10), "app": map[string]any{"id": OwnAppID}, "external_id": c.ExternalID})
 }
 
 func (s *Server) createDeployment(w http.ResponseWriter, req *http.Request, r *Repo) {

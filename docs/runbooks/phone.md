@@ -92,9 +92,9 @@ Use your own name in place of `server.tail1234.ts.net`. Check the log (`D:\Chape
 
 Adding a device is the critical-class operation `approvers.enroll`. It needs one approval, from the server.
 
-1. On the server open `http://localhost:55398/approvals` and sign in with Windows Hello.
+1. On the server open `http://localhost:55398/approvals` and sign in with your passkey.
 2. In the **Phone** panel, leave the name `Phone passkey` (or change it) and click **Ask to add a phone**. A card appears: *Enrol a new approver device*, marked **CRITICAL**, with the origin `https://<server>.<tailnet>.ts.net`. Read it.
-3. Click **Approve with Windows Hello** and approve.
+3. Click **Approve with your passkey** and approve.
 4. The panel now lists the approved request. Click **Show the enrolment address**. The page shows the address as text and as a **QR code**. The address works **once**, for 10 minutes, and the approval is spent when it is shown.
 5. On the phone, make sure Tailscale is connected. Scan the QR code with the camera (or type the address) and open it in the phone's browser (Safari on iPhone, Chrome on Android). The page is *Enrol a passkey*; tap **Create passkey** and confirm with the phone's screen lock.
 6. Still on the phone, open `https://<server>.<tailnet>.ts.net/login` and tap **Sign in with your passkey**. You are signed in as `operator`. Bookmark `https://<server>.<tailnet>.ts.net/phone`.

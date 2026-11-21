@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
 	"github.com/joshua-noel/chaperone/internal/gh"
 )
 
@@ -26,12 +27,13 @@ import (
 //     the policy's are refused before any GitHub call.
 //   - `done` is `success`. `failed`, `killed` and `blocked` are `failure`. Nothing else is ever posted.
 //   - GitHub is written with one token narrowed to the repository and `checks: write`, minted after the last check,
-//     used for the one POST and revoked at once, whatever the answer.
-//   - A report can be repeated: pr.merge reads the latest check run of that name on the head, so a second report
-//     for the same run replaces the first.
+//     used for one lookup and one POST and revoked at once, whatever the answer.
+//   - A repeat posts nothing new: a second Execute with the same execution id finds the run it posted (it carries
+//     the execution id as its external_id) and reports that one; see post. A second report for the same run under another execution id is a new check run, and pr.merge
+//     reads the latest check run of that name on the head, so it replaces the first.
 
 // ciReportAdapterTarget is the target adapter of a ci.report request; the ref is the run's ID.
-const ciReportAdapterTarget = "runner"
+const ciReportAdapterTarget = githubspec.CIAdapter
 
 // ciProfile is the profile a reported run must have had.
 const ciProfile = "ci"
@@ -56,6 +58,8 @@ type CIRunFunc func(ctx context.Context, runID string) (CIRun, error)
 // CIReportAPI is the part of *[gh.Client] that ci.report uses.
 type CIReportAPI interface {
 	CreateCheckRun(ctx context.Context, tok *gh.Token, repo gh.Repo, in gh.CheckRunRequest) (*gh.CheckRun, error)
+	ListCheckRuns(ctx context.Context, tok *gh.Token, repo gh.Repo, sha string, q gh.CheckRunQuery) ([]gh.CheckRun, error)
+	AppNumericID(ctx context.Context, repo gh.Repo) (int64, error)
 	RevokeToken(ctx context.Context, tok *gh.Token) error
 }
 
@@ -110,7 +114,7 @@ func (a *ciReportAdapter) resolve(ctx context.Context, r *Request) (ciReport, []
 	if r.Target.Adapter != ciReportAdapterTarget {
 		return rep, nil, paramsInvalid("target adapter must be %s, got %q", ciReportAdapterTarget, clip(r.Target.Adapter, 40))
 	}
-	if err := onlyParams(r.Params, "run_id"); err != nil {
+	if err := onlyParams(r.Params, githubspec.CIReport.ParamNames()...); err != nil {
 		return rep, nil, err
 	}
 	runID, err := paramString(r.Params, "run_id")
@@ -198,24 +202,23 @@ func (a *ciReportAdapter) Execute(ctx context.Context, r *Request) (Outcome, err
 		}
 		return Outcome{Failed: true, Result: map[string]any{"error": clip(msg, 400)}}, nil
 	}
-	run, perr := a.cfg.GitHub.CreateCheckRun(ctx, tok, rep.repo, gh.CheckRunRequest{
-		Name: rep.check, HeadSHA: rep.head, Conclusion: rep.conclusion,
-		Title:   ciTitle(rep),
-		Summary: ciSummary(rep),
-	})
+	run, reused, perr := a.post(ctx, tok, rep, r.ExecutionID)
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	rerr := a.cfg.GitHub.RevokeToken(rctx, tok)
 	tok.Wipe()
 	if perr != nil {
-		return Outcome{Failed: true, Result: map[string]any{"error": clip("post check run: "+perr.Error(), 400)}}, nil
+		return Outcome{Failed: true, Result: map[string]any{"error": clip(perr.Error(), 400)}}, nil
 	}
 	out := Outcome{
 		Result: map[string]any{
 			"run_id": rep.runID, "head_sha": rep.head, "check": rep.check, "conclusion": rep.conclusion,
 			"outcome": rep.outcome, "check_run_id": run.ID,
 		},
-		ExternalRef: clip(run.HTMLURL, 300),
+		ExternalRef: safeURL(run.HTMLURL, 300),
+	}
+	if reused {
+		out.Result["already_posted"] = true
 	}
 	if rerr != nil {
 		out.Result["warnings"] = []any{clip("revoke installation token: "+rerr.Error(), 300)}
@@ -233,4 +236,36 @@ func ciTitle(rep ciReport) string {
 // ciSummary is the check run's text. It holds only what chapd itself knows: the run, the commit and the outcome.
 func ciSummary(rep ciReport) string {
 	return fmt.Sprintf("Run %s of the ci profile ended %s on commit %s.\n\nPosted by Chaperone's ci.report from its own record of the run (ADR-002, amendment 10).", rep.runID, rep.outcome, rep.head)
+}
+
+// post creates the check run, unless this execution already did. The run carries the execution id as its
+// `external_id`, so a second Execute with the same id (which chapd does not make today) finds the first run by its
+// name, head, App and external_id and returns it instead of posting again. When the lookup cannot be made, nothing is
+// posted: without it a repeat could not be told from a first try. An Execute with no execution id (a test) posts.
+func (a *ciReportAdapter) post(ctx context.Context, tok *gh.Token, rep ciReport, execID string) (run *gh.CheckRun, reused bool, err error) {
+	if execID != "" {
+		own, lerr := a.cfg.GitHub.AppNumericID(ctx, rep.repo)
+		var runs []gh.CheckRun
+		if lerr == nil {
+			runs, lerr = a.cfg.GitHub.ListCheckRuns(ctx, tok, rep.repo, rep.head, gh.CheckRunQuery{CheckName: rep.check, AppID: own, All: true})
+		}
+		if lerr != nil {
+			return nil, false, fmt.Errorf("look for an earlier report of this run: %w; nothing was posted", lerr)
+		}
+		for i := range runs {
+			if r := runs[i]; r.Name == rep.check && r.HeadSHA == rep.head && r.AppID == own && r.ExternalID == execID {
+				return &r, true, nil
+			}
+		}
+	}
+	run, err = a.cfg.GitHub.CreateCheckRun(ctx, tok, rep.repo, gh.CheckRunRequest{
+		Name: rep.check, HeadSHA: rep.head, Conclusion: rep.conclusion,
+		Title:      ciTitle(rep),
+		Summary:    ciSummary(rep),
+		ExternalID: execID,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("post check run: %w", err)
+	}
+	return run, false, nil
 }

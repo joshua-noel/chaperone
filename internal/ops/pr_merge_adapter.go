@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/github/githubspec"
+	"github.com/joshua-noel/chaperone/internal/connectors/untrusted"
 	"github.com/joshua-noel/chaperone/internal/gh"
 	"github.com/joshua-noel/chaperone/internal/policy"
 )
@@ -40,6 +42,7 @@ func PRPolicyFromEngine(e *policy.Engine) PRPolicyFunc {
 			Base:        eff.PR.Base,
 			ExtraChecks: eff.PR.ExtraChecks,
 			Tiers:       PRTierGlobs{High: eff.PR.Tiers.High, Medium: eff.PR.Tiers.Medium, Low: eff.PR.Tiers.Low},
+			Invalid:     eff.PR.Invalid,
 		}
 		if l := eff.PR.LocalCI; l != nil {
 			p.LocalCI = &PRLocalCI{Check: l.Check, Instead: l.Mode == policy.LocalCIInstead}
@@ -76,6 +79,14 @@ func projectPR(pol PRPolicyFunc, r *Request, repo gh.Repo, op string) (PRPolicy,
 	if !ok {
 		return PRPolicy{}, noPRBlock(r.Project, op)
 	}
+	if p.Invalid == nil {
+		if err := p.Tiers.Validate(); err != nil {
+			p.Invalid = fmt.Errorf("its policy file %s.yaml has a tier glob that cannot be used, so pr.merge and pr.update are off for project %s until it is fixed (%w)", r.Project, r.Project, err)
+		}
+	}
+	if p.Invalid != nil {
+		return PRPolicy{}, &Refusal{Code: CodePolicyRefused, Why: clip(fmt.Sprintf("%s is refused: %v", op, p.Invalid), 700)}
+	}
 	if p.Repo != "" && !strings.EqualFold(p.Repo, repo.String()) {
 		return PRPolicy{}, &Refusal{Code: CodePolicyRefused, Why: clip(fmt.Sprintf(
 			"%s is refused: project %s merges only in %s, not %s", op, r.Project, p.Repo, repo), 400)}
@@ -85,7 +96,7 @@ func projectPR(pol PRPolicyFunc, r *Request, repo gh.Repo, op string) (PRPolicy,
 
 // targetPR parses a target ref "owner/repo#N" (number optional when optNum).
 func targetPR(r *Request, optNum bool) (gh.Repo, int, error) {
-	if r.Target.Adapter != "github" {
+	if r.Target.Adapter != githubspec.Adapter {
 		return gh.Repo{}, 0, paramsInvalid("target adapter must be github, got %q", clip(r.Target.Adapter, 40))
 	}
 	ref, num, hasNum := strings.Cut(r.Target.Ref, "#")
@@ -146,6 +157,16 @@ func paramInt(p map[string]any, key string) (int, bool, error) {
 	return 0, true, paramsInvalid("param %s must be a positive integer", key)
 }
 
+// linePaths returns the paths for the card, each on one line with no control or
+// format character: a pull request author chooses them.
+func linePaths(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = untrusted.Line(p)
+	}
+	return out
+}
+
 func verdictChecks(v PRVerdict) []Check {
 	out := make([]Check, 0, len(v.Checks))
 	for _, c := range v.Checks {
@@ -189,7 +210,7 @@ func refusalOf(v PRVerdict) error {
 	if code == "" {
 		code = CodePolicyRefused
 	}
-	return &Refusal{Code: code, Why: clip(why, 400)}
+	return &Refusal{Code: code, Why: clip(untrusted.Line(why), 400)}
 }
 
 // ---- pr.merge --------------------------------------------------------------
@@ -204,12 +225,15 @@ func (a *prMergeAdapter) request(r *Request) (PRMergeRequest, error) {
 	if err != nil {
 		return PRMergeRequest{}, err
 	}
-	if err := onlyParams(r.Params, "base", "head_sha", "method"); err != nil {
+	if err := onlyParams(r.Params, githubspec.PRMerge.ParamNames()...); err != nil {
 		return PRMergeRequest{}, err
 	}
 	base, err := paramString(r.Params, "base")
 	if err != nil {
 		return PRMergeRequest{}, err
+	}
+	if len(base) > githubspec.BranchMax {
+		return PRMergeRequest{}, paramsInvalid("param base is at most %d bytes", githubspec.BranchMax)
 	}
 	head, err := paramString(r.Params, "head_sha")
 	if err != nil {
@@ -252,7 +276,7 @@ func (a *prMergeAdapter) Check(ctx context.Context, r *Request) (CheckResult, er
 		if len(paths) > 40 {
 			paths, more = paths[:40], fmt.Sprintf("\n... and %d more", len(v.TierPaths)-40)
 		}
-		cr.Evidence = append(cr.Evidence, Evidence{Name: "paths that set the tier (" + string(v.Tier) + ")", Text: clip(strings.Join(paths, "\n"), 4000) + more})
+		cr.Evidence = append(cr.Evidence, Evidence{Name: "paths that set the tier (" + string(v.Tier) + ")", Text: clip(strings.Join(linePaths(paths), "\n"), 4000) + more})
 	}
 	switch v.Outcome {
 	case PRRefuse:
@@ -287,18 +311,18 @@ func (a *prMergeAdapter) Execute(ctx context.Context, r *Request) (Outcome, erro
 	res, err := a.m.Merge(ctx, req)
 	switch {
 	case errors.Is(err, ErrMergeUnconfirmed):
-		return Outcome{Unconfirmed: true, Result: map[string]any{"error": clip(err.Error(), 400)}}, nil
+		return Outcome{Unconfirmed: true, Result: map[string]any{"error": clip(untrusted.Line(err.Error()), 400)}}, nil
 	case err != nil:
 		// Every other error comes before the write or after a read-back that
 		// showed the PR open: it did not merge.
-		return Outcome{Failed: true, Result: map[string]any{"error": clip(err.Error(), 400)}}, nil
+		return Outcome{Failed: true, Result: map[string]any{"error": clip(untrusted.Line(err.Error()), 400)}}, nil
 	}
 	out := Outcome{Result: verdictResult(res.Verdict)}
 	out.Result["merged"] = res.Merged
 	if len(res.Warnings) > 0 {
 		ws := make([]any, len(res.Warnings))
 		for i, w := range res.Warnings {
-			ws[i] = clip(w, 300)
+			ws[i] = clip(untrusted.Line(w), 300)
 		}
 		out.Result["warnings"] = ws
 	}
@@ -323,7 +347,7 @@ func (a *prUpdateAdapter) request(r *Request) (PRUpdateRequest, error) {
 	if err != nil {
 		return PRUpdateRequest{}, err
 	}
-	if err := onlyParams(r.Params, "number", "expected_head_sha", "update_branch", "title", "body"); err != nil {
+	if err := onlyParams(r.Params, githubspec.PRUpdate.ParamNames()...); err != nil {
 		return PRUpdateRequest{}, err
 	}
 	n, hasN, err := paramInt(r.Params, "number")
@@ -387,7 +411,7 @@ func (a *prUpdateAdapter) Execute(ctx context.Context, r *Request) (Outcome, err
 	if len(res.Warnings) > 0 {
 		ws := make([]any, len(res.Warnings))
 		for i, w := range res.Warnings {
-			ws[i] = clip(w, 300)
+			ws[i] = clip(untrusted.Line(w), 300)
 		}
 		out.Result["warnings"] = ws
 	}

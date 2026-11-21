@@ -33,9 +33,9 @@ var rules = []rule{
 		Tests: []testRef{{"cmd/chap", "TestScrubMasksSecretShapes"}, {"test/redteam", "TestRT26CanaryNeverAppearsAnywhere"}, {"test/redteam", "TestRT26AgentSuppliedSecret"}},
 	},
 	{
-		Text:   "`chap dev-token` writes the token it mints to a new file and prints nothing of it. It creates the file exclusively, so an existing file is refused, not overwritten. The mode is 0600 where the system has file modes; on Windows the file takes the ACL of its folder, which is why the default place is your own profile.",
-		Where:  "cmd/chap: `createPrivateFile` (`O_EXCL`), `cmdDevToken`",
-		Tests:  []testRef{{"cmd/chap", "TestDevTokenWritesFileOnly"}},
+		Text:   "`chap dev-token` writes the token it mints to a new file and prints nothing of it. It creates the file exclusively, so an existing file is refused, not overwritten. The file is private to you from the moment it exists: mode 0600 where the system has file modes, and on Windows, where the mode means nothing, a protected access list for your user alone that is given in the same call that creates the file, so it does not take the access of its folder. A link at the path is refused, not followed.",
+		Where:  "cmd/chap: `createPrivateFile`, `cmdDevToken`; internal/privfile: `Create`",
+		Tests:  []testRef{{"cmd/chap", "TestDevTokenWritesFileOnly"}, {"cmd/chap", "TestKeyFilesArePrivateFromCreation"}, {"internal/privfile", "TestCreateIsOwnerOnlyByIcacls"}, {"internal/privfile", "TestCreateIsMode0600"}, {"internal/privfile", "TestCreateDoesNotFollowALink"}},
 		Covers: []string{"never overwritten"},
 	},
 	{
@@ -77,6 +77,19 @@ var rules = []rule{
 			{"internal/connectors/linear", "TestMoveToAStateThePolicyDoesNotListIsRefused"},
 		},
 		Covers: []string{"never to the Engineering team"},
+	},
+	{
+		Text:  "The Sentry connector (`chap errors`) acts only on the Sentry projects that the project's policy lists, and reads the issue again just before every write. It returns no request data, cookies, headers, user data or local variables of an event: `chapd` decodes the fields it lists and no others. It sends its token only to the one https host the policy names, and follows no redirect. It cannot delete, merge, ignore or create an issue, unassign, or delete a note, and a note cannot mention a person or a team. All six ops are off until a policy change turns them on, and nothing here ran against a real Sentry.",
+		Where: "internal/connectors/sentry: `client.go`, `base.readIssue`, `note.go`; internal/policy: `sentry.go`",
+		Tests: []testRef{
+			{"internal/connectors/sentry", "TestGetReturnsTheEssentialsAndNothingElse"},
+			{"internal/connectors/sentry", "TestProjectChangedBetweenCheckAndWriteStopsTheWrite"},
+			{"internal/connectors/sentry", "TestARedirectIsNotFollowed"},
+			{"internal/connectors/sentry", "TestTheClientSendsOnlyToAnExactHTTPSHost"},
+			{"internal/connectors/sentry", "TestOnlyTheFixedRoutesAreEverCalled"},
+			{"internal/connectors/sentry", "TestNoteRefusesWhatCouldMentionOrLinkOrHide"},
+			{"internal/policy", "TestCheckSentryBaseURL"},
+		},
 	},
 	{
 		Text:  "`chap mcp` serves the ops as MCP tools to a client on the same machine over stdio, and does nothing the command line cannot: each tool call is one request to `chapd` with the same credential, so policy, approvals and the ledger apply. It listens on nothing, and it cannot show or change an approval card: a call that needs a human returns only the op id, the approval id, the class and the time left. Text an op read from outside comes back in a field named `untrusted_result`.",

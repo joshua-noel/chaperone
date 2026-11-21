@@ -134,6 +134,29 @@ func TestPatternShapes(t *testing.T) {
 		{"google-oauth-token", "ya29." + randB64URL(t, 120)},
 		{"google-refresh-token", "1//" + randB64URL(t, 60)},
 		{"google-client-secret", "GOCSPX-" + randB64URL(t, 28)},
+		{"sentry-token", "sntryu_" + randB64URL(t, 64)},
+		{"sentry-token", "sntrys_" + randB64URL(t, 120)},
+		{"aws-access-key-id", "AKIA" + "IOSFODNN7EXAMPLE"},
+		{"slack-token", "xoxb-" + "123456789012-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx"},
+		{"slack-token", "xoxp-" + "123456789012-1234567890123"},
+		// one made-up value per format Slack documents (docs.slack.dev, "Tokens" and "Using token rotation")
+		{"slack-token", "xoxp-" + "111-222-333-d6bc768406e5c2e6958cfc399b438004"}, // the documentation's own example
+		{"slack-token", "xoxp-" + "111-222-333-d6bc76"},                           // a short secret from before August 2016
+		{"slack-token", "xoxa-" + "2-123456789012-123456789012-0123456789abcdef"}, // legacy workspace token
+		{"slack-token", "xoxo-" + "123456789012-123456789012-0123456789abcdef"},
+		{"slack-token", "xoxr-" + "123456789012-123456789012-0123456789abcdef"},
+		{"slack-token", "xoxs-" + "123456789012-123456789012-123456789012-0123456789abcdef"},
+		{"slack-token", "xoxb-" + "1234567890-AbCdEfGhIjKlMnOpQrStUvWx"}, // an old bot token: one digit group
+		{"slack-rotating-token", "xoxe.xoxb-" + "1-" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrStUvWxYz"},
+		{"slack-rotating-token", "xoxe.xoxp-" + "1-" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrStUvWxYz"}, // also a configuration token
+		{"slack-rotating-token", "xoxe-" + "1-" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrStUvWxYz"},      // refresh token
+		{"slack-rotating-token", "xoxe.xapp-" + "1-" + "A0123456789-1234567890123-0123456789abcdef0123456789abcdef"},
+		{"slack-app-token", "xapp-" + "1-" + "A0123456789-1234567890123-0123456789abcdef0123456789abcdef"},
+		{"slack-workflow-token", "xwfp-" + "0123456789-0123456789-0123456789-0123456789abcdef"},
+		{"stripe-key", "sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc"},
+		{"stripe-key", "sk_test_" + "4eC39HqLyjWDarjtT1zdp7dc"},
+		{"resend-api-key", "re_" + "Qw3rTy7u_Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8"}, // made up, in the documented shape: 8 then 24
+		{"resend-api-key", "re_" + "AbCdEf12_" + "Zy9Xw8Vu7Ts6Rq5Po4Nm3Lk2"},
 		{"jwt", "eyJ" + randB64URL(t, 30) + ".eyJ" + randB64URL(t, 60) + "." + randB64URL(t, 43)},
 	}
 	for _, c := range cases {
@@ -144,6 +167,23 @@ func TestPatternShapes(t *testing.T) {
 		}
 		if len(res.Hits) != 1 || res.Hits[0].Rule != rule || res.Hits[0].Count != 1 {
 			t.Errorf("%s: hits %+v", rule, res.Hits)
+		}
+	}
+}
+
+// The new shape rules are anchored tightly: ordinary words and near misses are left alone.
+func TestSecretShapeRulesLeaveOrdinaryTextAlone(t *testing.T) {
+	r := NewRegistry()
+	for _, in := range []string{
+		"the sntryu_ prefix and sntrys_ short", "sntryu_tooShort", "MAKIAIOSFODNN7EXAMPLEX", "AKIA", "AKIAshort", "akiaiosfodnn7example",
+		"xoxb- and xoxz-1234567890123456", "the xoxo-love-letters-collection", "xoxb-notdigits-abcdefgh", "xoxe-mail", "xoxe and xoxes", "hugs xoxe-1-love", "xapp-store-listing", "xwfp-short", "xoxe.xoxb-notdigits-abcdefghijklmnopqrstuvwxyz", "xoxb-short", "sk_live_short", "task_live_4eC39HqLyjWDarjtT1zdp7dc", "desk_test_4eC39HqLyjWDarjtT1zdp7dc",
+		"Rack and Pinion AKIRA", "ValueError: bad total (cart 4501234567)",
+		"re_export_defaultConfigurationSettings", "func re_render_componentDidUpdateWithPrevProps()", "re_compile_patternWithNamedCaptureGroups",
+		"re_deploy_0123456789abcdef0123456789abcdef01234567", "re_commit_0123456789abcdef0123456789abcdef01234567", "re_upload_0123456789abcdefABCDEF",
+		"re_use", "re_enter_password", "please re_enter_your_password_here", "re_validate_user_session_token_for_every_request", "re_initialize_the_connection_pool_again", "re_Qw3rTy7u_short", "re_Qw3rTy7u-Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8", "are_Qw3rTy7u_Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8",
+	} {
+		if out, res := r.Redact(in); res.Blocked() || out != in {
+			t.Errorf("%q changed: %q %+v", in, out, res.Hits)
 		}
 	}
 }

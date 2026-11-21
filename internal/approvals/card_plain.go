@@ -146,8 +146,14 @@ func whoLine(r spec.Requester) (string, error) {
 		}
 		return who, nil
 	case "orchestrator":
+		if id, ok := spec.KeyIDOf(r); ok {
+			return "Key " + ident(id), nil
+		}
 		if r.ID == "main" {
 			return "The orchestrator", nil
+		}
+		if r.ID == "operator" {
+			return "You, at the console", nil
 		}
 		return "Orchestrator " + ident(r.ID), nil
 	}
@@ -307,6 +313,21 @@ func wantsTo(req spec.Request, ev []Evidence) string {
 		return "change the settings of " + ref
 	case "host.scripts.refresh":
 		return "replace the host scripts on " + ref
+	case "keys.issue":
+		if strParam(req, "enrolment") != "" {
+			return "enrol the agent " + ident(strParam(req, "holder")) + " for " + ident(strParam(req, "owner")) + " in project " + ident(req.Project) +
+				": a key that can only ask for more access, and can do nothing else"
+		}
+		s := "give " + ident(strParam(req, "holder_kind")) + " " + ident(strParam(req, "holder")) + " a key that can use " + joinIdents(strList(req, "ops"))
+		if u := strList(req, "units"); len(u) > 0 {
+			s += " on " + joinIdents(u)
+		} else {
+			s += " in project " + ident(req.Project)
+		}
+		return s + " (a key can never approve anything or issue keys)"
+	case "keys.extend":
+		return "make the key " + ident(strParam(req, "key")) + " of agent " + ident(strParam(req, "holder")) + " last " + jsonText(req.Params["extend_hours"]) +
+			" hours longer (it gets no more access)"
 	case "approvers.enroll":
 		if l := strParam(req, "label"); l != "" {
 			return `add a new approver device named "` + text(clip(l, 60)) + `"`
@@ -348,4 +369,16 @@ func mailSentence(req spec.Request) string {
 		s += ` with the subject "` + text(clip(sub, 80)) + `"`
 	}
 	return s
+}
+
+// joinIdents renders a list of identifiers for a headline.
+func joinIdents(list []string) string {
+	if len(list) == 0 {
+		return "nothing"
+	}
+	out := make([]string, len(list))
+	for i, s := range list {
+		out[i] = ident(s)
+	}
+	return strings.Join(out, ", ")
 }

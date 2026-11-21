@@ -1,0 +1,8 @@
+$ chap issue comment AGT-12
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --body or --body-file is required
+usage: chap issue comment <n|AGT-12> [--body <b> | --body-file <f>] [--repo owner/name]

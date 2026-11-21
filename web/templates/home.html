@@ -2,7 +2,7 @@
 <div class="card" role="region" aria-labelledby="signed-in-heading">
   <header>
     <h1 class="card-title" id="signed-in-heading">Signed in as {{.Approver}}</h1>
-    <p>Your session was made by a verified Windows Hello or passkey check. Approving an action asks for a fresh one.</p>
+    <p>Your session was made by a verified passkey check. Approving an action asks for a fresh one.</p>
   </header>
   <section>{{template "passkeys" .Credentials}}</section>
   <footer>

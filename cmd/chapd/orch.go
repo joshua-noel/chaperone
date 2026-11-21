@@ -12,10 +12,12 @@ import (
 	"text/tabwriter"
 	"time"
 
+	keystore "github.com/joshua-noel/chaperone/internal/keys"
 	"github.com/joshua-noel/chaperone/internal/ledger"
 	"github.com/joshua-noel/chaperone/internal/localtime"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
+	"github.com/joshua-noel/chaperone/internal/privfile"
 	"github.com/joshua-noel/chaperone/internal/redact"
 	"github.com/joshua-noel/chaperone/internal/runtoken"
 	"github.com/joshua-noel/chaperone/internal/store"
@@ -82,9 +84,18 @@ func openOrch(ctx context.Context, dbPath, instance string) (*orchEnv, error) {
 		_ = led.Close()
 		return fail(err)
 	}
+	ks, err := keystore.New(keystore.Config{
+		DB: db, Ledger: sink, PolicyVersion: base.BaselineVersion,
+		TxRevoke: func(ctx context.Context, tx *store.Tx, id string) error { return svc.CancelKeyOps(ctx, tx, id) },
+	})
+	if err != nil {
+		_ = led.Close()
+		return fail(err)
+	}
+	txRevoke, txReissue := orchestratorHooks(svc, ks)
 	o, err := runtoken.NewOrchestrators(runtoken.OrchConfig{
 		DB: db, Appender: sink, Redact: reg, PolicyVersion: base.BaselineVersion,
-		TxRevoke: func(ctx context.Context, tx *store.Tx, id string) error { return svc.CancelOrchOps(ctx, tx, id) },
+		TxRevoke: txRevoke, TxReissue: txReissue,
 	})
 	if err != nil {
 		_ = led.Close()
@@ -218,7 +229,9 @@ func writePrivate(path string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, ".orch-*.tmp")
+	// A new private file with a random name (privfile): owner-only from the instant it exists, and not a name a link
+	// could be waiting at. The rename then replaces whatever is at path, a link included, without following it.
+	f, err := privfile.CreateTemp(dir, ".orch-*.tmp")
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,33 @@
+# Resend: the one op Chaperone has built for it. The full research profile (the ops not built
+# yet, the presets) belongs to the connector standard, a design document outside this repository.
+#
+# Tied to api/manual.yaml, the baseline pack and the `chap` usage by the C19 test
+# (internal/policy/profile_test.go).
+#
+# mail.send is ONE name for two connectors: Gmail (internal/connectors/google, target.adapter
+# `google`) and Resend (internal/connectors/resend, target.adapter `resend`). The catalog entry, the
+# class (high, irreversible), the card and the baseline rule are shared; the Resend adapter refuses a
+# project whose policy file has no valid `resend:` block, so the name being on does not turn Resend
+# on. The Gmail side has no profile file of its own yet. A run profile (host-interim) lists mail.send
+# for the Gmail side; the Resend adapter accepts the orchestrator token only.
+#
+# mail.send is OFF in the baseline. The `resend:` block is the policy: the sender addresses (exact),
+# who may receive mail (an exact address or a whole `@domain`, never the domain of a large public
+# mailbox provider), and the cap on recipients. A mistake in the block turns off the Resend side
+# only; mail through Gmail is not affected.
+#
+# The connector holds ONE secret, the API key (`resend-api-key`): Resend permission "Sending
+# access", restricted to one domain. It calls ONE route, POST /emails.
+#
+# Not built, on purpose: any read (a delivery status is read in Resend's dashboard: Resend gives a
+# sending-only key no read, and a key that can read can do anything in the account), attachments,
+# HTML, reply-to, scheduled sends, the batch endpoint, templates, tags and custom headers.
+profile_version: 1
+connector: resend
+standard: v1.1
+
+ops:
+  - {name: mail.send, class: high, reversibility: irreversible, surface: op, unit: project, enabled_default: false, chap: mail send, orchestrator_only: false, needs_policy_block: resend,
+     conditions: [orchestrator_only_through_resend, sender_listed, recipients_allowlisted, recipient_cap, plain_text_only, no_secret_in_message, approval_bound_to_message, idempotency_key, one_secret, one_route, fixed_https_host, no_redirect, rate]}
+
+standard_not_built: []

@@ -14,7 +14,7 @@ internal/approvals/           the approvals engine and the approval cards
 internal/console/             the web console; web/ holds its templates and static files
 internal/gh/, internal/gitproxy/   the GitHub App client and chapd's git proxy
 internal/ops/, internal/policy/    the operations and the policy that gates them
-internal/connectors/          third-party connectors (Google, Linear)
+internal/connectors/          third-party connectors (Google, Linear, Sentry, Resend)
 internal/mcpfront/            the local MCP server behind `chap mcp`
 internal/spec/                the contract shared with the runner: schemas and golden vectors (specdata/), strict JSON, JCS, hashes, validation
 internal/version/             build identity printed by `<binary> version`
@@ -119,17 +119,37 @@ go test ./internal/spec                  # reproduce every golden vector, valida
 
 ## CI
 
-The workflows are [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) and [`.github/workflows/scan.yml`](../.github/workflows/scan.yml).
+The workflows are [`ci.yml`](../.github/workflows/ci.yml), [`keyring.yml`](../.github/workflows/keyring.yml), [`release.yml`](../.github/workflows/release.yml) and [`scan.yml`](../.github/workflows/scan.yml). Every action is pinned to a commit SHA; reuse the SHAs already in the files, and do not add an action without a reason.
 
 | Job | Runs | Steps |
 | --- | --- | --- |
-| `linux` (`ubuntu-latest`) | on every pull request to `main` and every push to `main`, unless the change is only files in the `paths-ignore` list of `ci.yml` (docs the tests do not read); by hand with `workflow_dispatch` | `go mod verify`, vendor-drift check, allowlist check, `gofmt`, `go vet` (linux and `GOOS=windows`), `go test`, build all three binaries for both targets with `CGO_ENABLED=0`, `chap version` inside a clean `ubuntu:24.04` container |
-| `windows` (`windows-latest`) | on every push to `main`, and by hand; not on a pull request; only after `linux` passed | `go vet`, `go test`, build, `chap.exe version` |
+| `linux` (`ci.yml`, `ubuntu-latest`) | on every pull request to `main` and every push to `main`, unless the change is only files in the `paths-ignore` list of `ci.yml` (docs the tests do not read); by hand with `workflow_dispatch` | `go mod verify`, vendor-drift check, allowlist check, `gofmt`, `go vet` (linux, `GOOS=windows` and `GOOS=darwin`), `go test`, build all three binaries for both targets with `CGO_ENABLED=0`, `chap version` inside a clean `ubuntu:24.04` container |
+| `windows` (`ci.yml`, `windows-latest`) | on every push to `main`, and by hand; not on a pull request; only after `linux` passed | `go vet`, `go test`, build, `chap.exe version` |
+| `macos` (`ci.yml`, `macos-latest`, an Apple silicon runner: darwin/arm64) | the same as `windows` | `go vet`, `go test`, build the three programs natively, `chap version` |
+| `macos keychain` (`keyring.yml`, `macos-latest`) | on a pull request or push to `main` that changes `internal/vault/**`, `go.mod`, `go.sum` or `keyring.yml`; Wednesdays 05:41 UTC; by hand | a throwaway keychain, then one step for the `keychain-macos` wrapper on the real `security` tool, one for the `age-passphrase` wrapper on a real terminal (`script`) |
+| `linux secret service` (`keyring.yml`, `ubuntu-latest`) | the same as `macos keychain` | installs `libsecret-tools`, `gnome-keyring` and `dbus`; a self-check of a private D-Bus session with an unlocked GNOME Keyring; then one step for the `secret-service` wrapper on the real `secret-tool`, one for the `age-passphrase` wrapper on a real terminal |
+| `release` (`release.yml`, `ubuntu-latest`) | on a pushed tag `v*`, and by hand from a tag | `verify` (`go vet`, `go test`, the tag is a version and on `main`), then the archives for five systems, checksums, and a **draft** GitHub release. See [releasing.md](releasing.md) |
 | `govulncheck` (`scan.yml`, `ubuntu-latest`) | Mondays 05:23 UTC, by hand, and on a pull request that changes `go.mod` or `go.sum` | `govulncheck ./...` (v1.9.0) |
 
-A change that touches `internal/vault/` or `cmd/chap-host/` still gets `GOOS=windows go vet` from the Linux job. To run the Windows tests on a branch before it merges, run `gh workflow run ci -r <branch>`.
+A change that touches `internal/vault/` or `cmd/chap-host/` still gets `go vet` for `GOOS=windows` and `GOOS=darwin` from the Linux job. To run the Windows and macOS jobs on a branch before it merges, run `gh workflow run ci -r <branch>`. To run the keyring jobs on a branch, run `gh workflow run keyring -r <branch>`.
 
-A new push cancels the older run for the same branch (`concurrency`). Job time limits (10 and 15 minutes) stop a hung job.
+A new push cancels the older run for the same branch (`concurrency`), for pull requests only. Job time limits stop a hung job.
+
+### The real keychain and keyring tests
+
+The unit tests of the vault use fake `security` and `secret-tool` programs. The tests in `internal/vault/*_integration_test.go` run the key wrappers on the real tools. They are **opt-in**, and they are skipped, with a message that names the variable, unless it is set to `1`:
+
+| Variable | System | Test | What it uses |
+| --- | --- | --- | --- |
+| `CHAPERONE_TEST_REAL_KEYCHAIN` | macOS | `TestRealKeychainMacOS` | `/usr/bin/security` and the **default keychain** of the user (the wrapper cannot name another). CI makes a throwaway keychain the default first. |
+| `CHAPERONE_TEST_REAL_SECRET_SERVICE` | Linux | `TestRealSecretServiceLinux` | `secret-tool` and the Secret Service on the current session bus. CI starts a private bus and an unlocked GNOME Keyring first. |
+| `VAULT_TEST_REAL_TTY` | macOS, Linux | `TestTerminalPassphraseOnARealTerminal` | `/dev/tty`; run it inside a pseudo-terminal, see the comment on the test |
+
+Each test deletes the items it made, and compares keys without printing them. Do not run the first two on a machine whose keychain or keyring you care about unless you accept a test item that stays behind if the run is killed (service `chaperone-vault`, label `chaperone-vault-key`). To run them the way CI does, compile once with `go test -c ./internal/vault`; the steps in `keyring.yml` show the rest. `TestRealKeyringScenariosOnFakeTools` runs the same scenarios on the fake tools in every ordinary test run.
+
+### Release builds
+
+`scripts/build.sh` is the CI build (two targets, amd64 only). The release archives are made by `release.yml`, which has its own loop with the same `-trimpath` and the same version and commit linker flags. Change the flags in both places. How to cut a release is in [releasing.md](releasing.md).
 
 ## Pull requests
 

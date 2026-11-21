@@ -10,35 +10,38 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/kit"
+	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
 	"github.com/joshua-noel/chaperone/internal/redact"
 )
 
-// The op kinds.
+// The op kinds. The names, the classes and every other fact about an op are
+// declared once, in [linearspec]; this file holds what the adapters do.
 const (
-	OpList    = "intake.list"
-	OpComment = "intake.comment"
-	OpMove    = "intake.move"
-	OpStates  = "intake.states"
+	OpList    = linearspec.NameList
+	OpComment = linearspec.NameComment
+	OpMove    = linearspec.NameMove
+	OpStates  = linearspec.NameStates
 )
 
 // Ops lists the op kinds of the connector.
-var Ops = []string{OpList, OpComment, OpMove, OpStates}
+var Ops = linearspec.Served.Names()
 
 // AdapterName is the target adapter every intake op names.
-const AdapterName = "linear"
+const AdapterName = linearspec.Adapter
 
 // Limits of what a caller may send.
 const (
 	// MaxCommentBytes is the longest comment. "Picked up by the orchestrator" and a few
 	// links need a fraction of it.
-	MaxCommentBytes = 4000
+	MaxCommentBytes = linearspec.MaxCommentBytes
 )
 
 var (
-	teamRefRE  = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
-	identRefRE = regexp.MustCompile(`^([A-Z][A-Z0-9]{1,9})-[1-9][0-9]{0,8}$`)
+	teamRefRE  = regexp.MustCompile(linearspec.TeamRefPattern)
+	identRefRE = regexp.MustCompile(linearspec.IssueRefPattern)
 )
 
 // PolicyFunc returns the project's `linear:` block, or nil when the project
@@ -75,18 +78,30 @@ func (c Config) check() error {
 	return nil
 }
 
-// Adapters returns the adapters by op kind.
+// Adapters returns the adapters by op kind: the four operator-board intake ops
+// and the generic issue ops. [kit.Bind] refuses to return them when an
+// operation of [linearspec.Served] has no adapter here, or an adapter here has
+// no declaration.
+//
+// issue.comment is one name for two connectors (GitHub's, for the error
+// watcher, and Linear's). The adapter returned for it is Linear's side only;
+// the caller wires the two behind one dispatcher that picks by target.adapter
+// (ops.ByTarget), as cmd/chapd does.
 func Adapters(cfg Config) (map[string]ops.Adapter, error) {
 	if err := cfg.check(); err != nil {
 		return nil, err
 	}
 	b := base{cfg: cfg}
-	return map[string]ops.Adapter{
+	set := map[string]ops.Adapter{
 		OpList:    &listAdapter{base: b},
 		OpComment: &commentAdapter{base: b},
 		OpMove:    &moveAdapter{base: b},
 		OpStates:  &statesAdapter{base: b},
-	}, nil
+	}
+	for op, ad := range issueAdapters(b) {
+		set[op] = ad
+	}
+	return kit.Bind(linearspec.Served, set)
 }
 
 type base struct{ cfg Config }
@@ -123,7 +138,7 @@ func (b base) policy(r *ops.Request) (*policy.Linear, error) {
 
 // BoardRef is the target ref of intake.list and intake.states that means "the
 // team of the project's linear: block", for a caller that does not know the key.
-const BoardRef = "board"
+const BoardRef = linearspec.BoardRef
 
 // teamTarget checks a target that names a team (intake.list, intake.states):
 // the project's team key, or [BoardRef].
@@ -291,28 +306,4 @@ func writeErr(err error, res map[string]any) (ops.Outcome, error) {
 		return failed(err, res), nil
 	}
 	return ops.Outcome{Result: res}, err
-}
-
-// ---- text of results -------------------------------------------------------
-
-// clean shortens s to max bytes on a rune boundary and removes control and
-// format characters, keeping tabs and newlines. It is how Linear's text (which
-// is not ours to trust) is put into a result.
-func clean(s string, max int) string {
-	s = strings.ToValidUTF8(s, "")
-	s = strings.Map(func(r rune) rune {
-		switch {
-		case r == '\t' || r == '\n':
-			return r
-		case r == '\r':
-			return -1
-		case r < ' ' || r == 0x7f || unicode.Is(unicode.C, r):
-			return ' '
-		}
-		return r
-	}, s)
-	if len(s) <= max {
-		return s
-	}
-	return strings.ToValidUTF8(s[:max-3], "") + "..."
 }

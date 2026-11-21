@@ -1,0 +1,8 @@
+$ chap issue link AGT-12
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: --url is required
+usage: chap issue link <AGT-12> --url <u> [--title <t>] [--dry-run]

@@ -1,0 +1,37 @@
+# Sentry: the ops Chaperone has built. The full research profile (the ops not built yet, the
+# presets) belongs to the connector standard, a design document outside this repository.
+#
+# Tied to api/manual.yaml, the baseline pack and the `chap` usage by the C19 test
+# (internal/policy/profile_test.go).
+#
+# All six ops are for the orchestrator token only: a custom key cannot hold an errors.* op
+# (internal/ops/keyceiling.go), and no run profile lists one. All are OFF in the baseline. Each
+# refuses a project whose policy file has no valid `sentry:` block, and acts on the Sentry projects
+# that block lists (`project_in_policy_list`) and no others. The block is the policy: the server
+# (`base_url`, https, an exact host), the organisation, the project slugs and the members
+# errors.assign may use. A mistake in the block turns off these ops only.
+#
+# The token is one vault secret (`sentry-auth-token`). Scopes: event:read for the reads,
+# event:write for the writes, nothing else.
+#
+# Not built: deleting or merging an issue, ignoring or archiving one, creating one, unassigning,
+# deleting a note, anything in releases, alerts, members, teams or the organisation.
+profile_version: 1
+connector: sentry
+standard: v1.1
+
+ops:
+  - {name: errors.list,      class: routine, reversibility: reversible,  surface: op, unit: project, enabled_default: false, chap: errors list, orchestrator_only: true, needs_policy_block: sentry,
+     conditions: [orchestrator_only, project_in_policy_list, closed_filter_words, bulk_cap_page, exact_https_host, no_redirect, secret_text_withheld, rate]}
+  - {name: errors.get,       class: routine, reversibility: reversible,  surface: op, unit: project, enabled_default: false, chap: errors get, orchestrator_only: true, needs_policy_block: sentry,
+     conditions: [orchestrator_only, project_in_policy_list, field_allow_list, no_request_data, no_user_data, no_local_variables, stack_capped, exact_https_host, no_redirect, secret_text_withheld, rate]}
+  - {name: errors.resolve,   class: routine, reversibility: reversible,  surface: op, unit: project, enabled_default: false, chap: errors resolve, orchestrator_only: true, needs_policy_block: sentry,
+     conditions: [orchestrator_only, project_in_policy_list, project_present_now, status_allows_change, no_op_sends_nothing, exact_https_host, no_redirect, rate]}
+  - {name: errors.unresolve, class: routine, reversibility: reversible,  surface: op, unit: project, enabled_default: false, chap: errors unresolve, orchestrator_only: true, needs_policy_block: sentry,
+     conditions: [orchestrator_only, project_in_policy_list, project_present_now, status_allows_change, no_op_sends_nothing, exact_https_host, no_redirect, rate]}
+  - {name: errors.assign,    class: routine, reversibility: compensable, surface: op, unit: project, enabled_default: false, chap: errors assign, orchestrator_only: true, needs_policy_block: sentry,
+     conditions: [orchestrator_only, project_in_policy_list, project_present_now, assignee_in_policy_list, no_op_sends_nothing, exact_https_host, no_redirect, rate]}
+  - {name: errors.comment,   class: routine, reversibility: compensable, surface: op, unit: project, enabled_default: false, chap: errors comment, orchestrator_only: true, needs_policy_block: sentry,
+     conditions: [orchestrator_only, project_in_policy_list, project_present_now, note_plain_text, no_mention, content_guard_secret, exact_https_host, no_redirect, rate]}
+
+standard_not_built: []

@@ -266,48 +266,32 @@ func (l *listFlag) Set(v string) error {
 	return nil
 }
 
+// opCommands are the op commands that are written by hand. The commands of
+// the operations the connectors declare with the kit are built from their
+// declarations (kitcmd.go), except the ones whose declaration says
+// CLI.Custom: pr open, pr merge, issue open, issue comment and issue label, here.
 func opCommands() []*command {
 	return []*command{
 		{path: "pr open", usage: "chap pr open --title <t> [--body <b> | --body-file <f>] [--draft] [--branch <b>] [--base <b>] [--repo owner/name]",
 			summary: "open a pull request from the run's branch", run: cmdPrOpen},
-		{path: "pr update", usage: "chap pr update <n> --expected-head <sha> [--title <t>] [--body <b> | --body-file <f>] [--update-branch] [--repo owner/name]",
-			summary: "update a PR's title or body, or its branch", run: cmdPrUpdate},
 		{path: "pr merge", usage: "chap pr merge <n> --head <sha> [--base <b>] [--repo owner/name] [--dry-run]",
 			summary: "merge a PR when verify is green on its exact head", run: cmdPrMerge},
-		{path: "pr view", usage: "chap pr view <n> [--repo owner/name] [--dry-run]",
-			summary: "read a PR's title, body, state, head, base, mergeability (orchestrator only)", run: cmdPrView},
-		{path: "pr diff", usage: "chap pr diff <n> [--expected-head <sha>] [--repo owner/name] [--dry-run]",
-			summary: "read a PR's unified diff, capped at 256 KiB (orchestrator only)", run: cmdPrDiff},
-		{path: "pr checks", usage: "chap pr checks <n> [--expected-head <sha>] [--repo owner/name] [--dry-run]",
-			summary: "read the check runs on a PR's head commit (orchestrator only)", run: cmdPrChecks},
-		{path: "pr files", usage: "chap pr files <n> [--page <p>] [--per-page <n>] [--expected-head <sha>] [--repo owner/name] [--dry-run]",
-			summary: "list a PR's changed files, one page at a time (orchestrator only)", run: cmdPrFiles},
-		{path: "ci report", usage: "chap ci report <run-id> [--dry-run]",
-			summary: "post a finished ci run's result to GitHub as a check run (orchestrator only)", run: cmdCiReport},
 		{path: "issue open", usage: "chap issue open --title <t> --label source:error-watcher [--label <l>] [--body <b> | --body-file <f>] [--repo owner/name]",
 			summary: "open an issue labelled source:error-watcher", run: cmdIssueOpen},
-		{path: "issue comment", usage: "chap issue comment <n> [--body <b> | --body-file <f>] [--repo owner/name]",
-			summary: "comment on an issue labelled source:error-watcher", run: cmdIssueComment},
-		{path: "issue reopen", usage: "chap issue reopen <n> [--repo owner/name]",
-			summary: "reopen an issue labelled source:error-watcher", run: cmdIssueReopen},
+		{path: "issue comment", usage: "chap issue comment <n|AGT-12> [--body <b> | --body-file <f>] [--repo owner/name]",
+			summary: "comment on an issue (GitHub: labelled source:error-watcher; Linear: policy)", run: cmdIssueComment},
+		{path: "issue label", usage: "chap issue label <AGT-12> --add <l> | --remove <l> [--dry-run]",
+			summary: "add or remove one label from the policy's list", run: cmdIssueLabel},
 		{path: "health", usage: "chap health",
 			summary: "read the pilot's readiness status", run: cmdHealth},
 		{path: "logs", usage: "chap logs <web|worker|db|tunnel> [--lines <n>]",
 			summary: "read recent log lines from a fixed source", run: cmdLogs},
 		{path: "deploy", usage: "chap deploy <sha>",
 			summary: "deploy a commit to the pilot (needs one approval)", run: cmdDeploy},
-		{path: "mail send", usage: "chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f>",
+		{path: "mail send", usage: "chap mail send --from <account> --to <a> [--to <b>] [--cc <c>] [--bcc <d>] --subject <s> --body-file <f> [--via resend]",
 			summary: "send one email to allowlisted recipients (needs approval)", run: cmdMailSend},
 		{path: "drive share", usage: "chap drive share <file-id> --from <account> --name <file-name> --to <a> [--to <b>] --role <r>",
 			summary: "share one Drive file with allowlisted recipients (needs approval)", run: cmdDriveShare},
-		{path: "intake list", usage: "chap intake list [--refresh] [--closed] [--team <key>]",
-			summary: "list the board items labelled for the orchestrator", run: cmdIntakeList},
-		{path: "intake comment", usage: "chap intake comment <SHOP-12> [--body <b> | --body-file <f>]",
-			summary: "comment on a labelled operator-board item", run: cmdIntakeComment},
-		{path: "intake move", usage: "chap intake move <SHOP-12> --state <name>",
-			summary: "move a labelled operator-board item to a listed state", run: cmdIntakeMove},
-		{path: "intake states", usage: "chap intake states [--team <key>]",
-			summary: "list the board team's states and which a move may use", run: cmdIntakeStates},
 		{path: "request op", usage: "chap request op <op> --reason <why> [--params <json>] [--target <adapter>:<ref>]",
 			summary: "create the approval card for an op", run: cmdRequestOp},
 		{path: "request net", usage: "chap request net <host> --reason <why>",
@@ -365,53 +349,6 @@ func cmdPrOpen(a *app, c *command, args []string) int {
 	return a.ask(&co, opReq{op: "pr.open", target: target{"github", r}, params: params})
 }
 
-func cmdPrUpdate(a *app, c *command, args []string) int {
-	var co common
-	var tf textFlags
-	var title, expected, repo string
-	var updateBranch bool
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	tf.register(fs)
-	fs.StringVar(&title, "title", "", "new title")
-	fs.StringVar(&expected, "expected-head", "", "the PR's head sha you last saw (required)")
-	fs.BoolVar(&updateBranch, "update-branch", false, "update the PR branch from its base")
-	fs.StringVar(&repo, "repo", "", "owner/name (default: from the git remote origin)")
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	n, err := parsePR(pos[0])
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	if !shaRE.MatchString(expected) {
-		return a.usageErr(c, "--expected-head must be a 40-character lowercase hex sha")
-	}
-	text, hasBody, err := tf.resolve(a)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	r, err := a.repoArg(repo)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	params := map[string]any{"number": n, "expected_head_sha": expected}
-	if title != "" {
-		params["title"] = title
-	}
-	if hasBody {
-		params["body"] = text
-	}
-	if updateBranch {
-		params["update_branch"] = true
-	}
-	return a.ask(&co, opReq{op: "pr.update", target: target{"github", fmt.Sprintf("%s#%d", r, n)}, params: params})
-}
-
 func cmdPrMerge(a *app, c *command, args []string) int {
 	var co common
 	var head, base, repo string
@@ -442,27 +379,6 @@ func cmdPrMerge(a *app, c *command, args []string) int {
 	}
 	params := map[string]any{"base": base, "head_sha": head, "method": "squash"}
 	return a.ask(&co, opReq{op: "pr.merge", target: target{"github", fmt.Sprintf("%s#%d", r, n)}, params: params, dryRun: dry})
-}
-
-// cmdCiReport asks chapd to state a finished `ci` run's result on GitHub. The request names the run and nothing else:
-// chapd reads the repository, the commit and the outcome from its own record of the run.
-func cmdCiReport(a *app, c *command, args []string) int {
-	var co common
-	var dry bool
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	fs.BoolVar(&dry, "dry-run", false, "check the run and the policy only; post nothing")
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	if !runIDRE.MatchString(pos[0]) {
-		return a.usageErr(c, "%q is not a run id like r-7f3a", pos[0])
-	}
-	return a.ask(&co, opReq{op: "ci.report", target: target{"runner", pos[0]}, params: map[string]any{"run_id": pos[0]}, dryRun: dry})
 }
 
 func cmdHealth(a *app, c *command, args []string) int {
@@ -524,10 +440,11 @@ func cmdDeploy(a *app, c *command, args []string) int {
 func cmdMailSend(a *app, c *command, args []string) int {
 	var co common
 	var to, cc, bcc listFlag
-	var subject, bodyFile, from string
+	var subject, bodyFile, from, via string
 	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
 	co.register(fs, a)
-	fs.StringVar(&from, "from", "", "the Google account that sends, the address chapd connect google status prints (required)")
+	fs.StringVar(&from, "from", "", "the sender: the Google account (the address chapd connect google status prints), or with --via resend one of the project's resend.senders (required)")
+	fs.StringVar(&via, "via", "google", "the service that sends: google (Gmail, the default) or resend")
 	fs.Var(&to, "to", "recipient (repeat, or comma-separated)")
 	fs.Var(&cc, "cc", "copy recipient (repeat, or comma-separated)")
 	fs.Var(&bcc, "bcc", "blind-copy recipient (repeat, or comma-separated)")
@@ -542,6 +459,9 @@ func cmdMailSend(a *app, c *command, args []string) int {
 	if from == "" || len(to) == 0 || subject == "" || bodyFile == "" {
 		return a.usageErr(c, "--from, --to, --subject and --body-file are required")
 	}
+	if via != "google" && via != "resend" {
+		return a.usageErr(c, "--via must be google (Gmail) or resend")
+	}
 	text, err := a.readText(bodyFile)
 	if err != nil {
 		return a.usageErr(c, "%v", err)
@@ -553,9 +473,10 @@ func cmdMailSend(a *app, c *command, args []string) int {
 	if len(bcc) > 0 {
 		params["bcc"] = []string(bcc)
 	}
-	// The target is the sending account: the card shows it, and chapd refuses a
-	// request for an account it is not connected as.
-	return a.ask(&co, opReq{op: "mail.send", target: target{"google", from}, params: params})
+	// The target adapter picks the service (one name, two connectors) and the ref is the
+	// sender: the card shows it, and chapd refuses a sender it is not connected as or that
+	// the policy does not list.
+	return a.ask(&co, opReq{op: "mail.send", target: target{via, from}, params: params})
 }
 
 func cmdDriveShare(a *app, c *command, args []string) int {

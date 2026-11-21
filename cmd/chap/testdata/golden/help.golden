@@ -9,21 +9,40 @@ commands:
   logo               show the CHAPERONE banner
   mcp                serve the ops as MCP tools over stdio (Claude Code, Codex, Cursor)
   version
+  agent enrol        enrol this agent: print a code for its owner to type at the console, then keep a request-only key in --out (no token needed)
   approve list       list your own approval requests (approving is done in the console)
   ci report          post a finished ci run's result to GitHub as a check run (orchestrator only)
   deploy             deploy a commit to the pilot (needs one approval)
   dev-token          mint an interim run token into a file (orchestrator only)
   doctor             check the server's Chaperone install (from a normal, not elevated, terminal)
   drive share        share one Drive file with allowlisted recipients (needs approval)
+  errors assign      assign a Sentry issue to a member the policy lists
+  errors comment     add a note to a Sentry issue
+  errors get         read one Sentry issue and its latest event
+  errors list        list issues of an allowed Sentry project
+  errors resolve     resolve one Sentry issue
+  errors unresolve   reopen one resolved Sentry issue
   git setup          route git's GitHub traffic through chapd's git proxy
   health             read the pilot's readiness status
   intake comment     comment on a labelled operator-board item
   intake list        list the board items labelled for the orchestrator
   intake move        move a labelled operator-board item to a listed state
   intake states      list the board team's states and which a move may use
-  issue comment      comment on an issue labelled source:error-watcher
+  issue comment      comment on an issue (GitHub: labelled source:error-watcher; Linear: policy)
+  issue get          read one Linear issue of the project's issue team
+  issue label        add or remove one label from the policy's list
+  issue link         attach a link from a listed host to a Linear issue
+  issue list         list Linear issues of the issue team, one page at a time
+  issue move         move a Linear issue to a state the policy lists
   issue open         open an issue labelled source:error-watcher
   issue reopen       reopen an issue labelled source:error-watcher
+  key claim          take a granted key into --out, once (only the caller that asked for it)
+  key create         build a key for a script or an agent: a card you sign in the console, then the key goes to --out (orchestrator only)
+  key extend         ask your owner to make this key last longer: one tap and a Hello for them; it adds time and no access (an agent's key only)
+  key list           list the keys you own: holder, state, ops, repositories, expiry, uses (orchestrator only)
+  key request        ask your owner for a key: what, how long and why; wait, and the key replaces the one in CHAP_KEY_FILE (an agent's key only)
+  key revoke         revoke a key you own at once; it does not stop the agent, only its owner does that at the console (orchestrator only)
+  key show           show the key this process holds: what it can do and until when (a key only)
   ledger verify      walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only)
   logs               read recent log lines from a fixed source
   mail send          send one email to allowlisted recipients (needs approval)
@@ -44,6 +63,6 @@ commands:
   vault status       vault state: names and counts, never a value (orchestrator only)
 
 commands that call chapd take --json (the server's JSON, nothing else on stdout).
-token: CHAP_RUN_TOKEN, else the orchestrator token file. chapd: CHAP_URL (default http://127.0.0.1:55398).
+token: CHAP_RUN_TOKEN, else the key file CHAP_KEY_FILE, else the orchestrator token file. chapd: CHAP_URL (default http://127.0.0.1:55398).
 exit: 0 ok, 2 usage, 3 denied, 4 auth, 5 op not ok, 6 chapd unavailable, 7 pending, 8 not found or conflict, 1 other.
 --- stderr

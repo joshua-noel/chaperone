@@ -1,0 +1,250 @@
+package @{.Name}@
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"unicode"
+
+	"@{.Module}@/internal/connectors/@{.Name}@/@{.Name}@spec"
+	"@{.Module}@/internal/connectors/kit"
+	"@{.Module}@/internal/ops"
+	"@{.Module}@/internal/redact"
+)
+
+// The op kinds. The names, the classes and every other fact about an op are
+// declared once, in [@{.Name}@spec]; this file holds what the adapters do.
+const (
+	OpShow = @{.Name}@spec.NameShow
+)
+
+// Ops lists the op kinds of the connector.
+var Ops = @{.Name}@spec.Connector.Names()
+
+// Caps of the text a result carries. The service's text is not ours to trust.
+const (
+	maxID    = 40
+	maxTitle = 200
+	maxBody  = 2000
+
+	withheld = "[withheld: the text looks like a secret]"
+)
+
+var refRE = regexp.MustCompile(@{.Name}@spec.RefPattern)
+
+// Redactor is the part of *redact.Registry the adapters use.
+type Redactor interface {
+	Redact(s string) (string, redact.Result)
+}
+
+var _ Redactor = (*redact.Registry)(nil)
+
+// Config builds the adapters.
+type Config struct {
+	Client *Client
+	// Redactor is how an adapter tells that service text looks like a secret.
+	// Set it in chapd (the registry of the process); without it nothing is
+	// withheld.
+	Redactor Redactor
+}
+
+// Adapters returns the adapters by op kind. [kit.Bind] refuses to return them
+// when an operation of [@{.Name}@spec.Connector] has no adapter here, or an adapter
+// here has no declaration.
+func Adapters(cfg Config) (map[string]ops.Adapter, error) {
+	if cfg.Client == nil {
+		return nil, errors.New("@{.Name}@: the adapters need a client")
+	}
+	b := base{cfg: cfg}
+	return kit.Bind(@{.Name}@spec.Connector, map[string]ops.Adapter{
+		OpShow: &showAdapter{base: b},
+	})
+}
+
+type base struct{ cfg Config }
+
+// ---- refusals ---------------------------------------------------------------
+//
+// Return a *ops.Refusal with a cause code from internal/ops/denial.go for a
+// request that is not allowed. A plain error means "the service could not be
+// asked", and chapd fails closed.
+
+func paramsInvalid(format string, a ...any) error {
+	return &ops.Refusal{Code: ops.CodeParamsInvalid, Why: clip(fmt.Sprintf(format, a...), 400)}
+}
+
+func policyRefused(format string, a ...any) error {
+	return &ops.Refusal{Code: ops.CodePolicyRefused, Why: clip(fmt.Sprintf(format, a...), 400)}
+}
+
+// caller refuses everything but the orchestrator token: no run profile lists
+// these ops, and the adapter does not rely on that alone.
+func (b base) caller(r *ops.Request) error {
+	if r.Caller == nil || r.Caller.Kind != ops.KindOrchestrator {
+		return &ops.Refusal{Code: ops.CodePolicyRefused, Surface: "scope",
+			Why: r.Op + " is for the orchestrator token only, never for a run"}
+	}
+	return nil
+}
+
+// target checks the ref and returns the item id. The declaration's pattern is
+// only a convenience for the command line: this is the check.
+func (b base) target(r *ops.Request) (string, error) {
+	if r.Target.Adapter != @{.Name}@spec.Adapter {
+		return "", paramsInvalid("target.adapter must be %s", @{.Name}@spec.Adapter)
+	}
+	if !refRE.MatchString(r.Target.Ref) {
+		return "", paramsInvalid("target.ref must be an item id such as item-12")
+	}
+	return r.Target.Ref, nil
+}
+
+// onlyParams refuses a param the op does not declare. Pass it the declared
+// names, so the allowed keys and the declaration are the same list.
+func onlyParams(p map[string]any, allowed ...string) error {
+	for k := range p {
+		ok := false
+		for _, a := range allowed {
+			ok = ok || k == a
+		}
+		if !ok {
+			return paramsInvalid("unknown param %q; this op takes %s", clip(k, 40), paramList(allowed))
+		}
+	}
+	return nil
+}
+
+func paramList(allowed []string) string {
+	if len(allowed) == 0 {
+		return "no params"
+	}
+	return strings.Join(allowed, ", ")
+}
+
+func paramBool(p map[string]any, key string) (bool, error) {
+	v, ok := p[key]
+	if !ok {
+		return false, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, paramsInvalid("param %s must be true or false", key)
+	}
+	return b, nil
+}
+
+// ---- text of results --------------------------------------------------------
+
+// clip shortens s to n bytes on a rune boundary and replaces control
+// characters, for text that goes into an error or a refusal.
+func clip(s string, n int) string {
+	s = strings.Map(func(r rune) rune {
+		if r < ' ' || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n-3], "") + "..."
+}
+
+// clean shortens s to max bytes on a rune boundary and replaces control and
+// format characters (bidi overrides, zero-width joiners), keeping tabs and
+// newlines. It is how the service's text is put into a result.
+func clean(s string, max int) string {
+	s = strings.ToValidUTF8(s, "")
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\n':
+			return r
+		case r == '\r':
+			return -1
+		case r < ' ' || r == 0x7f || unicode.Is(unicode.C, r):
+			return ' '
+		}
+		return r
+	}, s)
+	if len(s) <= max {
+		return s
+	}
+	return strings.ToValidUTF8(s[:max-3], "") + "..."
+}
+
+// looksSecret reports whether text would trip the redaction check. A result
+// that holds such text is withheld whole.
+func (b base) looksSecret(texts ...string) bool {
+	if b.cfg.Redactor == nil {
+		return false
+	}
+	_, res := b.cfg.Redactor.Redact(strings.Join(texts, "\n"))
+	return res.Blocked()
+}
+
+// failed is the outcome of a read that did not work: nothing was changed, so
+// the caller may ask again. A write whose answer is lost is not `failed` but
+// `unconfirmed`; see docs/connectors.md.
+func failed(err error) ops.Outcome {
+	text := err.Error()
+	var ref *ops.Refusal
+	if errors.As(err, &ref) {
+		text = ref.Why
+	}
+	return ops.Outcome{Failed: true, Result: map[string]any{"error": clip(text, 300)}}
+}
+
+// ---- @{.Name}@.show --------------------------------------------------------------
+
+type showAdapter struct{ base }
+
+var _ ops.Adapter = (*showAdapter)(nil)
+
+type showParams struct {
+	id     string
+	detail bool
+}
+
+// parse is the one place a request is validated. Check and Execute both call
+// it, so a request that Check refuses is refused again by Execute.
+func (a *showAdapter) parse(r *ops.Request) (showParams, error) {
+	var p showParams
+	if err := a.caller(r); err != nil {
+		return p, err
+	}
+	id, err := a.target(r)
+	if err != nil {
+		return p, err
+	}
+	if err := onlyParams(r.Params, @{.Name}@spec.Show.ParamNames()...); err != nil {
+		return p, err
+	}
+	detail, err := paramBool(r.Params, "detail")
+	if err != nil {
+		return p, err
+	}
+	return showParams{id: id, detail: detail}, nil
+}
+
+// ---- written by hand from here: Check and Execute of @{.Name}@.show ----------------
+//
+// The example refuses every valid request until you write these two methods.
+// Check validates and reads at most; it changes nothing and runs many times.
+// Execute does the work and may be called again with the same execution id.
+// See docs/write-a-connector.md.
+
+func (a *showAdapter) Check(_ context.Context, r *ops.Request) (ops.CheckResult, error) {
+	if _, err := a.parse(r); err != nil {
+		return ops.CheckResult{}, err
+	}
+	return ops.CheckResult{}, policyRefused("%s is not implemented yet", r.Op)
+}
+
+func (a *showAdapter) Execute(_ context.Context, r *ops.Request) (ops.Outcome, error) {
+	if _, err := a.parse(r); err != nil {
+		return failed(err), nil
+	}
+	return failed(policyRefused("%s is not implemented yet", r.Op)), nil
+}

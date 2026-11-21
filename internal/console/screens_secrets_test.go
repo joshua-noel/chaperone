@@ -93,7 +93,7 @@ func TestSecretImportNeedsAFreshHelloApproval(t *testing.T) {
 	// The card, rendered by the server, labelled critical, on the Secrets page.
 	page := get(t, b, "/secrets")
 	mustHave(t, "card", page, "waiting for your approval", `data-approval="`+id+`"`, "approval-critical", "CRITICAL", "store a secret named gh-app-key",
-		"Approve with Windows Hello", `/approvals/approvals.js`, "Cancel and discard the value")
+		"Approve with your passkey", `/approvals/approvals.js`, "Cancel and discard the value")
 	mustNotHave(t, "card", page, canaryA)
 	mustNotHave(t, "card", page, `hx-post="/secrets/`+id+`/commit"`) // not approved yet: no way to complete it
 

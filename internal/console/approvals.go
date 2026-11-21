@@ -2,6 +2,7 @@ package console
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -22,7 +23,7 @@ import (
 )
 
 // The Approvals screen (ticket L1-12, ADR-004 sections 1 and 3): the card as the
-// server rendered it, "Approve with Windows Hello" and "Deny with a reason".
+// server rendered it, "Approve with your passkey" and "Deny with a reason".
 //
 // The console session only lets the operator look. Approving needs a fresh
 // WebAuthn assertion with user verification over the approval challenge, made
@@ -163,10 +164,15 @@ type approvalsView struct {
 }
 
 func requesterLabel(a *approvals.Approval) string {
-	if a.RequesterKind == "orchestrator" {
+	switch a.RequesterKind {
+	case "orchestrator":
 		return "orchestrator " + a.RequesterKey
+	case "key":
+		return "key " + a.RequesterKey
+	case "run":
+		return "run " + a.RunID
 	}
-	return "run " + a.RunID
+	return "unknown requester " + a.RequesterKey
 }
 
 // ago says how long ago t was, in words a person reads at a glance.
@@ -358,6 +364,9 @@ func (c *Console) approvalActor(r *http.Request) (approvals.Actor, bool) {
 		}
 		if strings.HasPrefix(tok, "chap_orch_") {
 			return approvals.Actor{Kind: approvals.ActorOrchestrator}, true
+		}
+		if strings.HasPrefix(tok, "chap_key_") {
+			return approvals.Actor{Kind: approvals.ActorKey}, true
 		}
 		return approvals.Actor{Kind: approvals.ActorRun}, true
 	}
@@ -594,6 +603,10 @@ func (c *Console) VerifyAssertion(ctx context.Context, in approvals.AssertionInp
 	if found == nil {
 		return approvals.AssertionEvidence{}, assertionRefused(ReasonCredential, errors.New("credential is not this approver's at this origin"))
 	}
+	// The setting may have been narrowed since this credential was made (see loginFinish).
+	if !c.attachmentAllowed(found.WA.Authenticator.Attachment) {
+		return approvals.AssertionEvidence{}, assertionRefused(ReasonAttachment, errors.New("credential's authenticator kind is not allowed by the authenticators setting"))
+	}
 	wa := rp.wa
 	if cd := parsed.Response.CollectedClientData; cd.CrossOrigin {
 		// Made in a frame. Accepted only when this console lists frame ancestors and the authenticator-signed topOrigin
@@ -618,5 +631,7 @@ func (c *Console) VerifyAssertion(ctx context.Context, in approvals.AssertionInp
 	if rp.RPID == LocalOrigin.RPID {
 		channel = "pc"
 	}
-	return approvals.AssertionEvidence{Channel: channel, CredentialID: found.WA.ID, RPID: rp.RPID, Origin: rp.URL}, nil
+	f := authnFacts(Event{}, updated)
+	return approvals.AssertionEvidence{Channel: channel, CredentialID: found.WA.ID, RPID: rp.RPID, Origin: rp.URL,
+		Attachment: cmp.Or(f.Attachment, "unreported"), Transports: f.Transports, BackupEligible: f.BackupEligible}, nil
 }

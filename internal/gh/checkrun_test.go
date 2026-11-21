@@ -90,3 +90,39 @@ func TestCreateCheckRunRefusals(t *testing.T) {
 		t.Errorf("an unknown commit: %v", err)
 	}
 }
+
+// A check run keeps the external_id it was created with, and a list returns it. A run created without one has none,
+// and its request has no external_id field.
+func TestCheckRunExternalID(t *testing.T) {
+	f := newFixture(t)
+	f.in.Granted["checks"] = "write"
+	head := f.r.Commit(base)
+	with, err := f.c.CreateCheckRun(ctx, f.mint(t, gh.PermsReportCI()), f.repo, gh.CheckRunRequest{Name: "local-ci", HeadSHA: head, Conclusion: "success", ExternalID: "x-abc123"})
+	if err != nil || with.ExternalID != "x-abc123" {
+		t.Fatalf("create: %v %+v", err, with)
+	}
+	without, err := f.c.CreateCheckRun(ctx, f.mint(t, gh.PermsReportCI()), f.repo, gh.CheckRunRequest{Name: "local-ci", HeadSHA: head, Conclusion: "success"})
+	if err != nil || without.ExternalID != "" {
+		t.Fatalf("create without: %v %+v", err, without)
+	}
+	runs, err := f.c.ListCheckRuns(ctx, f.mint(t, gh.PermsEvaluateMerge()), f.repo, head, gh.CheckRunQuery{CheckName: "local-ci", AppID: ghtest.OwnAppID, All: true})
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("list: %v %+v", err, runs)
+	}
+	got := map[int64]string{}
+	for _, r := range runs {
+		got[r.ID] = r.ExternalID
+	}
+	if got[with.ID] != "x-abc123" || got[without.ID] != "" {
+		t.Errorf("external ids = %v", got)
+	}
+	var posts []string
+	for _, r := range f.s.Requests() {
+		if r.Method == "POST" && strings.HasSuffix(r.Path, "/check-runs") {
+			posts = append(posts, r.Body)
+		}
+	}
+	if len(posts) != 2 || !strings.Contains(posts[0], `"external_id":"x-abc123"`) || strings.Contains(posts[1], "external_id") {
+		t.Errorf("request bodies = %v", posts)
+	}
+}

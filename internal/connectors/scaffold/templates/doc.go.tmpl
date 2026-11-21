@@ -1,0 +1,22 @@
+// Package @{.Name}@ is the @{.Name}@ connector: it lets Chaperone act on one
+// service for an agent, so the agent never holds a credential for it.
+//
+// This package was written by `go run ./internal/connectors/scaffold @{.Name}@`
+// and is not registered anywhere: chapd does not build its adapters, the
+// catalog does not list its operations and the baseline does not name them.
+// docs/write-a-connector.md says what to write and which steps are done by
+// hand.
+//
+// What is where:
+//
+//   - @{.Name}@spec/spec.go declares the operations once (name, class,
+//     reversibility, usage, rate, target, params). Replace the example.
+//   - adapter.go holds the adapters: Check and Execute of each operation. The
+//     two of the example refuse until they are written.
+//   - client.go is a small HTTP client that sends the credential in one header
+//     and never puts it, or the service's error text, in an error.
+//   - @{.Name}@test/server.go is a fake of the service for the tests.
+//   - conformance_test.go runs the shared connector suite
+//     (internal/connectors/conformance) against the real adapters and the
+//     fake.
+package @{.Name}@

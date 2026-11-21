@@ -25,6 +25,8 @@ type CheckRun struct {
 	Conclusion string // success, failure, cancelled, skipped, ...; empty until completed
 	AppID      int64  // the App that created the run; 0 if GitHub omitted it
 	HTMLURL    string
+	// ExternalID is the reference the creator gave the run (ci.report sets the execution id); empty if none.
+	ExternalID string
 	// StartedAt is when the run started; zero if GitHub omitted it. With ID it
 	// orders runs of one name on one commit: the latest run is the one that counts.
 	StartedAt time.Time
@@ -73,6 +75,7 @@ func (c *Client) ListCheckRuns(ctx context.Context, tok *Token, repo Repo, sha s
 			Status     string    `json:"status"`
 			Conclusion string    `json:"conclusion"`
 			HTMLURL    string    `json:"html_url"`
+			ExternalID string    `json:"external_id"`
 			StartedAt  time.Time `json:"started_at"`
 			App        *struct {
 				ID int64 `json:"id"`
@@ -87,7 +90,7 @@ func (c *Client) ListCheckRuns(ctx context.Context, tok *Token, repo Repo, sha s
 	}
 	runs := make([]CheckRun, len(out.CheckRuns))
 	for i, r := range out.CheckRuns {
-		runs[i] = CheckRun{ID: r.ID, Name: r.Name, HeadSHA: r.HeadSHA, Status: r.Status, Conclusion: r.Conclusion, HTMLURL: r.HTMLURL, StartedAt: r.StartedAt}
+		runs[i] = CheckRun{ID: r.ID, Name: r.Name, HeadSHA: r.HeadSHA, Status: r.Status, Conclusion: r.Conclusion, HTMLURL: r.HTMLURL, ExternalID: r.ExternalID, StartedAt: r.StartedAt}
 		if r.App != nil {
 			runs[i].AppID = r.App.ID
 		}
@@ -103,6 +106,9 @@ type CheckRunRequest struct {
 	Title      string // output title, at most 200 characters
 	Summary    string // output summary (Markdown), at most 4000 characters
 	DetailsURL string // optional
+	// ExternalID is sent as `external_id` when it is not empty: a reference of the caller's own, which a later
+	// ListCheckRuns returns, so a caller can tell whether it posted this run already.
+	ExternalID string
 }
 
 // CreateCheckRun posts a finished check run on a commit (POST /check-runs, status completed). Only a GitHub App can
@@ -139,6 +145,9 @@ func (c *Client) CreateCheckRun(ctx context.Context, tok *Token, repo Repo, in C
 	if in.DetailsURL != "" {
 		body["details_url"] = in.DetailsURL
 	}
+	if in.ExternalID != "" {
+		body["external_id"] = in.ExternalID
+	}
 	var out struct {
 		ID         int64  `json:"id"`
 		Name       string `json:"name"`
@@ -146,6 +155,7 @@ func (c *Client) CreateCheckRun(ctx context.Context, tok *Token, repo Repo, in C
 		Status     string `json:"status"`
 		Conclusion string `json:"conclusion"`
 		HTMLURL    string `json:"html_url"`
+		ExternalID string `json:"external_id"`
 		App        *struct {
 			ID int64 `json:"id"`
 		} `json:"app"`
@@ -156,7 +166,7 @@ func (c *Client) CreateCheckRun(ctx context.Context, tok *Token, repo Repo, in C
 	if out.ID == 0 {
 		return nil, errors.New("gh: create check run answered without an id")
 	}
-	run := &CheckRun{ID: out.ID, Name: out.Name, HeadSHA: out.HeadSHA, Status: out.Status, Conclusion: out.Conclusion, HTMLURL: out.HTMLURL}
+	run := &CheckRun{ID: out.ID, Name: out.Name, HeadSHA: out.HeadSHA, Status: out.Status, Conclusion: out.Conclusion, HTMLURL: out.HTMLURL, ExternalID: out.ExternalID}
 	if out.App != nil {
 		run.AppID = out.App.ID
 	}

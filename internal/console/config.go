@@ -23,6 +23,31 @@ type Origin struct {
 // LocalOrigin is the server console origin from ADR-004.
 var LocalOrigin = Origin{RPID: "localhost", URL: "http://localhost:55398"}
 
+// Authenticators says which kinds of authenticator may be enrolled, and may then sign in and approve. Every kind must
+// still do user verification (a PIN, a fingerprint or a face), user presence, discoverable credentials and the same
+// origin and relying-party checks; only the allowed attachment differs (ADR-004 amendment 15).
+type Authenticators string
+
+const (
+	// AuthenticatorsPlatform, the default, allows only an authenticator built into the device: Windows Hello, Touch ID,
+	// or the passkey of the phone the page is open on. It is what every install before amendment 15 enforced.
+	AuthenticatorsPlatform Authenticators = "platform"
+	// AuthenticatorsAny also allows a roaming authenticator: a hardware security key (with its PIN or fingerprint), or a
+	// phone passkey used through the browser's cross-device (hybrid) prompt. An opt-in per install.
+	AuthenticatorsAny Authenticators = "any"
+)
+
+// ParseAuthenticators reads the flag value. The empty string is the default, platform.
+func ParseAuthenticators(s string) (Authenticators, error) {
+	switch a := Authenticators(s); a {
+	case "", AuthenticatorsPlatform:
+		return AuthenticatorsPlatform, nil
+	case AuthenticatorsAny:
+		return a, nil
+	}
+	return "", fmt.Errorf("authenticators %q: use %q (built into the device, the default) or %q (also a security key or a phone)", s, AuthenticatorsPlatform, AuthenticatorsAny)
+}
+
 // Config configures [New].
 type Config struct {
 	// DB is the migrated state database (internal/store).
@@ -51,6 +76,9 @@ type Config struct {
 	// passkey made in a frame is refused. It never covers sign-in, enrolment, secret entry or any other page the guard
 	// does not list.
 	FrameAncestors []string
+	// Authenticators is which kinds of authenticator are allowed (default [AuthenticatorsPlatform]). A credential made
+	// as a kind that is not allowed any more (the setting was narrowed again) is refused at sign-in and approval too.
+	Authenticators Authenticators
 }
 
 // Event is an audit record. Name is one of the Event* constants.
@@ -73,6 +101,15 @@ type Event struct {
 	Origin       string
 	UserVerified bool
 	SignCount    uint32
+	// What kind of authenticator it was, so an audit can tell a built-in one from a security key or a phone. Set on
+	// console.enrolled and console.login (and on a refusal that knows the credential). Attachment is what the browser
+	// reported when the credential was made: "platform", "cross-platform", or "" when it did not say. Transports are the
+	// browser's list ("internal", "usb", "nfc", "ble", "hybrid"). BackupEligible is the credential's BE flag: true is a
+	// passkey that may be synced to an account (iCloud Keychain, Google Password Manager, a password manager), false is
+	// bound to this one device.
+	Attachment     string
+	Transports     []string
+	BackupEligible bool
 }
 
 // Event names.
@@ -85,6 +122,9 @@ const (
 func (c *Config) validate() error {
 	if c.DB == nil {
 		return errors.New("console: Config.DB is required")
+	}
+	if _, err := ParseAuthenticators(string(c.Authenticators)); err != nil {
+		return fmt.Errorf("console: Config.%w", err)
 	}
 	if len(c.Origins) == 0 {
 		return errors.New("console: Config.Origins is empty")

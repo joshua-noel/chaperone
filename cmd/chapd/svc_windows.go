@@ -50,11 +50,18 @@ func (s *service) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 	status <- svc.Status{State: svc.StartPending}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// Running is reported once the console's port is held (runDaemon takes it before anything else that matters), not
+	// before: a port another program holds then shows as a start that failed, not as a service that is up and gone.
+	listening := make(chan struct{})
+	cfg := s.cfg
+	cfg.onListening = func() { close(listening) }
 	done := make(chan error, 1)
-	go func() { done <- runDaemon(ctx, s.cfg) }()
-	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
+	go func() { done <- runDaemon(ctx, cfg) }()
 	for {
 		select {
+		case <-listening:
+			listening = nil
+			status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 		case err := <-done:
 			// chapd stopped by itself (bad config, listen failure): report a
 			// service-specific failure so the recovery action restarts it.

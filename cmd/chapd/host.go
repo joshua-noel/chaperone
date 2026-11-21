@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/joshua-noel/chaperone/internal/privfile"
 	"github.com/joshua-noel/chaperone/internal/runtoken"
 )
 
@@ -74,10 +75,10 @@ func hostKeygen(seedOut, tokenOut string) (public string, err error) {
 	return public, nil
 }
 
-// writeNew creates path with the content and the operator-only ACL. It refuses
-// an existing file.
+// writeNew creates path with the content and the operator-only ACL (privfile: a protected user-only access list given
+// when the file is created, mode 0600 on Unix). It refuses an existing file, and a link of any kind at the path.
 func writeNew(path, content string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := privfile.Create(path)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("%s already exists; keygen never overwrites", path)

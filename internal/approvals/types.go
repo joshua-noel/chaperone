@@ -61,6 +61,8 @@ func PhaseOneCatalog() StaticCatalog {
 		"drive.share":          ClassHigh,
 		"data.apply":           ClassHigh,
 		"pr.push.workflow":     ClassHigh,
+		"keys.issue":           ClassHigh, // ADR-008: every key is a card signed with Hello
+		"keys.extend":          ClassHigh, // ADR-008: making an agent's key last longer is a card signed with Hello
 		"secrets.write":        ClassCritical,
 		"repo.settings":        ClassCritical,
 		"host.scripts.refresh": ClassCritical,
@@ -95,8 +97,8 @@ const (
 type Approval struct {
 	ID            string
 	RequestID     string
-	RequesterKind string // "run" or "orchestrator"
-	RequesterKey  string // the run id or the orchestrator id
+	RequesterKind string // "run", "orchestrator" or "key"
+	RequesterKey  string // the run id, the orchestrator id or the key id
 	RunID         string // empty for the orchestrator
 	Project       string
 	Op            string
@@ -148,6 +150,7 @@ const (
 	ActorApprover     ActorKind = "approver"
 	ActorRun          ActorKind = "run"
 	ActorOrchestrator ActorKind = "orchestrator"
+	ActorKey          ActorKind = "key"
 )
 
 // Actor is the authenticated caller of a decision entry point.
@@ -159,7 +162,8 @@ type Actor struct {
 	ApproverID  string
 	// RunID names the run a ActorRun token belongs to, when known.
 	RunID string
-	// ID names the orchestrator of an ActorOrchestrator token, when known.
+	// ID names the orchestrator of an ActorOrchestrator token or the key of an
+	// ActorKey token, when known.
 	ID string
 }
 
@@ -237,6 +241,12 @@ type AssertionEvidence struct {
 	CredentialID []byte // the authenticator's credential id
 	RPID         string
 	Origin       string
+	// The kind of authenticator, for the ledger (ADR-004 amendment 15). Attachment is "platform", "cross-platform" or
+	// "unreported", or empty when the verifier does not say (the ledger body then names no authenticator). Transports
+	// is the browser's list. BackupEligible is the BE flag: true is a passkey that may be synced to an account.
+	Attachment     string
+	Transports     []string
+	BackupEligible bool
 }
 
 // AssertionError is what a [Verifier] returns for a refused assertion. Reason

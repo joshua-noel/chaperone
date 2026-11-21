@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -18,7 +19,9 @@ import (
 	"github.com/joshua-noel/chaperone/internal/console"
 	"github.com/joshua-noel/chaperone/internal/gh"
 	"github.com/joshua-noel/chaperone/internal/gitproxy"
+	keystore "github.com/joshua-noel/chaperone/internal/keys"
 	"github.com/joshua-noel/chaperone/internal/ledger"
+	"github.com/joshua-noel/chaperone/internal/loopback"
 	"github.com/joshua-noel/chaperone/internal/notify"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
@@ -48,7 +51,8 @@ type Config struct {
 	// interim issuer can sign. Without it neither exists.
 	VaultDir        string
 	VaultKeyDir     string
-	InterimSecretID string // vault secret holding the interim issuer's Ed25519 seed
+	VaultWrap       wrapperChoice // -vault-wrapper, -vault-passphrase-fd
+	InterimSecretID string        // vault secret holding the interim issuer's Ed25519 seed
 	InterimKID      string
 
 	// GitHubAppID turns on the GitHub ops (pr.merge, pr.update): chapd signs the
@@ -78,6 +82,11 @@ type Config struct {
 	// (-console-frame-ancestor, repeatable; internal/console Config.FrameAncestors). Empty: nothing is framed.
 	FrameAncestors []string
 
+	// Authenticators is which kinds of authenticator may be enrolled and used to approve (-approver-authenticators):
+	// "platform", the default, only one built into the device; "any" also a hardware security key and a phone through
+	// the browser's cross-device prompt. An existing install keeps "platform" until its operator opts in (ADR-004 amendment 15).
+	Authenticators console.Authenticators
+
 	Addr  string   // loopback only
 	Hosts []string // Host header allowlist; empty means 127.0.0.1:55398 and localhost:55398
 	Log   *slog.Logger
@@ -92,6 +101,14 @@ type Config struct {
 	// linearEndpoints, when set, replaces Linear's production endpoints (tests
 	// point it at a fake Linear).
 	linearEndpoints *linear.Endpoints
+	// sentryHTTP, when set, is the HTTP client of the Sentry connector (tests give
+	// one that sends every request to a fake Sentry). chapd never sets it: the
+	// connector still holds every base URL to the policy rule.
+	sentryHTTP *http.Client
+	// resendHTTP, when set, is the HTTP client of the Resend connector (tests give one
+	// that sends every request to a fake Resend). chapd never sets it: the connector
+	// still sends to one fixed address.
+	resendHTTP *http.Client
 	// baselineYAML, when set, replaces the embedded baseline pack (tests turn
 	// the intake ops on with it).
 	baselineYAML []byte
@@ -104,19 +121,24 @@ type Config struct {
 	// afterBuild, when set, runs once chapd is built and started (the demo
 	// build's -dev-enroll prints an enrolment address).
 	afterBuild func(context.Context, *App) error
+	// onListening, when set, is called once the console port is held, before Start (the Windows service reports that it
+	// is running then, not before).
+	onListening func()
 }
 
 // App is a built chapd: the database, the ledger, the services and the handler.
 type App struct {
-	cfg     Config
-	log     *slog.Logger
-	DB      *store.DB
-	Ledger  *ledger.Ledger
-	Policy  *policy.Engine
-	Ops     *ops.Service
-	Runs    *runtoken.Runs
-	Orch    *runtoken.Orchestrators
-	Console *console.Console
+	cfg        Config
+	log        *slog.Logger
+	DB         *store.DB
+	Ledger     *ledger.Ledger
+	Policy     *policy.Engine
+	Ops        *ops.Service
+	Runs       *runtoken.Runs
+	Orch       *runtoken.Orchestrators
+	Keys       *keystore.Store
+	KeyDecider *keystore.Decider
+	Console    *console.Console
 	// Approvals is the approvals engine (L1-12); bridge connects it to Ops.
 	Approvals *approvals.Engine
 	bridge    *approvalsBridge
@@ -179,7 +201,11 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	case cfg.testVault != nil:
 		a.vault = cfg.testVault
 	case cfg.VaultDir != "":
-		v, err := vault.Open(ctx, vault.Config{Dir: cfg.VaultDir, KeyDir: cfg.VaultKeyDir, DB: db, Wrapper: vault.NewDPAPI(), Registry: a.Reg})
+		wrapper, err := cfg.VaultWrap.build()
+		if err != nil {
+			return nil, fmt.Errorf("chapd: the vault key wrapper: %w", err)
+		}
+		v, err := vault.Open(ctx, vault.Config{Dir: cfg.VaultDir, KeyDir: cfg.VaultKeyDir, DB: db, Wrapper: wrapper, Registry: a.Reg})
 		if err != nil {
 			return nil, fmt.Errorf("chapd: open the vault: %w", err)
 		}
@@ -209,6 +235,19 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		return nil, err
 	}
 	a.Policy = policy.NewEngine(cat, base, cfg.PolicyDir)
+	for _, p := range a.Policy.Problems() {
+		if p.Block == "" {
+			a.log.Warn("policy: a project file is invalid, so every op of the project is refused until it is fixed", "project", p.Project, "file", p.File, "err", p.Err.Error())
+		} else if p.Block == "resend" {
+			a.log.Warn("policy: a project file has an unusable resend block; the Resend side of mail.send is off for the project, mail through Gmail and its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
+		} else if p.Block == "sentry" {
+			a.log.Warn("policy: a project file has an unusable sentry block; the Sentry operations (errors.*) are off for the project, its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
+		} else if p.Block == "linear.issues" {
+			a.log.Warn("policy: a project file has an unusable linear.issues block; the Linear issue operations (and Linear's issue.comment) are off for the project, the intake and its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
+		} else {
+			a.log.Warn("policy: a project file has an unusable "+p.Block+" block; pr.merge and pr.update are off for the project, its other ops work", "project", p.Project, "file", p.File, "err", p.Err.Error())
+		}
+	}
 
 	ghc, err := a.githubClient()
 	if err != nil {
@@ -229,7 +268,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		origins = append(origins, po)
 	}
 	con, err := console.New(console.Config{
-		DB: db, Origins: origins, Log: a.log, Now: cfg.now, FrameAncestors: cfg.FrameAncestors,
+		DB: db, Origins: origins, Log: a.log, Now: cfg.now, FrameAncestors: cfg.FrameAncestors, Authenticators: cfg.Authenticators,
 		OnEvent: func(e console.Event) {
 			select {
 			case a.auditCh <- e:
@@ -242,6 +281,21 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		return nil, err
 	}
 	a.Console = con
+	if cfg.Authenticators == console.AuthenticatorsAny {
+		a.log.Warn("approver authenticators: any. A hardware security key or a phone passkey may be enrolled and may approve, as well as one built into the device (ADR-004 amendment 15)")
+	}
+	// A setting that refuses enrolled passkeys (narrowed from "any", or a built-in passkey whose browser did not
+	// report its kind under "any") is said at start. A full lockout is logged as an error, with the way out. It does
+	// not stop chapd: that would turn a setting mistake into an outage for the agents doing routine work, and the
+	// routine ops that need no approval go on without the console; the operator is locked out of approving either way, and the fix is
+	// the same flag.
+	if refused, usable, err := con.RefusedCredentials(ctx); err != nil {
+		return nil, err
+	} else if refused > 0 && usable == 0 {
+		a.log.Error("nobody can sign in or approve: every enrolled passkey is refused by the authenticators setting. Start chapd again with -approver-authenticators any (chapd enroll cannot add one while an approver exists)", "refused", refused)
+	} else if refused > 0 {
+		a.log.Warn("some enrolled passkeys are refused by the authenticators setting and cannot sign in or approve: a security key or phone passkey made while it was any, or a built-in passkey whose browser did not report its kind. Start chapd with -approver-authenticators any to allow them again", "refused", refused, "usable", usable)
+	}
 
 	ntf, err := a.buildNotifier(ctx)
 	if err != nil {
@@ -270,18 +324,94 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	bridge.eng = eng
 	a.Approvals, a.bridge = eng, bridge
 
+	// ADR-008: custom keys. The store needs the ops service only to cancel a revoked key's waiting ops,
+	// and the service needs the keys.issue adapter, so the service is reached through a variable.
+	var svcRef *ops.Service
+	keyStore, err := keystore.New(keystore.Config{
+		DB: db, Ledger: sink, Redact: a.Reg, Now: cfg.now, PolicyVersion: base.BaselineVersion,
+		Catalog: a.Policy.Catalog(), Log: a.log,
+		// Agents may be enrolled only for a project whose policy turns keys.request on; a looping agent is logged.
+		EnrolProject: func(project string) bool { return a.Policy.For(project).Enabled(keystore.OpRequest) },
+		OnLooping: func(_ context.Context, l keystore.Looping) {
+			a.log.Warn("a looping agent: its key requests were refused again and again", "agent", l.Holder, "owner", l.Owner, "key", l.KeyID, "refusals", l.Refusals)
+		},
+		TxRevoke: func(ctx context.Context, tx *store.Tx, id string) error { return svcRef.CancelKeyOps(ctx, tx, id) },
+	})
+	if err != nil {
+		return nil, err
+	}
+	a.Keys = keyStore
+
 	deps := newAdapterDeps(ghc, a.Policy)
 	deps.ciRun = ciRunLookup(func() *runtoken.Runs { return a.Runs })
 	ads, err := adapters(deps)
 	if err != nil {
 		return nil, err
 	}
+	// ADR-008: the grant op. It is on only when a policy PR turns keys.issue on.
+	approvalOf := func(ctx context.Context, requestID string) (string, string, error) {
+		ap, err := eng.GetByRequest(ctx, requestID)
+		if err != nil {
+			return "", "", err
+		}
+		if ap == nil || ap.Approver == "" {
+			return "", "", fmt.Errorf("chapd: no signed approval for %s", requestID)
+		}
+		return ap.ID, ap.Approver, nil
+	}
+	issue, err := keystore.NewIssueAdapter(keystore.IssueConfig{
+		Store: keyStore, Catalog: a.Policy.Catalog(),
+		Enabled: func(project, op string) bool { return a.Policy.For(project).Enabled(op) },
+		Project: func(name string) (ops.PRProject, bool) {
+			eff := a.Policy.For(name)
+			if eff.Invalid != nil || eff.PR == nil {
+				return ops.PRProject{}, false
+			}
+			return ops.PRProject{Repo: eff.PR.Repo, Base: eff.PR.Base}, true
+		},
+		Approval: approvalOf,
+	})
+	if err != nil {
+		return nil, err
+	}
+	ads[keystore.OpIssue] = issue
+	// ADR-008, tracer 2: an agent asks for a key (keys.request, routine), and its owner makes a key last longer
+	// (keys.extend, a card). Both are on only when a policy PR turns them on.
+	request, err := keystore.NewRequestAdapter(keystore.RequestConfig{
+		Store: keyStore, Catalog: a.Policy.Catalog(),
+		Enabled: func(project, op string) bool { return a.Policy.For(project).Enabled(op) },
+		Project: func(name string) (ops.PRProject, bool) {
+			eff := a.Policy.For(name)
+			if eff.Invalid != nil || eff.PR == nil {
+				return ops.PRProject{}, false
+			}
+			return ops.PRProject{Repo: eff.PR.Repo, Base: eff.PR.Base}, true
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	ads[keystore.OpRequest] = request
+	extend, err := keystore.NewExtendAdapter(keyStore, approvalOf)
+	if err != nil {
+		return nil, err
+	}
+	ads[keystore.OpExtend] = extend
 	// L1-16: mail.send and drive.share adapters; both ops stay off in the baseline.
 	if err := a.installGoogle(ads); err != nil {
 		return nil, err
 	}
 	// the operator-board intake ops; on in the baseline, refused for a project with no `linear:` block.
 	if err := a.installLinear(ads); err != nil {
+		return nil, err
+	}
+	// the six Sentry errors.* ops; off in the baseline, refused for a project with no valid `sentry:` block.
+	if err := a.installSentry(ads); err != nil {
+		return nil, err
+	}
+	// the Resend side of mail.send (one name, two connectors: Gmail's adapter above and this one sit behind one
+	// ops.ByTarget); off in the baseline, refused for a project with no valid `resend:` block. After installGoogle.
+	if err := a.installResend(ads); err != nil {
 		return nil, err
 	}
 	// L1-15: `deploy` and chap-host's routes, only when its flags are set.
@@ -297,12 +427,16 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	svc, err := ops.NewService(ops.Config{
 		DB: db, Ledger: sink, Policy: a.Policy, Adapters: ads, Redactor: a.Reg, Log: a.log, Now: cfg.now,
 		Approvals: bridge, Alerter: alerts, ExecTimeout: execTimeout,
+		// ADR-008: an approved op of a key is released only while the key lives (checked in the release transaction).
+		KeyLive: func(ctx context.Context, tx *store.Tx, id string) error { return keyStore.Live(ctx, tx, id) },
 	})
 	if err != nil {
 		return nil, err
 	}
 	a.Ops = svc
+	svcRef = svc
 	bridge.svc = svc
+	a.KeyDecider = keystore.NewDecider(keyStore, svc)
 
 	keys, err := runtoken.LoadKeySet(cfg.KeysPath)
 	if err != nil {
@@ -319,12 +453,11 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	} else {
 		a.log.Warn("no profile source (-profiles-dir): every runner.* run token will be refused TOKEN_INVALID")
 	}
+	orchTxRevoke, orchTxReissue := orchestratorHooks(svc, keyStore)
 	orch, err := runtoken.NewOrchestrators(runtoken.OrchConfig{
 		DB: db, Appender: sink, Redact: a.Reg, Now: cfg.now,
 		PolicyVersion: base.BaselineVersion,
-		TxRevoke: func(ctx context.Context, tx *store.Tx, id string) error {
-			return svc.CancelOrchOps(ctx, tx, id)
-		},
+		TxRevoke:      orchTxRevoke, TxReissue: orchTxReissue,
 	})
 	if err != nil {
 		return nil, err
@@ -360,10 +493,13 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Auth: &ops.Auth{
 			Run:  runVerifier{v: verifier, stop: raiseTokenMisuse(led, idMaker("s-"), a.log)},
 			Orch: orchVerifier{o: orch},
+			Key:  keyStore,
 			Svc:  svc,
 		},
 		AllowInterim: keys.AllowInterim, Hosts: hosts,
 		Runs:   runsBackend{r: runs},
+		Keys:   keystore.NewAdmin(keyStore),
+		Agents: keystore.NewEnrolment(keyStore),
 		Ledger: ledgerBackend{l: led},
 	}
 	scfg.ApproverCredentials = func(ctx context.Context) (int, error) {
@@ -402,7 +538,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 
 	// Order matters: the Approvals screen first, then the
 	// screens that sit on it. UseApprovals turns on /approvals; UseScreens needs it.
-	if err := con.UseApprovals(eng, console.ApprovalsOptions{ResolveToken: tokenHolder(verifier, orch), Recheck: func(ctx context.Context, requestID string) (console.StaleCheck, error) {
+	if err := con.UseApprovals(eng, console.ApprovalsOptions{ResolveToken: tokenHolder(verifier, orch, keyStore), Recheck: func(ctx context.Context, requestID string) (console.StaleCheck, error) {
 		r, err := svc.Recheck(ctx, requestID)
 		return console.StaleCheck{Stale: r.Stale, Why: r.Why, NewCard: r.NewCard}, err
 	}}); err != nil {
@@ -411,6 +547,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	screens := console.ScreensConfig{
 		Version: version.Version, Runs: runs, Orch: orch, Ledger: led, Policy: a.Policy,
 		Record: approvalsLedger{l: led},
+		Keys:   a.KeyDecider,
 	}
 	if a.vault != nil { // an interface holding a nil *vault.Vault would not be nil
 		screens.Vault = a.vault
@@ -510,45 +647,46 @@ func (a *App) Start(ctx context.Context) error {
 				if _, err := a.Ops.Sweep(ctx); err != nil && ctx.Err() == nil {
 					a.log.Error("op expiry sweep", "err", err)
 				}
+				// A granted key nobody claimed within its hour is revoked, and the revoke is written down.
+				if n, err := a.Keys.Sweep(ctx); err != nil && ctx.Err() == nil {
+					a.log.Error("unclaimed key sweep", "err", err)
+				} else if n > 0 {
+					a.log.Warn("keys not claimed in time were revoked", "count", n)
+				}
 			}
 		}
 	}()
 	return nil
 }
 
-// Serve listens on cfg.Addr (loopback only) and serves until ctx ends.
-func (a *App) Serve(ctx context.Context) error {
+// Listen takes the console's port on cfg.Addr (loopback only): 127.0.0.1:PORT and [::1]:PORT (internal/loopback). It
+// is called before Start, so a port somebody else holds stops chapd before crash recovery, the sweeps and the release of
+// approved ops run (each service restart would repeat them), and before the
+// service reports that it is running. The system completes connections into the backlog, but nothing is read or answered until Serve.
+func (a *App) Listen() ([]net.Listener, error) { return a.listenWith(loopback.Listen) }
+
+func (a *App) listenWith(listen loopback.ListenFunc) ([]net.Listener, error) {
 	addr := a.cfg.Addr
 	if addr == "" {
 		addr = ops.ListenAddr
 	}
 	if err := requireLoopback(addr); err != nil {
-		return err
+		return nil, err
 	}
-	ln, err := net.Listen("tcp", addr)
+	lns, err := loopback.Bind(addr, listen, "\nIs another chapd running? Stop it first, or use -addr with another port")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return a.serve(ctx, ln)
+	if len(lns) == 1 {
+		a.log.Warn("no IPv6 loopback on this machine: listening on IPv4 only", "addr", lns[0].Addr().String())
+	}
+	return lns, nil
 }
 
-func (a *App) serve(ctx context.Context, ln net.Listener) error {
-	srv := &http.Server{
-		Handler: a.handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute,
-		WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 32 << 10,
-	}
-	done := make(chan error, 1)
-	go func() { done <- srv.Serve(ln) }()
-	a.log.Info("chapd listening", "addr", ln.Addr().String(), "version", version.Version)
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(sctx)
-		return nil
-	}
+// Serve serves the handler on the listeners Listen returned until ctx ends, then closes them.
+func (a *App) Serve(ctx context.Context, lns []net.Listener) error {
+	defer loopback.CloseAll(lns)
+	return serveListeners(ctx, a, lns)
 }
 
 // localEndpoints is the console's origin and the Host allowlist for the listen
@@ -577,8 +715,10 @@ func requireLoopback(addr string) error {
 		return fmt.Errorf("chapd: bad listen address %q: %w", addr, err)
 	}
 	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("chapd: listen address %q is not a loopback IP address (127.0.0.1 or ::1)", addr)
+	if ip == nil || !(ip.Equal(net.IPv4(127, 0, 0, 1)) || ip.Equal(net.IPv6loopback)) {
+		// Only these two: the console is held on both (internal/loopback), so another 127.x address would
+		// name a port whose 127.0.0.1 side nobody holds, and the Host allowlist knows no other.
+		return fmt.Errorf("chapd: listen address %q must be 127.0.0.1 or ::1 with a port (both are held)", addr)
 	}
 	return nil
 }
@@ -633,24 +773,25 @@ func (g *refusalGate) allow(now time.Time) (suppressed int, ok bool) {
 func (a *App) audit(ctx context.Context, e console.Event, gate *refusalGate) {
 	switch e.Name {
 	case console.EventEnrolled:
-		a.log.Warn("approver credential enrolled", "approver", e.ApproverID, "rp_id", e.RPID, "origin", e.Origin, "uv", e.UserVerified, "bootstrap", e.Bootstrap)
+		a.log.Warn("approver credential enrolled", "approver", e.ApproverID, "rp_id", e.RPID, "origin", e.Origin, "uv", e.UserVerified, "bootstrap", e.Bootstrap,
+			"attachment", e.Attachment, "transports", e.Transports, "backup_eligible", e.BackupEligible)
 		// Only the first approver is recorded here: no approver existed to approve it
 		// (spec v0.1.1, "Operator-recorded ops"). A later device is the approvers.enroll op.
 		if !e.Bootstrap {
 			return
 		}
-		if err := a.ledgerOperatorOp(ctx, "approvers.enroll", fmt.Sprintf("operator enrolled the first approver %d at %s", e.ApproverID, e.Origin)); err != nil {
+		if err := a.ledgerOperatorOp(ctx, "approvers.enroll", fmt.Sprintf("operator enrolled the first approver %d at %s; %s", e.ApproverID, e.Origin, authenticatorText(e))); err != nil {
 			a.log.Error("could not ledger the enrolment", "err", err)
 		}
 	case console.EventLogin:
-		a.log.Info("console sign-in", "approver", e.ApproverID, "rp_id", e.RPID, "uv", e.UserVerified)
+		a.log.Info("console sign-in", "approver", e.ApproverID, "rp_id", e.RPID, "uv", e.UserVerified, "attachment", e.Attachment, "transports", e.Transports, "backup_eligible", e.BackupEligible)
 		if e.ApproverSpecID == "" || !e.UserVerified {
 			return // a sign-in the spec cannot describe is not ledgered as one
 		}
-		a.ledgerConsole(ctx, "console.login", "INFO", map[string]any{
+		a.ledgerConsole(ctx, "console.login", "INFO", authenticatorText(e), map[string]any{
 			"factory.approver.id": e.ApproverSpecID, "factory.console.rp_id": e.RPID, "factory.console.user_verified": true})
 	default:
-		a.log.Warn("console refused a ceremony", "ceremony", e.Ceremony, "reason", e.Reason, "origin", e.Origin, "detail", e.Detail)
+		a.log.Warn("console refused a ceremony", "ceremony", e.Ceremony, "reason", e.Reason, "origin", e.Origin, "attachment", e.Attachment, "detail", e.Detail)
 		suppressed, ok := gate.allow(a.clock())
 		if !ok {
 			return
@@ -662,14 +803,21 @@ func (a *App) audit(ctx context.Context, e console.Event, gate *refusalGate) {
 		if suppressed > 0 {
 			attrs["factory.console.suppressed"] = float64(suppressed)
 		}
-		a.ledgerConsole(ctx, "console.refused", "WARN", attrs)
+		a.ledgerConsole(ctx, "console.refused", "WARN", "", attrs)
 	}
 }
 
+// authenticatorText says what kind of authenticator an event came from, for a ledger body (ADR-004 amendment 15):
+// the browser-reported attachment, its transports, and whether the passkey may be synced to an account.
+func authenticatorText(e console.Event) string {
+	return fmt.Sprintf("authenticator=%s; transports=%s; backup_eligible=%t",
+		cmp.Or(e.Attachment, "unreported"), cmp.Or(strings.Join(e.Transports, ","), "none"), e.BackupEligible)
+}
+
 // ledgerConsole appends one console event: about the console, so no run and no project.
-func (a *App) ledgerConsole(ctx context.Context, name, severity string, attrs map[string]any) {
+func (a *App) ledgerConsole(ctx context.Context, name, severity, body string, attrs map[string]any) {
 	err := a.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
-		return ledgerSink{l: a.Ledger}.AppendTx(ctx, tx, ops.Event{Name: name, Severity: severity, Attributes: attrs})
+		return ledgerSink{l: a.Ledger}.AppendTx(ctx, tx, ops.Event{Name: name, Severity: severity, Body: body, Attributes: attrs})
 	})
 	if err != nil {
 		a.log.Error("could not ledger the console event", "event", name, "err", err)

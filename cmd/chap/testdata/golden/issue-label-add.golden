@@ -1,0 +1,17 @@
+$ chap issue label AGT-12 --add triaged --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"issue.label","params":{"add":"triaged"},"project":"storefront","target":{"adapter":"linear","ref":"AGT-12"}}
+--- stdout
+issue.label AGT-12: succeeded
+id: q-7c3d4e  class: routine  policy: baseline-2026.10.1
+execution: x-7a8b9c
+external_ref: https://linear.app/example/issue/AGT-12
+result:
+  action: add
+  changed: true
+  identifier: AGT-12
+  label: triaged
+--- stderr

@@ -40,6 +40,13 @@ linear:
 
 func newLinearE2E(t *testing.T, enable bool, secrets bool) *linearE2E {
 	t.Helper()
+	return newLinearE2EWith(t, enable, secrets, intakeBlock, false)
+}
+
+// newLinearE2EWith is the rig with the project file's text, and with the
+// Linear issue ops switched on in the test baseline when issueOps is set.
+func newLinearE2EWith(t *testing.T, enable bool, secrets bool, project string, issueOps bool) *linearE2E {
+	t.Helper()
 	useTestWrapper(t)
 	dir := t.TempDir()
 	db := filepath.Join(dir, "state.db")
@@ -48,7 +55,7 @@ func newLinearE2E(t *testing.T, enable bool, secrets bool) *linearE2E {
 
 	tokenFile := filepath.Join(dir, "home", "orchestrator.token")
 	var out, errb bytes.Buffer
-	if code := orchCmd([]string{"issue", "-db", db, "-project", "acme-shop", "-ops", "intake.*", "-token-file", tokenFile, "-days", "1"}, &out, &errb); code != 0 {
+	if code := orchCmd([]string{"issue", "-db", db, "-project", "acme-shop", "-ops", "intake.*,issue.*", "-token-file", tokenFile, "-days", "1"}, &out, &errb); code != 0 {
 		t.Fatalf("orch issue: %d %s", code, errb.String())
 	}
 	raw, err := os.ReadFile(tokenFile)
@@ -81,7 +88,7 @@ func newLinearE2E(t *testing.T, enable bool, secrets bool) *linearE2E {
 	if err := os.MkdirAll(policyDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(policyDir, "acme-shop.yaml"), []byte(intakeBlock), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(policyDir, "acme-shop.yaml"), []byte(project), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -96,6 +103,21 @@ func newLinearE2E(t *testing.T, enable bool, secrets bool) *linearE2E {
 			"intake.move:          { enabled: true", "intake.move:          { enabled: false",
 			"intake.states:        { enabled: true", "intake.states:        { enabled: false",
 		).Replace(string(policy.BaselineBytes())))
+	}
+	if issueOps {
+		// The five Linear issue ops ship off; this test baseline switches them on.
+		base := string(policy.BaselineBytes())
+		if cfg.baselineYAML != nil {
+			base = string(cfg.baselineYAML)
+		}
+		for _, op := range []string{"issue.get", "issue.list", "issue.label", "issue.move", "issue.link"} {
+			old := op + ":" + strings.Repeat(" ", max(1, 21-len(op))) + "{ enabled: false"
+			if !strings.Contains(base, old) {
+				t.Fatalf("the baseline has no %q line to switch on", old)
+			}
+			base = strings.Replace(base, old, strings.Replace(old, "false", "true", 1), 1)
+		}
+		cfg.baselineYAML = []byte(base)
 	}
 	app, err := Build(ctx, cfg)
 	if err != nil {

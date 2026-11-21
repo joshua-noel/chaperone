@@ -151,7 +151,7 @@ type rawIssue struct {
 	Assignee *struct {
 		Name string `json:"name"`
 	} `json:"assignee"`
-	Labels   nodes[struct{ Name string }] `json:"labels"`
+	Labels   labelConn `json:"labels"`
 	Comments nodes[struct {
 		Body      string `json:"body"`
 		CreatedAt string `json:"createdAt"`

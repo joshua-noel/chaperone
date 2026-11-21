@@ -1,0 +1,183 @@
+// Package @{.Name}@test is a fake @{.Name}@ service for the connector's tests. It
+// never talks to the network: it is an https server on a loopback port that the
+// test owns.
+//
+// The connector's client accepts https only, with no exception for a test. The
+// test builds the client with [BaseURL] and [Server.HTTPClient]: that HTTP client
+// trusts the fake's certificate and sends every request to the fake, whatever
+// host the URL names.
+//
+// The package does not import the connector, so the connector's own tests can
+// import it without a cycle.
+//
+// It is a skeleton. Make it answer what your service answers, and count every
+// call that changes state in [Server.WriteCalls] and [Server.WritesApplied]:
+// the conformance suite reads them to prove that Check changes nothing and that
+// Execute acts once.
+package @{.Name}@test
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// BaseURL is the address a test gives the client. [Server.HTTPClient] sends it
+// to the fake.
+const BaseURL = "https://@{.Name}@.example.com"
+
+// Item is one item of the fake service.
+type Item struct {
+	ID, Title, Body string
+}
+
+// Request is one request the fake received. The credential is never recorded
+// here: see [Server.Credentials].
+type Request struct {
+	Method, Path string
+}
+
+// Server is the fake service.
+type Server struct {
+	*httptest.Server
+
+	mu      sync.Mutex
+	token   string
+	echo    bool
+	items   map[string]*Item
+	reqs    []Request
+	creds   []string
+	writes  int
+	applied int
+}
+
+// New starts the fake. It accepts the token "fake-token" until [Server.SetToken].
+func New(t testing.TB) *Server {
+	t.Helper()
+	s := &Server{token: "fake-token", items: map[string]*Item{}}
+	s.Server = httptest.NewTLSServer(http.HandlerFunc(s.serve))
+	t.Cleanup(s.Close)
+	return s
+}
+
+// HTTPClient returns an HTTP client that trusts the fake's certificate and
+// sends every request to the fake, whatever host the URL names. It follows
+// redirects as Go's default client does: the connector is the one that must not.
+func (s *Server) HTTPClient() *http.Client {
+	pool := x509.NewCertPool()
+	pool.AddCert(s.Certificate())
+	addr := s.Listener.Addr().String()
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "example.com"}, // the name the test certificate holds
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, addr)
+			},
+		},
+	}
+}
+
+// AddItem adds an item, or replaces the one with the same id.
+func (s *Server) AddItem(it Item) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items[it.ID] = &it
+}
+
+// Edit changes an item under the fake's lock. It does nothing for an unknown id.
+func (s *Server) Edit(id string, f func(it *Item)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if it := s.items[id]; it != nil {
+		f(it)
+	}
+}
+
+// SetToken sets the credential the fake accepts.
+func (s *Server) SetToken(v string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.token = v
+}
+
+// Hostile makes the fake behave like a careless service: it stops accepting
+// the credential it had (newToken is the one it accepts now), and its error
+// text repeats the credential it received.
+func (s *Server) Hostile(newToken string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.token, s.echo = newToken, true
+}
+
+// Requests returns every request received so far.
+func (s *Server) Requests() []Request {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Request(nil), s.reqs...)
+}
+
+// Credentials returns every credential the fake was sent.
+func (s *Server) Credentials() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.creds...)
+}
+
+// WriteCalls is how many calls that could change the service the fake has
+// received, accepted or not.
+func (s *Server) WriteCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writes
+}
+
+// WritesApplied is how many of those calls the fake accepted and acted on.
+func (s *Server) WritesApplied() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.applied
+}
+
+func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	s.reqs = append(s.reqs, Request{Method: r.Method, Path: r.URL.Path})
+	s.creds = append(s.creds, bearer)
+	reply := func(code int, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(v)
+	}
+	if r.Method != http.MethodGet {
+		// A write route goes here: count it in s.writes, and in s.applied only
+		// when the fake acts on it.
+		s.writes++
+	}
+	if bearer != s.token {
+		msg := "bad credential"
+		if s.echo {
+			msg += " " + bearer
+		}
+		reply(http.StatusUnauthorized, map[string]string{"error": msg})
+		return
+	}
+	if id, ok := strings.CutPrefix(r.URL.Path, "/items/"); ok && r.Method == http.MethodGet {
+		if it := s.items[id]; it != nil {
+			reply(http.StatusOK, map[string]string{"id": it.ID, "title": it.Title, "body": it.Body})
+			return
+		}
+		reply(http.StatusNotFound, map[string]string{"error": "no such item"})
+		return
+	}
+	reply(http.StatusNotFound, map[string]string{"error": "no such route"})
+}

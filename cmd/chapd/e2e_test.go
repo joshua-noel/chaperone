@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/joshua-noel/chaperone/internal/ledger"
+	"github.com/joshua-noel/chaperone/internal/policy"
 	"github.com/joshua-noel/chaperone/internal/spec"
 )
 
@@ -176,8 +177,14 @@ func TestE2EOrchestratorAcceptance(t *testing.T) {
 		t.Errorf("catalog: %d %v", st, body)
 	}
 	st, body = e.call("GET", "/v0/catalog?all=true", e.token, nil)
-	if st != 200 || len(body["ops"].([]any)) != 29 {
-		t.Errorf("catalog all: %d %d ops", st, len(body["ops"].([]any)))
+	// Every op of the shipped catalog, whatever the number: a new connector adds
+	// its operations to api/manual.yaml, and this must follow it.
+	cat, cerr := policy.DefaultCatalog()
+	if cerr != nil {
+		t.Fatal(cerr)
+	}
+	if st != 200 || len(body["ops"].([]any)) != len(cat.Ops()) {
+		t.Errorf("catalog all: %d %d ops, the catalog has %d", st, len(body["ops"].([]any)), len(cat.Ops()))
 	}
 
 	// A run token that is not valid, and a request with no token.
@@ -264,7 +271,7 @@ func TestRunUsage(t *testing.T) {
 }
 
 func TestListenAddressMustBeLoopback(t *testing.T) {
-	for _, a := range []string{"0.0.0.0:55398", "192.0.2.2:55398", ":55398", "example.com:55398"} {
+	for _, a := range []string{"0.0.0.0:55398", "192.0.2.2:55398", ":55398", "example.com:55398", "127.0.0.2:55398", "127.1.2.3:55398", "localhost:55398"} {
 		if err := requireLoopback(a); err == nil {
 			t.Errorf("%s accepted", a)
 		}

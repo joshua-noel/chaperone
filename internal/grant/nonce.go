@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/joshua-noel/chaperone/internal/privfile"
 )
 
 // NonceStore records nonces so that each is accepted once.
@@ -126,9 +129,20 @@ func openLocked(path string, now time.Time) (*FileNonces, error) {
 		buf.Write(line)
 		buf.WriteByte('\n')
 	}
+	// A new private file at a fixed name: a leftover of a crashed run is removed first (Remove does not follow a link),
+	// and Create then refuses whatever is there, so a link planted at the name is never written through.
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o600); err != nil {
+	if err := os.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
+	}
+	tf, err := privfile.Create(tmp)
+	if err != nil {
+		return nil, err
+	}
+	_, werr := tf.Write(buf.Bytes())
+	if cerr := tf.Close(); werr != nil || cerr != nil {
+		_ = os.Remove(tmp)
+		return nil, errors.Join(werr, cerr)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return nil, err

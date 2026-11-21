@@ -31,6 +31,7 @@ const (
 	ReasonUP         = "up_missing"
 	ReasonSignature  = "bad_signature"
 	ReasonCredential = "credential_not_allowed"
+	ReasonAttachment = "attachment_not_allowed" // the kind of authenticator (built in, security key, phone) is not allowed by Config.Authenticators
 	ReasonClone      = "clone_warning"
 	ReasonEnrolment  = "enrolment_refused"
 	ReasonVerify     = "verification_failed"
@@ -197,7 +198,7 @@ func (c *Console) loginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var found *credential
+	var found, blocked *credential
 	lookup := func(rawID, userHandle []byte) (webauthn.User, error) {
 		cr, err := c.credentialByRawID(r.Context(), rawID)
 		if err != nil {
@@ -215,16 +216,26 @@ func (c *Console) loginFinish(w http.ResponseWriter, r *http.Request) {
 		if ap.Disabled || !bytes.Equal(ap.Handle, userHandle) {
 			return nil, protocol.ErrBadRequest.WithDetails("approver disabled or user handle mismatch")
 		}
+		// The setting may have been narrowed since this credential was made: a security key enrolled while it said
+		// "any" is refused once it says "platform" again.
+		if !c.attachmentAllowed(cr.WA.Authenticator.Attachment) {
+			blocked = cr
+			return nil, protocol.ErrBadRequest.WithDetails("credential's authenticator kind is not allowed by the authenticators setting")
+		}
 		found = cr
 		return &waUser{handle: ap.Handle, name: ap.Name, creds: []webauthn.Credential{cr.WA}}, nil
 	}
 	_, updated, err := st.rp.wa.ValidatePasskeyLogin(lookup, cm.Session, parsed)
 	if err != nil {
 		reason := reasonOf(err)
-		if found == nil {
+		ev := Event{CredentialID: parsed.RawID}
+		switch {
+		case blocked != nil:
+			reason, ev.Attachment = ReasonAttachment, string(blocked.WA.Authenticator.Attachment)
+		case found == nil:
 			reason = ReasonCredential
 		}
-		c.refused(w, r, http.StatusForbidden, reason, err, Event{CredentialID: parsed.RawID})
+		c.refused(w, r, http.StatusForbidden, reason, err, ev)
 		return
 	}
 	if updated.Authenticator.CloneWarning {
@@ -243,8 +254,8 @@ func (c *Console) loginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, c.cookie(st.rp, sessionCookie, token, 0))
-	ev := Event{Name: EventLogin, ApproverID: found.ApproverID, CredentialID: found.WA.ID,
-		RPID: st.rp.RPID, Origin: st.rp.URL, UserVerified: flags.UserVerified(), SignCount: updated.Authenticator.SignCount}
+	ev := authnFacts(Event{Name: EventLogin, ApproverID: found.ApproverID, CredentialID: found.WA.ID,
+		RPID: st.rp.RPID, Origin: st.rp.URL, UserVerified: flags.UserVerified(), SignCount: updated.Authenticator.SignCount}, updated)
 	if ap, err := c.approverByID(r.Context(), found.ApproverID); err == nil {
 		ev.ApproverSpecID = approverSpecID(ap)
 	}
@@ -284,7 +295,7 @@ func (c *Console) enrollBegin(w http.ResponseWriter, r *http.Request) {
 		c.refused(w, r, http.StatusBadRequest, ReasonMalformed, err, Event{})
 		return
 	}
-	label, ok1 := cleanName(req.Label, "Windows Hello")
+	label, ok1 := cleanName(req.Label, "Passkey")
 	name, ok2 := cleanName(req.Name, "operator")
 	if !ok1 || !ok2 || req.Token == "" || len(req.Token) > 128 {
 		c.refused(w, r, http.StatusBadRequest, ReasonMalformed, errors.New("bad enrolment fields"), Event{})
@@ -367,8 +378,11 @@ func (c *Console) enrollFinish(w http.ResponseWriter, r *http.Request) {
 		c.refused(w, r, http.StatusForbidden, ReasonUP, errors.New("UP flag not set at registration"), Event{CredentialID: parsed.RawID})
 		return
 	}
-	if a := parsed.AuthenticatorAttachment; a != "" && a != protocol.Platform {
-		c.refused(w, r, http.StatusForbidden, ReasonCredential, errors.New("authenticator is not a platform authenticator"), Event{CredentialID: parsed.RawID})
+	// Which kinds of authenticator may be enrolled is Config.Authenticators. Everything else here (UV, UP, the
+	// relying party, the origin, the attestation) is checked the same for every kind.
+	if a := parsed.AuthenticatorAttachment; !c.attachmentAllowed(a) {
+		c.refused(w, r, http.StatusForbidden, ReasonAttachment, errors.New("authenticator attachment "+string(a)+" is not allowed by the authenticators setting"),
+			Event{CredentialID: parsed.RawID, Attachment: string(a)})
 		return
 	}
 	user := &waUser{handle: cm.Session.UserID, name: cm.ApproverName}
@@ -377,13 +391,17 @@ func (c *Console) enrollFinish(w http.ResponseWriter, r *http.Request) {
 		c.refused(w, r, http.StatusForbidden, reasonOf(err), err, Event{CredentialID: parsed.RawID})
 		return
 	}
+	// What the browser said about the transports is free text: keep the known ones. An attachment it did not give is
+	// recorded as the wider kind under the wider setting (recordedAttachment).
+	cred.Transport = cleanTransports(cred.Transport)
+	cred.Authenticator.Attachment = c.recordedAttachment(cred.Authenticator.Attachment)
 	approverID, err := c.saveEnrollment(r.Context(), cm, st.rp.Origin, cred)
 	if err != nil {
 		c.refusedEnroll(w, r, err)
 		return
 	}
-	c.emit(Event{Name: EventEnrolled, ApproverID: approverID, Bootstrap: !cm.ApproverID.Valid, CredentialID: cred.ID, RPID: st.rp.RPID,
-		Origin: st.rp.URL, UserVerified: cred.Flags.UserVerified, SignCount: cred.Authenticator.SignCount})
+	c.emit(authnFacts(Event{Name: EventEnrolled, ApproverID: approverID, Bootstrap: !cm.ApproverID.Valid, CredentialID: cred.ID, RPID: st.rp.RPID,
+		Origin: st.rp.URL, UserVerified: cred.Flags.UserVerified, SignCount: cred.Authenticator.SignCount}, cred))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "redirect": "/login"})
 }
 

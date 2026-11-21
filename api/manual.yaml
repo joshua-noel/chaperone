@@ -23,8 +23,14 @@
 # surface: how the op is asked for.
 #   op   POST /v0/ops (params as in components.schemas.Params* of openapi.yaml)
 #   git  the git proxy mount (/git/...); the op in the token authorises the push
+#
+# Entries between a "# BEGIN generated" and its "# END generated" line are written
+# by `go generate ./internal/connectors/...` from the connector's declaration
+# (internal/connectors/kit, docs/connectors.md). Change the declaration, not the
+# entry: a test fails when the two differ.
 version: 1
 ops:
+  # BEGIN generated: connector github (do not edit by hand; run `go generate ./internal/connectors/...`)
   pr.open:
     class: routine
     reversibility: reversible
@@ -77,14 +83,15 @@ ops:
     class: routine
     reversibility: compensable
     surface: op
-    summary: Comment on an issue labelled source:error-watcher.
-    usage: chap issue comment <n> --body <b>
+    summary: Comment on an issue the policy allows.
+    usage: chap issue comment <n|AGT-12> [--body <b> | --body-file <f>]
   issue.reopen:
     class: routine
     reversibility: reversible
     surface: op
     summary: Reopen an issue labelled source:error-watcher.
     usage: chap issue reopen <n>
+  # END generated: connector github
   branch.push:
     class: routine
     reversibility: reversible
@@ -103,12 +110,14 @@ ops:
     surface: op
     summary: Read recent log lines from a fixed source.
     usage: chap logs <web|worker|db|tunnel> [--lines <n>]
+  # BEGIN generated: connector ci (do not edit by hand; run `go generate ./internal/connectors/...`)
   ci.report:
     class: routine
     reversibility: reversible
     surface: op
     summary: Post a finished local CI run's result as a check run.
     usage: chap ci report <run-id>
+  # END generated: connector ci
   deploy:
     class: high
     reversibility: compensable
@@ -126,13 +135,14 @@ ops:
     reversibility: irreversible
     surface: op
     summary: Send one email to allowlisted recipients after approval.
-    usage: chap mail send --from <account> --to <a> --subject <s> --body-file <f>
+    usage: chap mail send --from <account> --to <a> --subject <s> --body-file <f> [--via resend]
   drive.share:
     class: high
     reversibility: compensable
     surface: op
     summary: Share one Drive file with allowlisted recipients.
     usage: chap drive share <file-id> --from <account> --name <file-name> --to <a> --role <r>
+  # BEGIN generated: connector linear (do not edit by hand; run `go generate ./internal/connectors/...`)
   intake.list:
     class: routine
     reversibility: reversible
@@ -157,6 +167,37 @@ ops:
     surface: op
     summary: List the board team's states and the policy's.
     usage: chap intake states
+  issue.get:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read one issue of the project's issue team.
+    usage: chap issue get <AGT-12> [--dry-run]
+  issue.list:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: List issues of the issue team, one page at a time.
+    usage: chap issue list [--state <type>] [--label <l>] [--cursor <c>] [--team <key>] [--dry-run]
+  issue.label:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Add or remove one label from the policy's list.
+    usage: chap issue label <AGT-12> --add <l> | --remove <l>
+  issue.move:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Move an issue to a state the policy lists.
+    usage: chap issue move <AGT-12> --state <name> [--dry-run]
+  issue.link:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Attach a link, from a listed host, to an issue.
+    usage: chap issue link <AGT-12> --url <u> [--title <t>] [--dry-run]
+  # END generated: connector linear
   notion.write:
     class: high
     reversibility: compensable
@@ -175,6 +216,24 @@ ops:
     surface: op
     summary: Change a repository setting after approval (CRITICAL).
     usage: chap request op repo.settings --reason <why>
+  keys.issue:
+    class: high
+    reversibility: compensable
+    surface: op
+    summary: Give a script or an agent a key after approval (HIGH).
+    usage: chap key create --project <p> --holder <name> --ops <op,op> [--repo owner/name] [--ttl 24h]
+  keys.request:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Ask your owner for the access a job needs.
+    usage: chap key request --ops <op,op> [--repo owner/name] [--ttl 24h] --reason <why> [--wait]
+  keys.extend:
+    class: high
+    reversibility: compensable
+    surface: op
+    summary: Make an agent's key last longer, with a Hello (HIGH).
+    usage: chap key extend --for <hours> --reason <why>
   secrets.write:
     class: critical
     reversibility: compensable
@@ -199,3 +258,41 @@ ops:
     surface: op
     summary: Activate a new policy pack (CRITICAL).
     usage: chap request op policy.activate --reason <why>
+  # BEGIN generated: connector sentry (do not edit by hand; run `go generate ./internal/connectors/...`)
+  errors.list:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: List issues of an allowed Sentry project, one page.
+    usage: chap errors list <sentry-project> [--status <s>] [--level <l>] [--limit <n>] [--cursor <c>]
+  errors.get:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Read one Sentry issue and its latest event's essentials.
+    usage: chap errors get <id> [--dry-run]
+  errors.resolve:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Resolve one unresolved Sentry issue.
+    usage: chap errors resolve <id> [--dry-run]
+  errors.unresolve:
+    class: routine
+    reversibility: reversible
+    surface: op
+    summary: Reopen one resolved Sentry issue.
+    usage: chap errors unresolve <id> [--dry-run]
+  errors.assign:
+    class: routine
+    reversibility: compensable
+    surface: op
+    summary: Assign a Sentry issue to a member the policy lists.
+    usage: chap errors assign <id> --to <member> [--dry-run]
+  errors.comment:
+    class: routine
+    reversibility: compensable
+    surface: op
+    summary: Add a note to a Sentry issue.
+    usage: chap errors comment <id> [--body <b> | --body-file <f>]
+  # END generated: connector sentry

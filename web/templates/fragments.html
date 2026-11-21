@@ -136,7 +136,7 @@
     <footer class="approval-actions">
       <label for="reason-{{.ID}}">Reason, if you deny</label>
       <input id="reason-{{.ID}}" class="input" type="text" maxlength="500" autocomplete="off" placeholder="Needed only to deny">
-      {{if .Split}}<button class="btn approval-approve" type="button" data-action="approve"{{if .Restricted}} disabled{{end}}>Approve with Windows Hello</button>{{else}}<p class="approval-old">This request was made by an older version of Chaperone, so it cannot be approved here. Deny it, or let it run out; the orchestrator has to ask again.</p>{{end}}
+      {{if .Split}}<button class="btn approval-approve" type="button" data-action="approve"{{if .Restricted}} disabled{{end}}>Approve with your passkey</button>{{else}}<p class="approval-old">This request was made by an older version of Chaperone, so it cannot be approved here. Deny it, or let it run out; the orchestrator has to ask again.</p>{{end}}
       <button class="btn approval-deny" data-variant="destructive" type="button" data-action="deny"{{if .Restricted}} disabled{{end}}>Deny</button>
     </footer>
     <p class="approval-status" role="status" aria-live="polite"></p>
@@ -154,3 +154,18 @@
 
 {{/* An approval's state as a badge. The word is always shown; the colour only adds to it. "consumed" is the engine's word for an approval the operation used. */}}
 {{define "state-badge"}}<span class="badge" data-tone="{{if eq . "approved"}}success{{else if eq . "denied"}}danger{{else if eq . "pending"}}warning{{else if eq . "consumed"}}info{{else}}neutral{{end}}">{{if eq . "consumed"}}approved and used{{else if eq . "approved"}}approved, not used yet{{else if eq . "cancelled"}}withdrawn{{else}}{{.}}{{end}}</span>{{end}}
+
+{{/* The agent a code names, for the owner to confirm before a card is made. */}}
+{{define "agent-enrol-confirm"}}
+<div class="alert" data-tone="success" role="status">
+  <h2>Enrol <code>{{.Label}}</code>?</h2>
+  <section>
+    <p>An agent called <code>{{.Label}}</code> asked to be enrolled for project <code>{{.Project}}</code>. It gets no access at all: only the right to ask you for a key, and every ask is a card you answer. The enrolment key lasts 30 days. The code lasts until <time datetime="{{.Expires}}">{{.Expires}}</time>.</p>
+    <p>Only enrol an agent you started, on the machine you started it on, a moment ago.</p>
+    <form class="form" hx-post="/agents/enrol/approve" hx-target="#enrol-status" hx-swap="innerHTML">
+      <input type="hidden" name="code" value="{{.Code}}">
+      <button class="btn" type="submit">Make the enrolment card</button>
+    </form>
+  </section>
+</div>
+{{end}}

@@ -189,7 +189,7 @@ func (e *Engine) RequestTx(ctx context.Context, tx *store.Tx, in RequestInput) (
 	if info.Class == ClassRoutine {
 		return Result{Refusal: refuse(CodeParamsInvalid, "this op never needs an approval")}, nil
 	}
-	requesterKey, runID, err := requesterOf(req.Requester)
+	kind, requesterKey, runID, err := requesterOf(req.Requester)
 	if err != nil {
 		return Result{Refusal: refuse(CodeParamsInvalid, err.Error())}, nil
 	}
@@ -214,7 +214,7 @@ func (e *Engine) RequestTx(ctx context.Context, tx *store.Tx, in RequestInput) (
 	}
 
 	// Dedupe: the same caller asking for the same op hash while a card waits.
-	if existing, err := e.pendingFor(ctx, tx, opHash, req.Requester.Kind, requesterKey); err != nil {
+	if existing, err := e.pendingFor(ctx, tx, opHash, kind, requesterKey); err != nil {
 		return Result{}, err
 	} else if existing != nil {
 		return Result{Approval: existing}, nil
@@ -230,11 +230,11 @@ func (e *Engine) RequestTx(ctx context.Context, tx *store.Tx, in RequestInput) (
 	}
 
 	// Pending caps (section 6, item 4): they bound what agents queue.
-	if r, err := e.overCap(ctx, tx, req, requesterKey); err != nil {
+	if r, err := e.overCap(ctx, tx, req, kind, requesterKey); err != nil {
 		return Result{}, err
 	} else if r != nil {
 		if e.cfg.Stop != nil {
-			if err := e.cfg.Stop(ctx, tx, Stop{Code: StopFlood, RunID: runID, RequesterKind: req.Requester.Kind,
+			if err := e.cfg.Stop(ctx, tx, Stop{Code: StopFlood, RunID: runID, RequesterKind: kind,
 				RequesterKey: requesterKey, Project: req.Project, Why: r.Why}); err != nil {
 				return Result{}, err
 			}
@@ -243,7 +243,7 @@ func (e *Engine) RequestTx(ctx context.Context, tx *store.Tx, in RequestInput) (
 	}
 
 	a := &Approval{
-		ID: newApprovalID(), RequestID: req.RequestID, RequesterKind: req.Requester.Kind, RequesterKey: requesterKey,
+		ID: newApprovalID(), RequestID: req.RequestID, RequesterKind: kind, RequesterKey: requesterKey,
 		RunID: runID, Project: req.Project, Op: req.Op, OpHash: opHash, Class: info.Class,
 		PolicyVersion: in.PolicyVersion, Request: req, Checks: nonNilChecks(in.Checks), Evidence: nonNilEvidence(in.Evidence),
 		State: StatePending, Created: now.Truncate(time.Second), RequestExpires: expires,
@@ -270,27 +270,31 @@ func (e *Engine) RequestTx(ctx context.Context, tx *store.Tx, in RequestInput) (
 	return Result{Approval: a, Created: true, Effects: fx}, nil
 }
 
-func requesterOf(r spec.Requester) (key, runID string, err error) {
+// requesterOf says who asked, in the engine's own terms: the kind ("run",
+// "orchestrator" or "key"), the key of that requester and the run id. A key
+// reaches the engine as the spec's orchestrator "key.<id>" (spec.KeyRequester)
+// and is stored as a key.
+func requesterOf(r spec.Requester) (kind, key, runID string, err error) {
 	switch r.Kind {
 	case "run":
 		if r.RunID == "" {
-			return "", "", errors.New("a run request has no run_id")
+			return "", "", "", errors.New("a run request has no run_id")
 		}
-		return r.RunID, r.RunID, nil
+		return "run", r.RunID, r.RunID, nil
 	case "orchestrator":
 		if r.ID == "" {
-			return "", "", errors.New("an orchestrator request has no id")
+			return "", "", "", errors.New("an orchestrator request has no id")
 		}
-		return r.ID, "", nil
+		if id, ok := spec.KeyIDOf(r); ok {
+			return "key", id, "", nil
+		}
+		return "orchestrator", r.ID, "", nil
 	}
-	return "", "", fmt.Errorf("unknown requester kind %q", r.Kind)
+	return "", "", "", fmt.Errorf("unknown requester kind %q", r.Kind)
 }
 
 func (e *Engine) alert(stage string, a *Approval) Alert {
-	who := "run " + a.RunID
-	if a.RequesterKind == "orchestrator" {
-		who = "orchestrator " + a.RequesterKey
-	}
+	who := requesterWho(a)
 	return Alert{Stage: stage, Op: a.Op, Project: a.Project, ApprovalID: a.ID, RequestID: a.RequestID, OpHash: a.OpHash, Requester: who}
 }
 
@@ -328,17 +332,20 @@ func insertApproval(ctx context.Context, tx *store.Tx, a *Approval) error {
 	if err != nil {
 		return err
 	}
-	var run any
+	var run, key any
 	if a.RunID != "" {
 		run = a.RunID
+	}
+	if a.RequesterKind == "key" {
+		key = a.RequesterKey
 	}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO approvals (approval_id, request_id, requester_kind, requester_key, run_id, project, op, op_hash, class,
 			policy_version, request_json, checks_json, evidence_json, card_text, display_sha256, state, created_unix,
-			request_expires_unix)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+			request_expires_unix, key_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
 		a.ID, a.RequestID, a.RequesterKind, a.RequesterKey, run, a.Project, a.Op, a.OpHash, string(a.Class),
-		a.PolicyVersion, reqJSON, checks, ev, a.CardText, a.DisplaySHA256, a.Created.Unix(), a.RequestExpires.Unix())
+		a.PolicyVersion, reqJSON, checks, ev, a.CardText, a.DisplaySHA256, a.Created.Unix(), a.RequestExpires.Unix(), key)
 	return err
 }
 
@@ -374,7 +381,7 @@ func (e *Engine) stickyWait(ctx context.Context, q queryer, opHash string, now t
 
 // overCap checks the three pending caps and returns the refusal for the first
 // one exceeded.
-func (e *Engine) overCap(ctx context.Context, q queryer, req spec.Request, key string) (*Refusal, error) {
+func (e *Engine) overCap(ctx context.Context, q queryer, req spec.Request, kind, key string) (*Refusal, error) {
 	type capCheck struct {
 		name  string
 		limit int
@@ -382,7 +389,7 @@ func (e *Engine) overCap(ctx context.Context, q queryer, req spec.Request, key s
 		args  []any
 	}
 	checks := []capCheck{
-		{"this " + req.Requester.Kind, e.chap.PerRun, `state = 'pending' AND requester_kind = ? AND requester_key = ?`, []any{req.Requester.Kind, key}},
+		{"this " + kind, e.chap.PerRun, `state = 'pending' AND requester_kind = ? AND requester_key = ?`, []any{kind, key}},
 		{"this project", e.chap.PerProject, `state = 'pending' AND project = ?`, []any{req.Project}},
 		{"Chaperone", e.chap.Total, `state = 'pending'`, nil},
 	}
@@ -535,3 +542,17 @@ func (e *Engine) sweepTx(ctx context.Context, tx *store.Tx) (int, error) {
 }
 
 func (e *Engine) channelAllowed(c string) bool { return slices.Contains(e.cfg.Channels, c) }
+
+// requesterWho names the requester of a for an alert: "run <id>", "orchestrator
+// <id>" or "key <id>". An unknown kind is named as such, never as a run.
+func requesterWho(a *Approval) string {
+	switch a.RequesterKind {
+	case "run":
+		return "run " + a.RunID
+	case "orchestrator":
+		return "orchestrator " + a.RequesterKey
+	case "key":
+		return "key " + a.RequesterKey
+	}
+	return "unknown requester " + a.RequesterKey
+}

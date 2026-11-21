@@ -1,0 +1,15 @@
+$ chap issue link AGT-12 --url https://github.com/example-org/storefront/pull/12 --title "The fix" --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"issue.link","params":{"title":"The fix","url":"https://github.com/example-org/storefront/pull/12"},"project":"storefront","target":{"adapter":"linear","ref":"AGT-12"}}
+--- stdout
+issue.link AGT-12: succeeded
+id: q-7e5f6a  class: routine  policy: baseline-2026.10.1
+execution: x-7a8b9c
+external_ref: https://linear.app/example/issue/AGT-12
+result:
+  identifier: AGT-12
+  url: https://github.com/example-org/storefront/pull/12
+--- stderr

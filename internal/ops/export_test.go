@@ -5,3 +5,9 @@ package ops
 func PlainRefusal(r *Refusal) string { return plainRefusal(r) }
 
 func Retitled(r *Refusal) bool { return retitled(r) }
+
+// SafeURL and LineText are the helpers that clean GitHub's text for a result.
+var (
+	SafeURL  = safeURL
+	LineText = lineText
+)

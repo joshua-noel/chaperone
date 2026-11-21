@@ -250,7 +250,7 @@ func TestPhoneApprovesOnItsOwnWithTheRightNumber(t *testing.T) {
 	if strings.Contains(phonePage, `class="phone-code-number"`) || strings.Contains(phonePage, "Phone number for this card") {
 		t.Fatal("the phone page shows which number is right")
 	}
-	if !strings.Contains(pcPage, "Approve with Windows Hello") || strings.Contains(phonePage, "Approve with Windows Hello") {
+	if !strings.Contains(pcPage, "Approve with your passkey") || strings.Contains(phonePage, "Approve with your passkey") {
 		t.Fatal("the PC offers Hello and the phone offers the number buttons")
 	}
 

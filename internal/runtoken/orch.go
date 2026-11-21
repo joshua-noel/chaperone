@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,6 +133,12 @@ type OrchConfig struct {
 	// TxRevoke runs inside the revoke transaction: cancel the orchestrator's
 	// pending approvals here (ADR-007 item 7). An error rolls the revoke back.
 	TxRevoke func(ctx context.Context, tx *store.Tx, id string) error
+	// TxReissue runs inside the transaction that issues a token for id, before the old token of id is rotated out,
+	// with the scope the new token will have. Revoke here what the orchestrator owns beyond that scope (ADR-008): a key
+	// in a project the new token no longer covers, or holding an operation it no longer allows, could not be seen or
+	// revoked by its owner any more, and must not outlive the access it was built from. An error rolls the issue
+	// back.
+	TxReissue func(ctx context.Context, tx *store.Tx, id string, scope OrchScope) error
 	// AfterRevoke runs after the revoke committed.
 	AfterRevoke func(ctx context.Context, id string)
 	Now         func() time.Time
@@ -202,6 +209,11 @@ func (o *Orchestrators) Verify(ctx context.Context, bearer string) (*Principal, 
 	if scopeErr == nil && len(scope.Projects) > 0 {
 		project = scope.Projects[0]
 	}
+	// A row from before these ids were reserved, or written by hand, must not act as the console's own identity
+	// ("operator" passes the gates that only a person's own Hello may pass) or as a name chapd records for keys.
+	if why := reservedOrchID(id); why != "" {
+		return nil, forOrch(refuse(CauseTokenInvalid, "orchestrator token %s: %s", id, why), id, project)
+	}
 	if revoked.Valid {
 		return nil, forOrch(misuse(refuse(CauseTokenRevoked, "orchestrator token %s was revoked", id)), id, project)
 	}
@@ -234,6 +246,32 @@ type IssueResult struct {
 	ExpiresAt   time.Time
 }
 
+// ChapdID is the id chapd writes into the ledger for what it does on its own: the sweep of keys nobody claimed, and
+// the revoke of the keys an orchestrator owns when the orchestrator is revoked or loses a project.
+const ChapdID = "chapd"
+
+// reservedOrchID says why an orchestrator id may not be used, or returns "" when it may. These are the ids chapd
+// writes into the ledger for what is not an orchestrator: the person at the console, a key, a person's own
+// agent, an enrolment. Issue refuses them when a token is made, and Verify refuses them again, so a row that
+// got there another way is never accepted.
+func reservedOrchID(id string) string {
+	if id == OperatorID {
+		return "it is reserved: it is what chapd records for a person at the console"
+	}
+	if id == ChapdID {
+		return "it is reserved: it is what chapd records for what it does by itself (a sweep, the revoke of a key with its owner)"
+	}
+	if strings.HasPrefix(id, spec.KeyRequesterPrefix) {
+		return "it must not start with " + strconv.Quote(spec.KeyRequesterPrefix) + " (reserved for keys)"
+	}
+	for _, prefix := range []string{"person.", "agent.", "enrol."} {
+		if strings.HasPrefix(id, prefix) {
+			return "it must not start with " + strconv.Quote(prefix) + " (reserved for what chapd records for people, agents and enrolments)"
+		}
+	}
+	return ""
+}
+
 // Issue creates a token and stores only its SHA-256. A live token for the same
 // id is revoked in the same transaction (rotation: revoked_by "rotated"). The
 // token is added to the redaction sink before the row commits. The events are
@@ -241,6 +279,9 @@ type IssueResult struct {
 func (o *Orchestrators) Issue(ctx context.Context, p IssueParams) (IssueResult, error) {
 	if !orchIDRe.MatchString(p.ID) {
 		return IssueResult{}, invalid("orchestrator id %q must match %s", p.ID, orchIDRe)
+	}
+	if why := reservedOrchID(p.ID); why != "" {
+		return IssueResult{}, invalid("orchestrator id %q: %s", p.ID, why)
 	}
 	if err := p.Scope.check(); err != nil {
 		return IssueResult{}, err
@@ -271,6 +312,11 @@ func (o *Orchestrators) Issue(ctx context.Context, p IssueParams) (IssueResult, 
 	}
 	res := IssueResult{Token: token, Fingerprint: hexSum[:8], ExpiresAt: time.Unix(expires.Unix(), 0).UTC()}
 	err = o.cfg.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
+		if o.cfg.TxReissue != nil {
+			if err := o.cfg.TxReissue(ctx, tx, p.ID, p.Scope); err != nil {
+				return fmt.Errorf("runtoken: re-issue hook: %w", err)
+			}
+		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE orchestrators SET revoked_at = ?, revoked_by = 'rotated' WHERE id = ? AND revoked_at IS NULL`,
 			now.Unix(), p.ID); err != nil {

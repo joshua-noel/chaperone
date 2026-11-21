@@ -37,6 +37,8 @@ type Check struct {
 	StartedAt time.Time
 	// Title and Summary are the output a check run created through POST /check-runs carries.
 	Title, Summary string
+	// ExternalID is the `external_id` a check run created through POST /check-runs carried; empty if none.
+	ExternalID string
 }
 
 type checkRun struct {

@@ -1,0 +1,17 @@
+$ chap issue move AGT-12 --state "In Progress" --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"issue.move","params":{"state":"In Progress"},"project":"storefront","target":{"adapter":"linear","ref":"AGT-12"}}
+--- stdout
+issue.move AGT-12: succeeded
+id: q-7d4e5f  class: routine  policy: baseline-2026.10.1
+execution: x-7a8b9c
+external_ref: https://linear.app/example/issue/AGT-12
+result:
+  from: Todo
+  identifier: AGT-12
+  moved: true
+  to: In Progress
+--- stderr

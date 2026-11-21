@@ -53,3 +53,32 @@ func TestPlainRune(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRefusesShapesThatCanNeverMatch(t *testing.T) {
+	for name, bad := range map[string]string{
+		"trailing slash": "docs/", "trailing slash after **": "docs/**/", "doubled slash": "docs//a", "dot component": "docs/./a",
+		"dotdot component": "docs/../a", "dot only": ".", "dotdot only": "..", "leading space": "docs/ a", "trailing space": "docs/a ",
+		"space after slash": "docs/ /a", "ends with a dot": "docs/a.", "star then dot": "docs/*.", "caret outside a class": "docs/a^b",
+		"caret at the start": "^docs/**", "caret after a class": "docs/[a]^", "reversed range": "docs/[z-a]/**", "reversed digits": "x/[9-0]",
+		"reversed in a negated class": "x/[^z-a]", "empty class": "docs/[]/a", "empty negated class": "docs/[^]/a", "class not closed": "docs/[ab",
+		"class not closed after a range": "docs/[a-c",
+	} {
+		err := tierglob.Validate(bad)
+		if err == nil {
+			t.Errorf("%s: %q accepted", name, bad)
+		} else if !strings.Contains(err.Error(), strconv.Quote(bad)) {
+			t.Errorf("%s: the refusal does not name the glob: %v", name, err)
+		}
+	}
+}
+
+func TestValidateAcceptsClassesAndNegation(t *testing.T) {
+	for _, ok := range []string{
+		"docs/[a-c]*.md", "docs/[^a]?.md", "docs/[ab]/**", "docs/[a-cx-z]/**", "docs/[a^]/x", "docs/[1]/x",
+		"app/?slug?/**", "**/[A-Z]*.md", "a.b/**", "x/a b/c",
+	} {
+		if err := tierglob.Validate(ok); err != nil {
+			t.Errorf("%q refused: %v", ok, err)
+		}
+	}
+}

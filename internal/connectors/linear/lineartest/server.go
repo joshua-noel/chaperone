@@ -1,7 +1,8 @@
 // Package lineartest is a fake Linear for the connector's tests: the OAuth
 // client_credentials token endpoint (HTTP Basic client authentication, a
-// token that ends) and a GraphQL endpoint that answers the connector's five
-// fixed operations, by `operationName` and variables. It never talks to the
+// token that ends) and a GraphQL endpoint that answers the connector's fixed
+// operations (the five intake documents and the seven of the generic issue
+// ops), by `operationName` and variables. It never talks to the
 // network. Tests build the connector's Endpoints from [Server.URL]:
 //
 //	API: URL+"/graphql", Token: URL+"/oauth/token"
@@ -71,6 +72,8 @@ type Issue struct {
 	Links       []Link
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	// MoreLabels makes the fake report that the issue has more labels than one page.
+	MoreLabels bool
 }
 
 // Request is one GraphQL request the fake received.
@@ -107,13 +110,18 @@ type Server struct {
 	rate429  int // answer the next n GraphQL calls with HTTP 429
 	remain   string
 	commentN int
-	drop     map[string]bool // operation names whose answer is cut after the work was done
+	drop     map[string]bool   // operation names whose answer is cut after the work was done
+	secret   string            // the client secret the token endpoint accepts
+	echo     bool              // error answers repeat the credential they received
+	labels   map[string]string // label name -> team key ("" for a workspace label), set by DefineLabel
+	noops    int               // accepted mutations that changed nothing (a link that was already there)
+	cursor   string            // when set, the end cursor every page reports (a careless service)
 }
 
 // New starts a fake with two teams: SHOP (Operations) and ENG (Engineering).
 func New(t testing.TB) *Server {
 	t.Helper()
-	s := &Server{Now: time.Now, TokenTTL: 30 * 24 * time.Hour, teams: map[string]*Team{}, tokens: map[string]time.Time{}}
+	s := &Server{Now: time.Now, TokenTTL: 30 * 24 * time.Hour, teams: map[string]*Team{}, tokens: map[string]time.Time{}, secret: ClientSecret}
 	s.teams["SHOP"] = &Team{Key: "SHOP", Name: "Operations", States: []State{
 		{"st-ops-backlog", "Backlog", "backlog"}, {"st-ops-todo", "Todo", "unstarted"},
 		{"st-ops-handed", "Handed to engineering", "started"}, {"st-ops-progress", "In Progress", "started"},
@@ -121,6 +129,10 @@ func New(t testing.TB) *Server {
 	}}
 	s.teams["ENG"] = &Team{Key: "ENG", Name: "Engineering", States: []State{
 		{"st-eng-todo", "Todo", "unstarted"}, {"st-eng-done", "Done", "completed"},
+	}}
+	s.teams["AGT"] = &Team{Key: "AGT", Name: "Agents", States: []State{
+		{"st-agt-backlog", "Backlog", "backlog"}, {"st-agt-todo", "Todo", "unstarted"},
+		{"st-agt-progress", "In Progress", "started"}, {"st-agt-done", "Done", "completed"}, {"st-agt-cancel", "Canceled", "canceled"},
 	}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/oauth/token", s.token)
@@ -284,8 +296,15 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(v)
 	}
-	if id != ClientID || secret != ClientSecret {
-		reply(http.StatusUnauthorized, map[string]string{"error": "invalid_client", "error_description": "Client authentication failed"})
+	s.mu.Lock()
+	want, echo := s.secret, s.echo
+	s.mu.Unlock()
+	if id != ClientID || secret != want {
+		desc := "Client authentication failed"
+		if echo {
+			desc += " for the secret " + secret
+		}
+		reply(http.StatusUnauthorized, map[string]string{"error": "invalid_client", "error_description": desc})
 		return
 	}
 	if form["grant_type"] != "client_credentials" {
@@ -361,9 +380,13 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 	if exp, ok := s.tokens[bearer]; !ok || !s.Now().Before(exp) {
 		rec.Errors = true
 		s.reqs = append(s.reqs, rec)
+		msg := "Authentication required, not authenticated"
+		if s.echo {
+			msg += " (token " + bearer + ")"
+		}
 		s.mu.Unlock()
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"errors": []gqlError{{
-			Message: "Authentication required, not authenticated", Extensions: map[string]any{"type": "authentication error", "code": "AUTHENTICATION_ERROR"}}}})
+			Message: msg, Extensions: map[string]any{"type": "authentication error", "code": "AUTHENTICATION_ERROR"}}}})
 		return
 	}
 	if s.rate429 > 0 {
@@ -379,7 +402,7 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 	s.reqs = append(s.reqs, rec)
 	idx := len(s.reqs) - 1
 	var guardN int
-	if in.OperationName == "IntakeGuard" {
+	if in.OperationName == "IntakeGuard" || in.OperationName == "IssueGuard" {
 		s.guards++
 		guardN = s.guards
 	}
@@ -404,6 +427,20 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 		data, errs = s.comment(in.Variables)
 	case "IntakeSetState":
 		data, errs = s.setState(in.Variables)
+	case "IssueGet":
+		data, errs = s.issueGet(in.Variables)
+	case "IssueList":
+		data, errs = s.list(in.Variables)
+	case "IssueGuard":
+		data, errs = s.issueGuard(in.Variables)
+	case "IssueLabelLookup":
+		data, errs = s.labelLookup(in.Variables)
+	case "IssueAddLabel":
+		data, errs = s.changeLabel(in.Variables, true)
+	case "IssueRemoveLabel":
+		data, errs = s.changeLabel(in.Variables, false)
+	case "IssueLink":
+		data, errs = s.link(in.Variables)
 	default:
 		errs = []gqlError{{Message: "Cannot query field: unknown operation " + in.OperationName, Extensions: map[string]any{"code": "GRAPHQL_VALIDATION_FAILED"}}}
 	}
@@ -465,6 +502,7 @@ func dig(m map[string]any, path ...string) any {
 func (s *Server) list(v map[string]any) (any, []gqlError) {
 	team, _ := dig(v, "filter", "team", "key", "eq").(string)
 	label, _ := dig(v, "filter", "labels", "some", "name", "eq").(string)
+	eqType, _ := dig(v, "filter", "state", "type", "eq").(string)
 	var notIn []string
 	if l, ok := dig(v, "filter", "state", "type", "nin").([]any); ok {
 		for _, x := range l {
@@ -483,6 +521,9 @@ func (s *Server) list(v map[string]any) (any, []gqlError) {
 		if label != "" && !has(i.Labels, label) {
 			continue
 		}
+		if eqType != "" && s.stateOf(i).Type != eqType {
+			continue
+		}
 		if has(notIn, s.stateOf(i).Type) {
 			continue
 		}
@@ -499,6 +540,9 @@ func (s *Server) list(v map[string]any) (any, []gqlError) {
 		nodes = append(nodes, s.node(i))
 	}
 	page := map[string]any{"hasNextPage": end < len(match), "endCursor": strconv.Itoa(end)}
+	if s.cursor != "" {
+		page["endCursor"] = s.cursor
+	}
 	return map[string]any{"issues": map[string]any{"nodes": nodes, "pageInfo": page}}, nil
 }
 
@@ -506,7 +550,7 @@ func (s *Server) node(i *Issue) map[string]any {
 	t := s.teams[i.TeamKey]
 	labels := []any{}
 	for _, l := range i.Labels {
-		labels = append(labels, map[string]any{"name": l})
+		labels = append(labels, map[string]any{"id": labelID(l), "name": l})
 	}
 	comments := []any{}
 	for k := len(i.Comments) - 1; k >= 0 && len(comments) < 8; k-- {
@@ -523,7 +567,7 @@ func (s *Server) node(i *Issue) map[string]any {
 		"createdAt": i.CreatedAt.Format(time.RFC3339), "updatedAt": i.UpdatedAt.Format(time.RFC3339),
 		"team":        map[string]any{"key": t.Key, "name": t.Name},
 		"state":       map[string]any{"name": s.stateOf(i).Name, "type": s.stateOf(i).Type},
-		"labels":      map[string]any{"nodes": labels},
+		"labels":      map[string]any{"nodes": labels, "pageInfo": map[string]any{"hasNextPage": i.MoreLabels}},
 		"comments":    map[string]any{"nodes": comments},
 		"attachments": map[string]any{"nodes": links},
 	}
@@ -655,4 +699,226 @@ func (s *Server) setState(v map[string]any) (any, []gqlError) {
 // token endpoint (for tests that call it directly).
 func BasicHeader() string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(ClientID+":"+ClientSecret))
+}
+
+// SetClientSecret changes the client secret the token endpoint accepts (the
+// default is [ClientSecret]). The conformance suite uses it to make its canary
+// the credential.
+func (s *Server) SetClientSecret(v string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secret = v
+}
+
+// Hostile makes the fake behave like a careless service: it stops accepting the
+// client secret it had (newSecret is the one it accepts now) and every
+// authentication error repeats the credential it received, in the text of the
+// error.
+func (s *Server) Hostile(newSecret string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secret, s.echo = newSecret, true
+}
+
+// Tokens returns every access token the token endpoint has issued.
+func (s *Server) Tokens() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.tokens))
+	for t := range s.tokens {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Edit changes the issue with the identifier under the fake's lock. It does
+// nothing when there is no such issue.
+func (s *Server) Edit(ident string, f func(i *Issue)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, i := range s.issues {
+		if i.Identifier == ident {
+			f(i)
+		}
+	}
+}
+
+// AddState adds a workflow state to a team.
+func (s *Server) AddState(team string, st State) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.teams[team].States = append(s.teams[team].States, st)
+}
+
+// ---- the generic issue documents ---------------------------------------------
+
+func labelID(name string) string { return "lbl-" + name }
+
+// DefineLabel makes a label exist: a workspace label (teamKey empty) or the
+// own label of one team. A label that an issue carries and that was never
+// defined counts as a workspace label.
+func (s *Server) DefineLabel(name, teamKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.labels == nil {
+		s.labels = map[string]string{}
+	}
+	s.labels[name] = teamKey
+}
+
+// SetCursor makes every page report v as its end cursor, whatever it was.
+func (s *Server) SetCursor(v string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cursor = v
+}
+
+// NoOps is how many accepted mutations changed nothing: a link that the issue
+// already had, with the same title. The conformance rig subtracts them from the
+// writes it counts as applied.
+func (s *Server) NoOps() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.noops
+}
+
+// Attachments returns the links of the issue.
+func (s *Server) Attachments(ident string) []Link {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, i := range s.issues {
+		if i.Identifier == ident {
+			return append([]Link(nil), i.Links...)
+		}
+	}
+	return nil
+}
+
+func (s *Server) issueGet(v map[string]any) (any, []gqlError) {
+	id, _ := v["id"].(string)
+	i := s.find(id)
+	if i == nil {
+		return nil, invalid("Entity not found: Issue - Could not find referenced Issue.")
+	}
+	return map[string]any{"issue": s.node(i)}, nil
+}
+
+func (s *Server) issueGuard(v map[string]any) (any, []gqlError) {
+	id, _ := v["id"].(string)
+	i := s.find(id)
+	if i == nil {
+		return nil, invalid("Entity not found: Issue - Could not find referenced Issue.")
+	}
+	t := s.teams[i.TeamKey]
+	labels := []any{}
+	for _, l := range i.Labels {
+		labels = append(labels, map[string]any{"id": labelID(l), "name": l})
+	}
+	return map[string]any{"issue": map[string]any{
+		"id": i.ID, "identifier": i.Identifier, "title": i.Title, "url": "https://linear.app/fake/issue/" + i.Identifier,
+		"team":   map[string]any{"key": t.Key, "name": t.Name, "states": map[string]any{"nodes": stateNodes(t)}},
+		"state":  map[string]any{"id": s.stateOf(i).ID, "name": s.stateOf(i).Name, "type": s.stateOf(i).Type},
+		"labels": map[string]any{"nodes": labels, "pageInfo": map[string]any{"hasNextPage": i.MoreLabels}},
+	}}, nil
+}
+
+func (s *Server) labelLookup(v map[string]any) (any, []gqlError) {
+	name, _ := v["name"].(string)
+	nodes := []any{}
+	team, defined := s.labels[name]
+	if !defined {
+		for _, i := range s.issues {
+			if has(i.Labels, name) {
+				defined = true
+			}
+		}
+	}
+	if defined {
+		n := map[string]any{"id": labelID(name), "name": name, "team": nil}
+		if team != "" {
+			n["team"] = map[string]any{"key": team}
+		}
+		nodes = append(nodes, n)
+	}
+	return map[string]any{"issueLabels": map[string]any{"nodes": nodes}}, nil
+}
+
+func (s *Server) changeLabel(v map[string]any, add bool) (any, []gqlError) {
+	id, _ := v["id"].(string)
+	labelId, _ := v["labelId"].(string)
+	if len(v) != 2 {
+		return nil, invalid("unexpected variables")
+	}
+	var target *Issue
+	for _, i := range s.issues {
+		if i.ID == id {
+			target = i
+		}
+	}
+	if target == nil {
+		return nil, invalid("Entity not found: Issue")
+	}
+	name := strings.TrimPrefix(labelId, "lbl-")
+	if name == labelId || name == "" {
+		return nil, invalid("Entity not found: IssueLabel")
+	}
+	var kept []string
+	found := false
+	for _, l := range target.Labels {
+		if l == name {
+			found = true
+			if !add {
+				continue
+			}
+		}
+		kept = append(kept, l)
+	}
+	switch {
+	case add && found:
+		return nil, invalid("Label already added to the issue")
+	case add:
+		kept = append(kept, name)
+	case !found:
+		return nil, invalid("Label is not on the issue")
+	}
+	target.Labels = kept
+	target.UpdatedAt = s.Now()
+	field := "issueRemoveLabel"
+	if add {
+		field = "issueAddLabel"
+	}
+	return map[string]any{field: map[string]any{"success": true, "issue": map[string]any{"identifier": target.Identifier}}}, nil
+}
+
+func (s *Server) link(v map[string]any) (any, []gqlError) {
+	in, _ := v["input"].(map[string]any)
+	if errs := onlyKeys(in, "issueId", "url", "title"); errs != nil {
+		return nil, errs
+	}
+	issueID, _ := in["issueId"].(string)
+	url, _ := in["url"].(string)
+	title, _ := in["title"].(string)
+	var target *Issue
+	for _, i := range s.issues {
+		if i.ID == issueID {
+			target = i
+		}
+	}
+	if target == nil || url == "" {
+		return nil, invalid("Entity not found: Issue")
+	}
+	for k, l := range target.Links {
+		if l.URL == url {
+			if title != "" && title != l.Title {
+				target.Links[k].Title = title
+			} else {
+				s.noops++
+			}
+			return map[string]any{"attachmentCreate": map[string]any{"success": true, "attachment": map[string]any{"id": "att-1", "url": url}}}, nil
+		}
+	}
+	target.Links = append(target.Links, Link{URL: url, Title: title, Source: "api"})
+	target.UpdatedAt = s.Now()
+	return map[string]any{"attachmentCreate": map[string]any{"success": true, "attachment": map[string]any{"id": "att-1", "url": url}}}, nil
 }

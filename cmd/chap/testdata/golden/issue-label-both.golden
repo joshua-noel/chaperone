@@ -1,0 +1,8 @@
+$ chap issue label AGT-12 --add a --remove b
+exit: 2
+--- request
+(none)
+--- stdout
+--- stderr
+chap: give exactly one of --add and --remove
+usage: chap issue label <AGT-12> --add <l> | --remove <l> [--dry-run]

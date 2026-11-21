@@ -4,13 +4,23 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"regexp"
 	"strconv"
+
+	"github.com/joshua-noel/chaperone/internal/connectors/linear/linearspec"
 )
 
 // `chap issue open|comment|reopen`: the error watcher files and
 // follows issues through chapd with its orchestrator token. chapd takes the
 // repository from the project and refuses any issue that lacks the label
-// source:error-watcher; these commands only build the request.
+// source:error-watcher; these commands only build the request. `issue reopen`
+// is built from its declaration (cmd/chap/kitcmd.go); `issue open` stays here
+// because its usage line names the label the watcher must give, and `issue
+// comment` because it serves two connectors: a bare number is a GitHub issue,
+// a Linear identifier (AGT-12) is a Linear one (issue_linear.go).
+
+// issueIdentRE is the shape of a Linear issue identifier, AGT-12.
+var issueIdentRE = regexp.MustCompile(linearspec.IssueRefPattern)
 
 func parseIssue(s string) (int, error) {
 	n, err := strconv.Atoi(s)
@@ -73,6 +83,9 @@ func cmdIssueComment(a *app, c *command, args []string) int {
 	if err := co.check(); err != nil {
 		return a.usageErr(c, "%v", err)
 	}
+	if issueIdentRE.MatchString(pos[0]) { // AGT-12: a Linear issue; a bare number is GitHub's
+		return cmdIssueCommentLinear(a, c, &co, &tf, pos[0])
+	}
 	n, err := parseIssue(pos[0])
 	if err != nil {
 		return a.usageErr(c, "%v", err)
@@ -89,28 +102,4 @@ func cmdIssueComment(a *app, c *command, args []string) int {
 		return a.usageErr(c, "%v", err)
 	}
 	return a.ask(&co, opReq{op: "issue.comment", target: target{"github", fmt.Sprintf("%s#%d", r, n)}, params: map[string]any{"body": text}})
-}
-
-func cmdIssueReopen(a *app, c *command, args []string) int {
-	var co common
-	var repo string
-	fs := flag.NewFlagSet(c.path, flag.ContinueOnError)
-	co.register(fs, a)
-	fs.StringVar(&repo, "repo", "", "owner/name (default: from the git remote origin)")
-	pos, code, done := a.parse(c, fs, args, 1, 1)
-	if done {
-		return code
-	}
-	if err := co.check(); err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	n, err := parseIssue(pos[0])
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	r, err := a.repoArg(repo)
-	if err != nil {
-		return a.usageErr(c, "%v", err)
-	}
-	return a.ask(&co, opReq{op: "issue.reopen", target: target{"github", fmt.Sprintf("%s#%d", r, n)}, params: map[string]any{}})
 }

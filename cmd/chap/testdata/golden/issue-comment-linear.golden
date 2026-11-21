@@ -1,0 +1,16 @@
+$ chap issue comment AGT-12 --body "Looking at it." --project storefront
+exit: 0
+--- request
+POST /v0/ops
+auth: orchestrator
+{"op":"issue.comment","params":{"body":"Looking at it."},"project":"storefront","target":{"adapter":"linear","ref":"AGT-12"}}
+--- stdout
+issue.comment AGT-12: succeeded
+id: q-7f6a7b  class: routine  policy: baseline-2026.10.1
+execution: x-7a8b9c
+external_ref: https://linear.app/example/issue/AGT-12#comment-1a2b3c4d
+result:
+  comment_id: 1a2b3c4d-0000-4000-8000-000000000001
+  identifier: AGT-12
+  url: https://linear.app/example/issue/AGT-12#comment-1a2b3c4d
+--- stderr

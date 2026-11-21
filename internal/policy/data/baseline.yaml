@@ -28,6 +28,25 @@ ops:
   issue.open:           { enabled: true,  rate_per_minute: 6,  rate_per_hour: 20 }
   issue.comment:        { enabled: true,  rate_per_minute: 6,  rate_per_hour: 20 }
   issue.reopen:         { enabled: true,  rate_per_minute: 6,  rate_per_hour: 20 }
+  # `issue.comment` above is one name for two connectors (GitHub's, for the error watcher, and Linear's). The Linear
+  # adapter refuses every project whose policy file has no `linear.issues` block, so the name being on does not turn
+  # Linear on. The five Linear issue ops below are OFF until a policy change flips them: reads of and writes to the
+  # issue team only, never the operator board (`intake_label_excluded`). `issue.open` and `issue.update` are not built.
+  # Linear comments also need `comment: true` in the project's `linear.issues` block, and share this name's rate budget.
+  issue.get:            { enabled: false, rate_per_minute: 12 }
+  issue.list:           { enabled: false, rate_per_minute: 12 }
+  issue.label:          { enabled: false, rate_per_minute: 6 }
+  issue.move:           { enabled: false, rate_per_minute: 6 }
+  issue.link:           { enabled: false, rate_per_minute: 6,  rate_per_hour: 30 }
+  # Sentry (internal/connectors/sentry): all six ops are OFF until a policy change flips them. For the orchestrator token only (no
+  # profile lists them, and a custom key can never hold an errors.* op). Each refuses a project whose policy file has no valid
+  # `sentry:` block, and touches only the Sentry projects that block lists. The caps bound the load on Sentry.
+  errors.list:          { enabled: false, rate_per_minute: 12, rate_per_hour: 300 }
+  errors.get:           { enabled: false, rate_per_minute: 12, rate_per_hour: 300 }
+  errors.resolve:       { enabled: false, rate_per_minute: 2,  rate_per_hour: 10 }  # what a resolve starts in Sentry (a ticket that closes, a page) is not undone: keep this low
+  errors.unresolve:     { enabled: false, rate_per_minute: 2,  rate_per_hour: 10 }
+  errors.assign:        { enabled: false, rate_per_minute: 6,  rate_per_hour: 30 }
+  errors.comment:       { enabled: false, rate_per_minute: 6,  rate_per_hour: 30 }
   # Read-only PR views (ADR-002 amendment 12): on since the operator's policy PR. For the orchestrator token only (no profile lists them);
   # the repository is the project's `pr.repo`. The caps bound the load on GitHub: one to three API calls and one token per call.
   pr.view:              { enabled: true,  rate_per_minute: 30, rate_per_hour: 600 }
@@ -44,12 +63,17 @@ ops:
   intake.states:        { enabled: true,  rate_per_minute: 6 }
   deploy:               { enabled: false, rate_per_minute: 3 }
   data.apply:           { enabled: false, rate_per_minute: 3 }
+  # mail.send is one name for two connectors (Gmail, target `google`, and Resend, target `resend`); this one rule turns both on.
+  # Each refuses a project whose policy file has no valid block of its own (`google:` or `resend:`). Every send needs an approval.
   mail.send:            { enabled: false, rate_per_minute: 3 }
   drive.share:          { enabled: false, rate_per_minute: 3 }
   notion.write:         { enabled: false, rate_per_minute: 3 }
   pr.push.workflow:     { enabled: false, rate_per_minute: 3 }
   repo.settings:        { enabled: false, rate_per_minute: 3 }
   secrets.write:        { enabled: false, rate_per_minute: 3 }
+  keys.issue:           { enabled: false, rate_per_minute: 3 }    # ADR-008: a key for a script or an agent; every key is a card signed with Hello; off until a policy PR turns it on
+  keys.request:         { enabled: false, rate_per_minute: 6 }    # ADR-008: an agent asks its owner for a key (routine: it only writes the ask down); off until a policy PR turns it on
+  keys.extend:          { enabled: false, rate_per_minute: 3 }    # ADR-008: the owner makes an agent's key last longer, one card signed with Hello; off until a policy PR turns it on
   host.scripts.refresh: { enabled: false, rate_per_minute: 3 }
   approvers.enroll:     { enabled: false, rate_per_minute: 3 }
   policy.activate:      { enabled: false, rate_per_minute: 3 }

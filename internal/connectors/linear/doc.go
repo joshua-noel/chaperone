@@ -2,6 +2,15 @@
 // : the ops `intake.list`, `intake.comment`,
 // `intake.move` and `intake.states`.
 //
+// # Where the facts of an operation are
+//
+// The name, class, reversibility, summary, usage line, rate, target and params
+// of each operation are declared once, in the subpackage [linearspec]. The
+// manual entry, the params schema, the `chap` command and the adapter's list of
+// allowed params are derived from that declaration (see docs/connectors.md and
+// internal/connectors/kit). This package holds what is not a fact: the policy
+// checks, the idempotency, the reading of Linear and the handling of its text.
+//
 // # What an agent can and cannot do
 //
 // The orchestrator asks chapd for an op; chapd builds the GraphQL itself. The caller never
@@ -53,4 +62,15 @@
 // answer that does not show whether Linear acted (a timeout, a 5xx) leaves the
 // op `unconfirmed`, and the result carries the comment id chapd chose, so the
 // comment can be looked up.
+//
+// # The generic issue ops
+//
+// Beside the operator-board intake, the package serves the generic issue ops of
+// the connector standard (a design document outside this repository): `issue.get`, `issue.list`, `issue.comment`,
+// `issue.label`, `issue.move` and `issue.link` (issue.go). They work in the
+// project's `linear.issues.team` only, are off for a project whose policy file
+// has no `linear.issues` block, and never read or write an item of the operator
+// board (`intake_label_excluded`): an item in the intake team or with the intake
+// label is refused in Check and again in Execute, and no policy field lifts
+// that. `issue.open` and `issue.update` are not built. See ADR-003 amendment 7.
 package linear

@@ -14,7 +14,7 @@ cd chaperone
 .\scripts\demo\approve-a-merge.ps1
 ```
 
-The script prints one address. Open it in Edge, create a passkey, sign in, open Approvals, read the card and press **Approve with Windows Hello**. The script then checks that the fake GitHub saw exactly one merge and that the approval cannot be used again. Add `-AlsoDeny` to deny a second card first.
+The script prints one address. Open it in Edge, create a passkey, sign in, open Approvals, read the card and press **Approve with your passkey**. The script then checks that the fake GitHub saw exactly one merge and that the approval cannot be used again. Add `-AlsoDeny` to deny a second card first.
 
 ## The problem
 
@@ -45,8 +45,11 @@ Chaperone takes a different route. The agent never has the credential. It has on
 | `chap-host` | A small helper in the operator's own session. It shows a notification when approvals are waiting and runs a fixed list of host scripts, such as deploy and health, when `chapd` gives it a signed grant. |
 | `chap mcp` | A local MCP server, part of `chap`. It lets an MCP client on the same machine use Chaperone's operations. It cannot approve either. See [`docs/runbooks/mcp.md`](docs/runbooks/mcp.md). |
 | GitHub connector | A GitHub App. Push to a task branch through a git proxy, open and update pull requests, read pull requests, file issues, and merge only when CI is green on the exact commit. |
-| Linear connector | Read an intake board and write back a comment or a state change. Limited by policy to one team, one label and a list of states. |
+| Linear connector | Read an intake board and write back a comment or a state change. Limited by policy to one team, one label and a list of states. Five more operations (get, list, label, move, link) and Linear's side of `issue.comment` work on a second team, never on the intake board, and are off until a policy change turns them on. |
+| Sentry connector | List the issues of listed Sentry projects, read one with its latest event's stack, resolve or reopen it, assign it to a listed member, and add a plain-text note. Never returns request data, cookies, headers, user data or local variables. Off until a policy change turns it on. Tested against a fake Sentry only. |
 | Google connector | Send mail and share a Drive file, with a recipient allowlist. Off until a policy change turns it on. |
+| Resend connector | Send a plain-text email through Resend (the same `mail.send` operation as Gmail; the target picks the service) to listed addresses from listed senders, after the operator approves each message. No attachment, HTML, reply-to, scheduled send, template, tag or header. Off until a policy change turns it on. Tested against a fake Resend only. |
+| Custom keys | A key for a script or an agent: its own token for a few operations in one project and repository (routine ones it runs on its own; for a risky one it can only ask, and the operator approves each use with a passkey), made by an approval card the operator signs, shown once, stored only as a hash, limited in time and rate, and revoked at once. It can never approve, issue another key or do a critical operation. See [`docs/adr/008-custom-keys.md`](docs/adr/008-custom-keys.md). Off until a policy change turns `keys.issue` on. |
 | Console | A web page on `localhost` for approvals, runs, the list of operations, the ledger and secrets. It never shows a secret or a token. |
 | Phone approvals | The same approval card on a phone, with a passkey and number matching. A push message only wakes the phone and holds no details. |
 | Ledger tools | `chap ledger verify` checks the hash chain. Signed anchors can be copied to a phone and to a backup, so a rewrite of the whole chain is also found. |
@@ -88,7 +91,7 @@ The parts listed under "What is included" are built and have automated tests. Th
 - Running a whole agent setup on Chaperone alone, with the agents holding no other access.
 - The Google mail and Drive actions against the real Google service. The tests use a fake.
 - Phone approval over a real network. The browser flow was tested without a real phone.
-- A real tool call by a model through `chap mcp`. The server was tested against a fake `chapd`, not with a model.
+- A model working through `chap mcp` all the way to an approved merge. Claude Code has listed the tools, read a pull request, been refused a merge and asked for an approval card in the playground. No one has yet approved that card and watched the model finish.
 
 Do not rely on Chaperone to protect something you cannot afford to lose until you have tested it in your own setup.
 

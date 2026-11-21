@@ -1,6 +1,7 @@
 package approvals
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -66,6 +67,8 @@ func (e *Engine) breach(ctx context.Context, actor Actor, approvalID string) err
 			s.RequesterKind, s.RequesterKey, s.RunID = "run", actor.RunID, actor.RunID
 		case ActorOrchestrator:
 			s.RequesterKind, s.RequesterKey = "orchestrator", actor.ID
+		case ActorKey:
+			s.RequesterKind, s.RequesterKey = "key", actor.ID
 		}
 		if err := e.cfg.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
 			return e.cfg.Stop(ctx, tx, s)
@@ -388,6 +391,10 @@ func (e *Engine) Approve(ctx context.Context, in ApproveInput) (*Approval, error
 		}
 		body := fmt.Sprintf("approved by %s on %s; assertion_sha256=%s; display_sha256=%s; challenge_sha256=%s",
 			ch.Approver, ev.Channel, assertionHash, a.DisplaySHA256, hash)
+		if ev.Attachment != "" {
+			body += fmt.Sprintf("; authenticator=%s; transports=%s; backup_eligible=%t",
+				ev.Attachment, cmp.Or(strings.Join(ev.Transports, ","), "none"), ev.BackupEligible)
+		}
 		if ev.Channel == "phone" {
 			body += "; number_matching=ok"
 		}
@@ -456,10 +463,18 @@ func (e *Engine) ledgerDecision(ctx context.Context, tx *store.Tx, a *Approval, 
 		"factory.decision":       decision,
 		"factory.approver.id":    a.Approver,
 		"factory.policy_version": a.PolicyVersion,
-		"factory.requester.kind": a.RequesterKind,
 	}
-	if a.RequesterKind == "orchestrator" {
+	// The ledger knows the spec's requester kinds only: a key is the orchestrator "key.<id>".
+	switch a.RequesterKind {
+	case "run":
+		attrs["factory.requester.kind"] = "run"
+	case "orchestrator":
+		attrs["factory.requester.kind"] = "orchestrator"
 		attrs["factory.orchestrator.id"] = a.RequesterKey
+	case "key":
+		sr := spec.KeyRequester(a.RequesterKey)
+		attrs["factory.requester.kind"] = sr.Kind
+		attrs["factory.orchestrator.id"] = sr.ID
 	}
 	if channel != "" {
 		attrs["factory.confirm.channels"] = []any{channel}

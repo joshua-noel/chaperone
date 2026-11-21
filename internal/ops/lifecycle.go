@@ -21,6 +21,7 @@ const (
 	causeCancelled   = "CANCELLED_BY_REQUESTER"
 	causeRunEnded    = "RUN_ENDED"
 	causeOrchRevoked = "ORCHESTRATOR_REVOKED"
+	causeKeyRevoked  = "KEY_REVOKED"
 	causeExpired     = "OP_APPROVAL_EXPIRED"
 	causeRestart     = "CHAPD_RESTARTED"
 	causePolicyMoved = "OP_POLICY_REFUSED"
@@ -157,6 +158,17 @@ func (s *Service) startRelease(ctx context.Context, id string) (<-chan struct{},
 
 	execID := s.newID("x-")
 	err = s.db.Immediate(bg, func(ctx context.Context, tx *store.Tx) error {
+		// An op of a key runs only while the key lives. This is checked in the transaction that releases the op, which
+		// the revoke's own transaction cannot interleave with: a key revoked while the call was in flight, or that
+		// ran out while its card waited, is refused here, and the approval is not spent.
+		if rec.RequesterKind == KindKey {
+			if s.keyLive == nil {
+				return errors.New("ops: an op of a key, and no key store to ask")
+			}
+			if err := s.keyLive(ctx, tx, rec.KeyID); err != nil {
+				return err
+			}
+		}
 		if err := (transition{From: StateAllowed, To: StateExecuting, Now: s.now(), ExecutionID: execID}).apply(ctx, tx, id); err != nil {
 			return err
 		}
@@ -447,8 +459,9 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 
 // Recover runs once at start: an op found `executing` was dispatched by a
 // process that died. Nobody knows whether the action happened, so it becomes
-// `unconfirmed`, and its adapter resolves it with the same execution_id
-// (never a second execution).
+// `unconfirmed`. The adapter is not run again: a second execution could repeat
+// the write. The op stays unconfirmed until [Service.Reconcile] settles it, and
+// no shipped code calls that yet.
 func (s *Service) Recover(ctx context.Context) (int, error) {
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT `+recordColumns+` FROM ops WHERE state = 'executing'`)
 	if err != nil {
@@ -545,6 +558,13 @@ func (s *Service) CancelRunOps(ctx context.Context, tx *store.Tx, runID, reason 
 // the orchestrator cancels its pending approvals and waiting ops.
 func (s *Service) CancelOrchOps(ctx context.Context, tx *store.Tx, orchID string) error {
 	return s.cancelOpsOf(ctx, tx, "orchestrator:"+orchID, "orchestrator revoked", causeOrchRevoked)
+}
+
+// CancelKeyOps is the keys store's revoke hook (ADR-008): revoking a key
+// cancels its pending approvals and waiting ops in the revoke transaction,
+// each with an op.result of refused and cause KEY_REVOKED.
+func (s *Service) CancelKeyOps(ctx context.Context, tx *store.Tx, keyID string) error {
+	return s.cancelOpsOf(ctx, tx, "key:"+keyID, "key revoked", causeKeyRevoked)
 }
 
 func (s *Service) cancelOpsOf(ctx context.Context, tx *store.Tx, requesterKey, reason, cause string) error {
@@ -705,10 +725,6 @@ func (r *record) specRequest() spec.Request {
 		RequestedAt: r.RequestedAt.Format(time.RFC3339), ExpiresAt: r.ExpiresAt.Format(time.RFC3339),
 		Traceparent: r.Traceparent,
 	}
-	if r.RequesterKind == KindRun {
-		req.Requester = spec.Requester{Kind: KindRun, RunID: r.RunID, TokenJTI: r.TokenJTI, Profile: r.Profile}
-	} else {
-		req.Requester = spec.Requester{Kind: KindOrchestrator, ID: r.OrchID}
-	}
+	req.Requester = requesterOf(r.RequesterKind, r.RunID, r.TokenJTI, r.Profile, r.OrchID, r.KeyID)
 	return req
 }
