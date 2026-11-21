@@ -299,6 +299,7 @@ func readQuickstartState(dir string) (*quickstartState, error) {
 // quickstartFolder is a prepared folder.
 type quickstartFolder struct {
 	Dir, DB, Keys, PolicyDir, TokenFile, LogDir string
+	AgentKey                                    string // the agent's key file: made by `chap agent enrol`, never by chapd
 	Addr                                        string
 	Fresh                                       bool
 	identity                                    os.FileInfo // the folder as it was when it was prepared
@@ -332,7 +333,7 @@ func (f *quickstartFolder) stillTheSameFolder() error {
 // knownTopLevel are the only entries a quickstart folder holds. state.db-journal is here because SQLite
 // opens a rollback journal it finds next to the database and writes its pages into the database.
 var knownTopLevel = []string{quickstartMarker, "run-keys.json", "state.db", "state.db-wal", "state.db-shm", "state.db-journal",
-	quickstartTokenFile, "policy", "logs"}
+	quickstartTokenFile, quickstartKeyFile, quickstartKeyFile + ".new", "policy", "logs"}
 
 // isKnownEntry: a known name, or the temporary file `writePrivate` leaves if it is interrupted.
 func isKnownEntry(name string) bool {
@@ -359,7 +360,7 @@ func prepareQuickstartFolder(dir string, state *quickstartState, wantAddr string
 	f := &quickstartFolder{
 		Dir: dir, DB: filepath.Join(dir, "state.db"), Keys: filepath.Join(dir, "run-keys.json"),
 		PolicyDir: filepath.Join(dir, "policy"), TokenFile: filepath.Join(dir, quickstartTokenFile), LogDir: filepath.Join(dir, "logs"),
-		Fresh: state == nil,
+		AgentKey: filepath.Join(dir, quickstartKeyFile), Fresh: state == nil,
 	}
 	switch {
 	case state == nil:

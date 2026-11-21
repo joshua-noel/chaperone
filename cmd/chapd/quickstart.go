@@ -76,6 +76,13 @@ var quickstartAfterCheck func()
 // quickstartAfterBuild runs after chapd has opened its files and before the folder identity is checked. Only tests set it.
 var quickstartAfterBuild func()
 
+// quickstartConfigHook and quickstartAppHook let a test change the Config before chapd is built (the passkey stand-in) and
+// reach the built App before the first-passkey address is issued. Only tests set them.
+var (
+	quickstartConfigHook func(*Config)
+	quickstartAppHook    func(*App)
+)
+
 //go:embed quickstart_policy/playground.yaml
 var quickstartPolicy []byte
 
@@ -284,13 +291,23 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	}
 	defer fake.Close()
 
-	app, err := Build(ctx, Config{
+	// keys.issue, keys.request and keys.extend are off in the shipped baseline. This chapd, which knows the one project
+	// "playground", gets a copy of the pack with them on, so the agent can enrol and ask (see quickstart_keys.go).
+	baseline, err := quickstartBaseline(policyBaselineShipped())
+	if err != nil {
+		return err
+	}
+	cfg := Config{
 		DBPath: f.DB, KeysPath: f.Keys, PolicyDir: f.PolicyDir, Instance: quickstartInstance,
-		Addr: f.Addr, Log: logger, github: fake.Client,
+		Addr: f.Addr, Log: logger, github: fake.Client, baselineYAML: baseline,
 		// A throwaway playground over a fake GitHub, on any system, is for trying the flow: a Linux desktop usually has no built-in
 		// authenticator, so the playground also takes a security key or a phone. `chapd run` stays strict until its operator opts in.
 		Authenticators: console.AuthenticatorsAny,
-	})
+	}
+	if quickstartConfigHook != nil {
+		quickstartConfigHook(&cfg)
+	}
+	app, err := Build(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -298,12 +315,24 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	if err := app.Start(ctx); err != nil {
 		return err
 	}
+	if quickstartAppHook != nil {
+		quickstartAppHook(app)
+	}
 	if err := ensureQuickstartToken(ctx, app, f.TokenFile, time.Now()); err != nil {
 		return err
 	}
 	enrol, err := console.IssueFirstEnrollment(ctx, app.DB, quickstartEnrollTTL, time.Now())
 	if err != nil {
 		return err
+	}
+	agent, err := inspectAgentKey(ctx, app, f.AgentKey)
+	if err != nil {
+		return err
+	}
+	if agent.Kind == "ended" {
+		if err := retireEndedKey(f.AgentKey); err != nil {
+			return err
+		}
 	}
 	// chapd has opened its files by path. Before anything is shown or served, the path must still lead to the folder
 	// that was prepared (a folder renamed away and replaced in between would hold the attacker's files).
@@ -316,7 +345,7 @@ func runQuickstart(ctx context.Context, o quickstartOptions, stdout io.Writer) e
 	origin, _ := localEndpoints(f.Addr, nil)
 	info := quickstartInfo{
 		GOOS: runtime.GOOS, Dir: f.Dir, LogDir: f.LogDir, Addr: f.Addr, Origin: origin.URL, EnrollToken: enrol, Fresh: f.Fresh,
-		TokenFile: f.TokenFile, Project: quickstartProject, Repo: fake.Repo, Base: fake.Base, PRs: fake.PRs, TTL: quickstartEnrollTTL,
+		TokenFile: f.TokenFile, KeyFile: f.AgentKey, Agent: agent, Project: quickstartProject, Repo: fake.Repo, Base: fake.Base, PRs: fake.PRs, TTL: quickstartEnrollTTL,
 	}
 	info.Chap, info.ChapOnPath = findChap(runtime.GOOS)
 	fmt.Fprint(stdout, renderQuickstart(info))

@@ -667,6 +667,7 @@ func sampleInfo(goos string) quickstartInfo {
 			{Number: 3, Kind: "medium", Head: strings.Repeat("3", 40)},
 		},
 		Chap: "/opt/chap/chap", ChapOnPath: true,
+		KeyFile: "/home/a/.config/chaperone-quickstart/agent.key", Agent: agentKeyState{Kind: "none", Label: "playground-agent"},
 	}
 }
 

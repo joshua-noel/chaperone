@@ -2,7 +2,7 @@
 
 Try Chaperone on your own computer in about ten minutes. No account, no administrator rights, no real repository.
 
-You start `chapd quickstart`. It makes a private scratch folder in your user profile and starts Chaperone in your terminal. It uses a **playground**: a fake GitHub that lives inside the program. An agent asks to merge a pull request in the playground. Chaperone refuses, makes an approval card, and waits for you to approve it with a passkey.
+You start `chapd quickstart`. It makes a private scratch folder in your user profile and starts Chaperone in your terminal. It uses a **playground**: a fake GitHub that lives inside the program. The agent gets a **key of its own** (not your orchestrator token): it can read the playground pull requests and ask you for more, and you give it that key with your passkey. Then you play the orchestrator, ask to merge a pull request, and approve the approval card with your passkey.
 
 The playground is not real. No real repository, key or network is touched. Real GitHub is not in this version (see [Real GitHub](#real-github)).
 
@@ -13,15 +13,19 @@ Read this first. This page is only as good as these tests.
 | Step | Tested | Where |
 | --- | --- | --- |
 | Build `chapd` and `chap` from source | Yes | Windows 11 (10.0.26200), Go 1.26.10 |
-| `chapd quickstart` starts and prints the three things | Yes | Windows 11 |
+| `chapd quickstart` starts and prints the four steps | Yes | Windows 11 |
 | The first-passkey page answers `200` on this computer, and `403` to a wrong `Host` | Yes | Windows 11 |
-| `chap` with the generated token: refused, then an approval card | Yes | Windows 11 |
+| `chap` with the generated orchestrator token: refused, then an approval card | Yes | Windows 11 |
 | A pull request with failing checks is refused | Yes | Windows 11 |
 | `claude mcp add` with the printed line, then `claude mcp list` shows `Connected` | Yes, in a scratch user profile | Windows 11, Claude Code 2.1.302 |
 | Starting again reuses the folder and prints a new first-passkey address, or the sign-in address once you have a passkey | Yes (automated tests) | Windows 11 |
 | The quickstart holds both `127.0.0.1` and `[::1]` and refuses to start when another program already listens on `[::1]` at its port | Yes (automated tests) | Windows 11 |
 | The scratch folder is made by the quickstart itself with an owner and a protected ACL for your user from the instant it exists; a folder that already exists is refused; the parent must not let others rename it away | Yes (automated tests, ACL and owner read back) | Windows 11 |
 | The same folder rules on Linux (mode 0700, owner, writable-parent refusal, unknown entries refused), run from the Linux test binary | Yes, under WSL (Ubuntu); the second-account case was not tried | Windows 11 + WSL |
+| The agent's key, from the printed commands, with the real `chap` binary: `chap agent enrol` prints a code and writes the key file into the folder; `chap key request --wait` is answered and the key in the file is replaced; the key reads pull requests, is refused `pr.merge` (`OP_NOT_IN_TOKEN`), and `chap manual` and `chap mcp` list only what it may do. The passkey tap is the test's stand-in. | Yes (`TestQuickstartWithTheRealChap`, with `CHAP_BIN` set) | Windows 11 |
+| What a restart does with an existing key: valid, request-only, revoked, expired, stopped by a human, unknown | Yes (automated test, with the stand-in) | Windows 11 |
+| **The two enrolment taps on the Agents page in a real browser** (look up the code, make the card, answer the request) | **No.** Their screens were read from the code and the page tests, and the commands were run. A person has not tapped them. | Nowhere yet |
+| **Claude Code using the agent's key** | **No.** The key file, the printed `claude mcp add` line and the tool list (below) were tested with `chap mcp`. Claude Code was not run against a key. | Nowhere yet |
 | **Creating the passkey, signing in, approving the card, and seeing the pull request merged** | **No.** It needs a person to tap. | Nowhere yet |
 | **A real model calling a tool through `chap mcp`** | **No** | Nowhere yet |
 | **Everything on macOS** | **No.** It compiles for macOS. It has never run there. | Nowhere yet |
@@ -80,33 +84,59 @@ Leave this window open. Press Ctrl+C in it to stop.
 
    Press "Create passkey" and approve with your system's passkey prompt. Then sign in at http://localhost:55421/login.
 
-2. Connect Claude Code (optional)
-   Run this in another terminal. It adds the PLAYGROUND tools:
+2. The agent's own key
+   The agent gets a key of its own, not your orchestrator token. It can read the playground pull requests and ask you for more, and
+   nothing else. Making it takes two taps of your passkey, the same two a real agent needs. Sign in first (step 1).
+   In a terminal for the agent, tell chap where chapd is and where the key goes:
 
-   claude mcp add --scope user chaperone-playground -e CHAP_URL=http://127.0.0.1:55421 -e CHAP_PROJECT=playground -e CHAP_ORCHESTRATOR_TOKEN_FILE=C:\Profiles\you\AppData\Local\chaperone-quickstart\orchestrator.token -- C:\Profiles\you\dev\chaperone\dist\chap.exe mcp
+   $env:CHAP_URL = 'http://127.0.0.1:55421'
+   $env:CHAP_KEY_FILE = 'C:\Profiles\you\AppData\Local\chaperone-quickstart\agent.key'
+
+   a. Enrol the agent. It prints a short code and waits for you:
+      chap agent enrol --label playground-agent --project playground --out C:\Profiles\you\AppData\Local\chaperone-quickstart\agent.key
+      Open http://localhost:55421/agents, type the code, press "Look up the agent", then "Make the enrolment card". The Approvals page opens with the
+      card. It says the agent gets no access at all. Approve it with your passkey. The agent now holds a key that can only ask.
+
+   b. The agent asks for what it needs, and waits for you:
+      chap key request --ops pr.checks,pr.diff,pr.files,pr.view --repo playground/storefront --ttl 8h --reason "read the playground pull requests" --wait 600
+      Open http://localhost:55421/agents. Under "Waiting for your answer" press Answer, read what it asks for, press "Grant as asked", and approve the second
+      card with your passkey. The key in the file is then replaced by one that can read the four pull-request operations.
+
+3. Connect Claude Code (optional)
+   Run this in another terminal. It adds the PLAYGROUND tools, and gives Claude Code the AGENT'S KEY, never the orchestrator token:
+
+   claude mcp add --scope user chaperone-playground -e CHAP_URL=http://127.0.0.1:55421 -e CHAP_KEY_FILE=C:\Profiles\you\AppData\Local\chaperone-quickstart\agent.key -- C:\Profiles\you\dev\chaperone\dist\chap.exe mcp
+
+   Run it after step 2: the key file does not exist until the agent has been enrolled. Claude Code sees tools only for what the key may do: the four pull-request reads, and keys_request, with which it can ask you for access itself (you still answer at Agents).
 
    When you stop using the quickstart, remove it:
 
    claude mcp remove chaperone-playground --scope user
 
-   Why: the entry stays in Claude Code's user settings and keeps pointing at port 55421 and the token file. Once the quickstart is stopped, another program could listen on that port and receive the token on the next tool call.
+   Why: the entry stays in Claude Code's user settings and keeps pointing at port 55421 and the key file. Once the quickstart is stopped, another program could listen on that port and receive the key on the next tool call.
 
-3. Three commands to try (PLAYGROUND repository playground/storefront)
-   Open another terminal. Tell chap where this chapd is:
+4. Try it (PLAYGROUND repository playground/storefront)
+   As the AGENT, in the terminal that has CHAP_URL and CHAP_KEY_FILE set (step 2):
+
+   a. Read pull request 3. This works once the key can read, and needs no approval:
+      chap pr view 3 --repo playground/storefront
+   b. Try to merge it. A key can never hold pr.merge, so this is refused, whatever you approve:
+      chap pr merge 3 --head 6f1c... --base main --repo playground/storefront
+
+   As YOU, the operator, in a second terminal. The merge demo uses the ORCHESTRATOR token, because a key cannot ask for a
+   merge: the orchestrator is the role that holds pr.merge, and here you play it. Do not give this token to an agent.
 
    $env:CHAP_URL = 'http://127.0.0.1:55421'
    $env:CHAP_PROJECT = 'playground'
    $env:CHAP_ORCHESTRATOR_TOKEN_FILE = 'C:\Profiles\you\AppData\Local\chaperone-quickstart\orchestrator.token'
    $env:PATH = 'C:\Profiles\you\dev\chaperone\dist' + ';' + $env:PATH
 
-   a. Read pull request 3:
-      chap pr view 3 --repo playground/storefront
-   b. Ask to merge it. It changes code, so Chaperone refuses: it needs your approval.
+   c. Ask to merge it. It changes code, so Chaperone refuses: it needs your approval.
       chap pr merge 3 --head 6f1c... --base main --repo playground/storefront
-   c. Ask again for an approval card:
+   d. Ask again for an approval card:
       chap pr merge 3 --head 6f1c... --base main --repo playground/storefront --request --reason "reword the checkout button"
 
-   Then open http://localhost:55421/approvals, read the card and approve it with your passkey. Run (a) again: it is merged.
+   Then open http://localhost:55421/approvals, read the card and approve it with your passkey. Run (a) again, as the agent: it shows the pull request merged.
 
    Extra: pull request 2 has failing checks, so Chaperone refuses to merge it:
       chap pr merge 2 --head 91ab... --base main --repo playground/storefront
@@ -142,11 +172,30 @@ This is the playground only. The real service, `chapd run`, accepts only the bui
 
 None of these was tried by a person on a Mac or a Linux computer, with a security key, or with a phone. These are open items (see [Open items](#open-items)).
 
-### Ask for the merge
+### Give the agent a key
 
-In a second terminal, paste the three setup lines from part 3 of the output, then run commands (a), (b) and (c). Expected results (the real output was captured on Windows; ids and times differ):
+Do this after you have made your passkey and signed in. It is the real flow, and it takes your passkey twice.
 
-(a) reads the pull request. It succeeds.
+1. **Enrol.** In the agent's terminal run command (a) of step 2 (`chap agent enrol ...`). It prints a code such as `ABCD-EFGH` and waits up to 10 minutes. In the console open **Agents** and type the code under **Enrol an agent**. Press **Look up the agent**. The page shows what you are enrolling, with **no access at all**. Press **Make the enrolment card**. The **Approvals** page opens with a card; read it and approve it with your passkey. `chap agent enrol` then writes the key file and prints `enrolled: the request-only key ... is in ...`. That key holds no access: it can only ask.
+2. **Ask.** In the same terminal run command (b) (`chap key request ...`). It says what the agent wants, for how long and why, and waits. In the console open **Agents**. The request is under **Waiting for your answer**. Press **Answer**, read what is asked (the four pull-request reads, on `playground/storefront`, 8 hours) and the reason the agent wrote, and press **Grant as asked** (**Narrow and grant** lets you remove an operation or shorten it). A second card opens on **Approvals**; approve it with your passkey. `chap key request` then replaces the key in the file with one that can read, and says so.
+3. **Look.** **Agents** lists the key, who holds it, what it may do and when it ends. **Revoke** there takes it away at once and stops that agent for good (the name cannot be enrolled again; the next start of the quickstart uses a new one).
+
+What the key may do: read pull requests on `playground/storefront` (`pr.view`, `pr.diff`, `pr.checks`, `pr.files`) on its own, and ask. Under it, `chap manual` lists those four and the ask, and `chap mcp` offers the tools `pr_view`, `pr_diff`, `pr_checks`, `pr_files`, `keys_request`, `chaperone_manual` and `chaperone_op_status`. Under the orchestrator token the tools are `pr_view`, `pr_diff`, `pr_checks`, `pr_files`, `pr_merge`, `chaperone_manual` and `chaperone_op_status`.
+
+**Why the merge uses a different token.** A key can never hold `pr.merge`. The ceiling on what a key may hold (the four pull-request reads, `health`, `logs` and `deploy`, ask-only) has no merge in it, and the quickstart does not widen it for a demo. So an agent with a key cannot even ask for a merge, and the "an action that needs your approval" demo cannot be done by the agent. The merge demo is done by you, with the orchestrator token, which is the role that holds `pr.merge` in the real design. The orchestrator token stays in `orchestrator.token` in the folder and is never printed or given to Claude Code.
+
+Which tokens do what, in one table:
+
+| Token | Held by | May do | Needs your passkey for |
+| --- | --- | --- | --- |
+| The agent's key (`agent.key`) | The agent (Claude Code) | Read pull requests on `playground/storefront`; ask for access | Making it (twice) and anything it asks for beyond reads |
+| The orchestrator token (`orchestrator.token`) | You, in your own terminal | Read pull requests; ask to merge | The merge card |
+
+### Ask for the merge (you, with the orchestrator token)
+
+In a second terminal, paste the setup lines from the "As YOU" part of step 4, then run commands (c) and (d). Expected results (the real output was captured on Windows; ids and times differ).
+
+(a), as the agent, reads the pull request. It succeeds.
 
 ```
 pr.view playground/storefront#3: succeeded
@@ -156,7 +205,9 @@ pr.view playground/storefront#3: succeeded
 mergeable: true (clean)
 ```
 
-(b) is refused. Exit code 3.
+(b), as the agent, is refused. A key does not hold `pr.merge`. Exit code 3, with `cause: OP_NOT_IN_TOKEN`.
+
+(c), as you, is refused until you approve. Exit code 3.
 
 ```
 DENIED pr.merge on playground/storefront#3 (orchestrator main)
@@ -164,7 +215,7 @@ cause: OP_APPROVAL_REQUIRED
 why: pr.merge needs an approval for this exact head: tier medium: src/checkout.py
 ```
 
-(c) makes an approval card. Exit code 0. Nothing has run.
+(d), as you, makes an approval card. Exit code 0. Nothing has run.
 
 ```
 pr.merge playground/storefront#3: pending_approval
@@ -186,26 +237,33 @@ why: CI_RED: verify: latest verify run concluded failure, not success
 
 Open `http://localhost:55421/approvals` in the browser where you signed in. Read the card. It names the pull request, the head commit and the file. Press the approve button and answer the passkey prompt.
 
-Then run (a) again. **Expected, not yet seen by a person:** the pull request shows as merged.
+Then run (a) again, as the agent. **Expected, not yet seen by a person:** the pull request shows as merged.
+
 
 ## 4. Connect Claude Code (optional)
 
-Run the line from part 2 of the output, in a terminal. Then:
+Run step 2 first, so the key file exists. Then run the line from part 3 of the output, in a terminal. Then:
 
 ```
 claude mcp list
 ```
 
-It should show `chaperone-playground: ... Connected`. In Claude Code, ask it to list the Chaperone tools, then to read pull request 3 of `playground/storefront` through Chaperone. If it asks to merge, you approve in the console, never in Claude Code.
+It should show `chaperone-playground: ... Connected`. In Claude Code, ask it to list the Chaperone tools, then to read pull request 3 of `playground/storefront` through Chaperone. Claude Code holds only the agent's key (`CHAP_KEY_FILE`): it sees the four pull-request reads, `keys_request` and the two helper tools, and no `pr_merge`. If it needs more access it can ask with `keys_request`; you answer at **Agents**, with your passkey, never in Claude Code. The merge is yours to run in your own terminal (step 4, "As YOU").
 
-Tested: the printed line, then `claude mcp list` showing `Connected`, in a scratch user profile on Windows with Claude Code 2.1.302. **Not tested:** a real model calling a tool. More on `chap mcp`: [runbooks/mcp.md](runbooks/mcp.md).
+Tested: with the real `chap` binary, `chap mcp` started with only `CHAP_URL` and `CHAP_KEY_FILE` (no `CHAP_PROJECT`) lists exactly those tools under the key, and `pr_merge` plus the same helpers under the orchestrator token. Earlier, the printed `claude mcp add` line (with the orchestrator token) was run in a scratch user profile on Windows with Claude Code 2.1.302, and `claude mcp list` showed `Connected`. **Not tested:** Claude Code against the key, and a real model calling a tool with it. More on `chap mcp`: [runbooks/mcp.md](runbooks/mcp.md).
 
-Remove it when you are done: `claude mcp remove chaperone-playground --scope user`. The entry is in your user settings, so it outlives the quickstart. While the quickstart is stopped it still points at port 55421 and the token file, and another program that listens on that port would receive the token on the next tool call. The token works only against the quickstart's own scratch database, and for at most 7 days.
+Remove it when you are done: `claude mcp remove chaperone-playground --scope user`. The entry is in your user settings, so it outlives the quickstart. While the quickstart is stopped it still points at port 55421 and the key file, and another program that listens on that port would receive the key on the next tool call. The key works only against the quickstart's own scratch database, for the hours or days it was granted (here 8 hours).
 
 ## Stop, start again, start over
 
 - **Stop:** Ctrl+C in the quickstart window.
-- **Start again:** run `chapd quickstart` again. It reuses the folder, the database, your passkey and the token. If you already made a passkey, part 1 prints the sign-in address. If not, it prints a new passkey address. The playground GitHub starts fresh: pull request 3 is open again, with a new head commit.
+- **Start again:** run `chapd quickstart` again. It reuses the folder, the database, your passkey, the orchestrator token and the agent's key. If you already made a passkey, step 1 prints the sign-in address. If not, it prints a new passkey address. The playground GitHub starts fresh: pull request 3 is open again, with a new head commit. Step 2 says what state the agent's key file is in:
+  - **no key yet:** both commands are printed;
+  - **a key that can only ask** (enrolled, not yet granted): only the `chap key request` command is printed;
+  - **a valid key** that can read: nothing to do, and the output lists what it may do and when it ends;
+  - **an ended key** (expired, revoked, or not a key this folder's database knows): the file is removed so `chap agent enrol --out` can create it again, the output says why, and both commands are printed;
+  - **a key a person stopped for good** (Agents, Revoke): that name can never be enrolled again, so the file is removed and the commands use a new name (`playground-agent-2`, then `-3`, and so on).
+  The agent key file is made by `chap` (private to your user from the moment it exists, internal/privfile), never by `chapd`; `chapd` only reads it, to tell you its state, and never prints it.
 - **Start over:** stop it, then delete the folder named in the first lines of its output. Your passkey for the old folder is then useless. Delete it in your browser's passkey list too.
 - **Another port:** a folder keeps its port, because the passkey is tied to the address. Use a new `--dir` to change it.
 
@@ -225,7 +283,8 @@ The moment before the first passkey exists is the risky one: whoever opens the a
 
 ## What the quickstart does not do
 
-- **It does not keep an agent away from the token or the folder.** The orchestrator token is a file in the scratch folder that your user can read (mode 0600 on macOS and Linux; one entry for your user on Windows). Administrators (root, or a Windows administrator) can read it too. A program that runs as you can read it and ask Chaperone for the same things you can. It can also change the scratch folder: it can edit the database and make itself an approver, replace the key set, or edit the policy. So the passkey protects you from an agent that runs somewhere else or as another user, not from one that runs as you. In real use the agent runs somewhere else, in a virtual machine or another account. See the [README](../README.md).
+- **The agent's key limits what the agent can ask Chaperone to do. It does not hide the other files in the folder from an agent that runs as you.** Claude Code runs as your user, and the orchestrator token is a file in the same scratch folder that your user can read (mode 0600 on macOS and Linux; one entry for your user on Windows; administrators can read it too). An agent that reads that file, or the database, can do what you can, including editing the database and making itself an approver. The passkey and the key protect you from an agent that runs somewhere else or as another user, and from an agent that stays inside the tools you gave it (the key's tools do not read files). They do not protect you from one that runs as you and goes looking. In real use the agent runs somewhere else, in a virtual machine or another account. See the [README](../README.md).
+- **The key operations are on here and off everywhere else.** `keys.issue`, `keys.request` and `keys.extend` ship off in the baseline policy. A project file cannot turn an op on, so `chapd quickstart` starts its own chapd, which knows the one project `playground`, with a copy of the baseline in which those three are on. `chapd run` and the Windows service are not changed.
 - **It has no vault.** The playground needs no secret of its own. Nothing here stores a real credential. Do not paste one into the folder.
 - **It is not the real service.** It uses its own port, folder and database. It refuses port 55398. Its folder lies inside your home folder and must not exist yet, so it can never be a real install's folder (a real install is not in your home folder, and it exists). As a second check, on Windows it also refuses the default real install folder and anything above it, below it or reached through a link or junction. It cannot be started from `chapd run` or the Windows service: the fake GitHub is wired in only by `chapd quickstart`.
 - **What it does to keep its folder private, and what it does not defend against.** It keeps the folder inside your own home folder. It creates the folder itself, private to you from the instant it exists (mode 0700; on Windows an owner and a protected ACL for you alone, set in the same call that creates it), and refuses one that already exists. It refuses a path with a folder above it that other users could rename things in. Every file in it is made exclusively. On a later run it refuses any entry it does not know (a leftover SQLite journal would be replayed into the database), and each entry it uses must be owned by you and closed to others. Before it prints or serves anything it checks that the path still leads to the same folder. It does **not** defend against another program running as you, against an administrator (root or a Windows administrator), or against someone to whom you gave rights inside your own home folder. On macOS and Linux, extended ACLs (`chmod +a`, `setfacl`) are not examined; only the owner and the mode bits are. The checks above are for other local users who have no such rights. It also trusts your operating system's idea of your home folder (on macOS and Linux that comes from the `HOME` setting).
@@ -253,13 +312,17 @@ The playground never talks to the real GitHub. `chapd quickstart --playground=fa
 | `this folder was set up for 127.0.0.1:55421 ...` | The passkey is tied to that address. Use that `--addr`, or a new `--dir`. |
 | The passkey address answers "not found" or is refused | It expired, was used, or a newer start replaced it. Stop and start again. |
 | The browser refuses the passkey | Check that it asks for a PIN, a fingerprint or a face. The console refuses an authenticator that does not verify you. See [The passkey](#the-passkey). |
-| `chap: no token` or `chapd is not reachable` | The three setup lines were not run in this terminal. Run them again. |
+| `chap: no token` or `chapd is not reachable` | The setup lines were not run in this terminal. Run them again. The agent's terminal needs `CHAP_URL` and `CHAP_KEY_FILE`; yours needs `CHAP_URL`, `CHAP_PROJECT` and `CHAP_ORCHESTRATOR_TOKEN_FILE`. Do not set both in one terminal: a key file is used before the orchestrator token. |
+| `chap agent enrol` says the file already exists | `chap` never overwrites a key file. Start `chapd quickstart` again: it removes the file of a key that has ended. A key that is still valid is kept on purpose (step 2 says so). |
+| `chap agent enrol` says the agent is "stopped by a human" | A person revoked that agent at **Agents**; the name can never be enrolled again. Start `chapd quickstart` again: it prints a new name. |
+| The Agents page says "Agent keys are off" | You are not on the quickstart's chapd (the key operations are on only there), or the project is not `playground`. |
 | `chap: unknown command` or `chap` is not found | Run the `PATH` line from the output, or use the full path of `chap`. |
-| `chap` says the token is invalid after a long break | The token lasts 7 days. Start `chapd quickstart` again: a token with less than a day left is replaced. |
+| `chap` says the token or key is invalid after a long break | The orchestrator token lasts 7 days and the agent's key what it was granted (8 hours here). Start `chapd quickstart` again: an orchestrator token with less than a day left is replaced, and an ended key is removed so the agent can be enrolled again. |
 
 ## Open items
 
 - **Passkeys on macOS and Linux, security keys and phones.** Not tried by a person. The code accepts all three kinds in the playground (see [The passkey](#the-passkey)); someone with a real security key, a phone and a Linux desktop has to confirm it.
 - **Wording.** The Windows demo script still says "Windows Hello" and "Edge". The console pages and this page do not.
 - **Release binaries.** Until they exist you build from source.
-- **A model approving its way to a merge.** Claude Code has run the playground through `chap mcp` on Windows: it listed the tools, read pull request 3, was refused the merge (`OP_APPROVAL_REQUIRED`), asked for an approval card and got one (`pending`), and was refused the red pull request (`CI_RED`). Nobody has yet tapped a passkey on that card and watched the model see the merge go through.
+- **A model approving its way to a merge.** Claude Code has run the playground through `chap mcp` on Windows with the orchestrator token (before the agent got its own key): it listed the tools, read pull request 3, was refused the merge (`OP_APPROVAL_REQUIRED`), asked for an approval card and got one (`pending`), and was refused the red pull request (`CI_RED`). Nobody has yet tapped a passkey on that card and watched the merge go through, and Claude Code has not been run against the agent's key.
+- **The merge by the agent.** A key cannot hold `pr.merge`, so the agent cannot ask for a merge: you run it with the orchestrator token. If a later version puts a merge-like operation in the key ceiling, the demo can move to the agent.
