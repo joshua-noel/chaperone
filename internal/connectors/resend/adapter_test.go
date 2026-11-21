@@ -1,12 +1,16 @@
 package resend
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
@@ -523,4 +527,168 @@ func TestAdaptersNeedWhatTheyUse(t *testing.T) {
 		t.Error("a client with no send key")
 	}
 	_ = e
+}
+
+// ---- the transport may replay one request, and that is safe ----------------------------
+
+type connLog struct {
+	mu     sync.Mutex
+	reused []bool
+}
+
+func (l *connLog) add(b bool) { l.mu.Lock(); l.reused = append(l.reused, b); l.mu.Unlock() }
+func (l *connLog) reset()     { l.mu.Lock(); l.reused = nil; l.mu.Unlock() }
+func (l *connLog) get() []bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]bool(nil), l.reused...)
+}
+
+// tracingTransport records, for every connection a request takes, whether it was a
+// warm one that the transport had used before.
+type tracingTransport struct {
+	base http.RoundTripper
+	log  *connLog
+}
+
+func (t tracingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	tr := &httptrace.ClientTrace{GotConn: func(i httptrace.GotConnInfo) { t.log.add(i.Reused) }}
+	return t.base.RoundTrip(r.WithContext(httptrace.WithClientTrace(r.Context(), tr)))
+}
+
+// The adapter never repeats a send, but Go's HTTP transport does replay a request that
+// carries an Idempotency-Key and a rebuildable body when a warm keep-alive connection
+// drops after the server took the message. The replay is the identical request: same
+// body, same key. Resend answers it from the first, so there are two POSTs and one
+// message. This test pins that, and with it the reason the key is sent on every send.
+//
+// Whether a request meets a warm connection depends on the transport putting the first
+// connection back in its pool in time. The test records the connection each request
+// took and tries again until it meets one; it fails if it never does, and never passes
+// without having seen the replay.
+func TestAWarmConnectionThatDropsIsReplayedWithTheSameKeyAndSendsOnce(t *testing.T) {
+	e := newEnv(t, nil)
+	log := &connLog{}
+	hc := e.fake.HTTPClient()
+	hc.Transport = tracingTransport{base: hc.Transport, log: log}
+	cl, err := NewClient(ClientConfig{SendKey: func(context.Context) (string, error) { return testSendKey, nil }, Registry: e.reg, HTTP: hc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ads, err := Adapters(Config{Client: cl, Policy: func(string) *policy.Resend { return e.pol }, Redactor: e.reg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(exec string) ops.Outcome {
+		r := e.sendReq(mailParams())
+		r.ExecutionID = exec
+		out, err := ads[OpSend].Execute(context.Background(), r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	for i := range 50 {
+		mustSucceed(t, send(fmt.Sprintf("x-warm-%d", i))) // leaves a connection to reuse
+		before, reqsBefore := len(e.fake.Sent()), len(e.fake.Requests())
+		e.fake.DropNext()
+		log.reset()
+		out := send(fmt.Sprintf("x-drop-%d", i))
+		conns := log.get()
+		if len(conns) == 0 || !conns[0] {
+			time.Sleep(5 * time.Millisecond) // the first request met a new connection: no replay is possible; try again
+			continue
+		}
+		if len(conns) != 2 {
+			t.Fatalf("the first request took a warm connection, and the connections were %v: want it replayed once", conns)
+		}
+		mustSucceed(t, out) // the replay got Resend's answer
+		reqs := e.fake.Requests()[reqsBefore:]
+		if len(reqs) != 2 || reqs[0].Method != http.MethodPost || reqs[0].Path != "/emails" {
+			t.Fatalf("the fake saw %+v, want two POSTs", reqs)
+		}
+		if reqs[0].IdempotencyKey == "" || reqs[0].IdempotencyKey != reqs[1].IdempotencyKey || !bytes.Equal(reqs[0].Body, reqs[1].Body) {
+			t.Errorf("the replay is not the identical request: keys %q %q, bodies equal %v", reqs[0].IdempotencyKey, reqs[1].IdempotencyKey, bytes.Equal(reqs[0].Body, reqs[1].Body))
+		}
+		if n := len(e.fake.Sent()) - before; n != 1 {
+			t.Errorf("two POSTs made %d messages, want 1", n)
+		}
+		return
+	}
+	t.Fatal("no request met a warm connection in 50 tries: the test proved nothing")
+}
+
+// ---- the key ------------------------------------------------------------------------
+
+// A stored key that holds a byte outside `!` to `~` is refused up front, as not sent,
+// with a message that says the key is malformed. Go would refuse it as a header value
+// before writing anything, which would read as a send that may have gone.
+func TestAMalformedStoredKeyIsRefusedAsNotSent(t *testing.T) {
+	for name, key := range map[string]string{
+		"a line break inside": "re_abc\ndef", "a NUL": "re_abc\x00def", "a space inside": "re_abc def", "a tab inside": "re_abc\tdef",
+		"a DEL": "re_abc\x7fdef", "a byte above ASCII": "re_abc\xe9def", "a carriage return inside": "re_abc\rdef",
+	} {
+		e := newEnv(t, nil)
+		cl, err := NewClient(ClientConfig{SendKey: func(context.Context) (string, error) { return key, nil }, HTTP: e.fake.HTTPClient()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ads, err := Adapters(Config{Client: cl, Policy: func(string) *policy.Resend { return e.pol }, Redactor: e.reg})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := e.sendReq(mailParams())
+		r.ExecutionID = "x-1"
+		out, _ := ads[OpSend].Execute(context.Background(), r)
+		if !out.Failed || out.Unconfirmed || !has(errorText(out), "malformed", "import resend-api-key again", "nothing was sent") || has(errorText(out), "may or may not") {
+			t.Errorf("%s: outcome %+v", name, out)
+		}
+		if strings.Contains(asJSON(t, out.Result), "abc") {
+			t.Errorf("%s: the result holds part of the key", name)
+		}
+		// Check refuses before a card is made.
+		_, err = ads[OpSend].Check(context.Background(), e.sendReq(mailParams()))
+		if ref := wantRefusal(t, err, ops.CodePolicyRefused); !strings.Contains(ref.Why, "malformed") {
+			t.Errorf("%s: why = %s", name, ref.Why)
+		}
+		if len(e.fake.Requests()) != 0 {
+			t.Errorf("%s: a request was made", name)
+		}
+	}
+	// A key with a trailing line break is trimmed, as before, and works.
+	e := newEnv(t, nil)
+	cl, _ := NewClient(ClientConfig{SendKey: func(context.Context) (string, error) { return testSendKey + "\r\n", nil }, HTTP: e.fake.HTTPClient()})
+	if _, err := cl.Send(context.Background(), Message{From: testSender, To: []string{"ops@example.com"}, Subject: "s", Text: "t"}, "chaperone-mail-send/x-1"); err != nil {
+		t.Errorf("a key with a trailing line break: %v", err)
+	}
+}
+
+// The error names Resend documents (its Errors page) or its SDK lists are seen as they
+// are; a name outside the list is "other". The status decides what the adapter does, so
+// a 422 is a refusal like a 400.
+func TestTheErrorNamesOfTheDocumentationAreKnown(t *testing.T) {
+	names := []string{
+		"validation_error", "invalid_idempotency_key", "missing_api_key", "restricted_api_key", "invalid_api_key", "invalid_permission",
+		"suspended_api_key", "not_found", "method_not_allowed", "invalid_idempotent_request", "concurrent_idempotent_requests",
+		"invalid_attachment", "invalid_from_address", "invalid_access", "invalid_parameter", "invalid_region", "missing_required_field",
+		"missing_required_parameter", "monthly_quota_exceeded", "daily_quota_exceeded", "rate_limit_exceeded", "email_above_quota",
+		"security_error", "application_error", "internal_server_error", "service_unavailable", "dns_lookup_failed", "resource_locked",
+	}
+	for _, n := range names {
+		if !errorCodes[n] {
+			t.Errorf("%s is documented and not in the list", n)
+		}
+	}
+	e := newEnv(t, nil)
+	for _, status := range []int{400, 422} {
+		e.fake.FailNext(status, "invalid_from_address", "")
+		out := e.run(e.sendReq(mailParams()))
+		if !out.Failed || out.Unconfirmed || !has(errorText(out), fmt.Sprintf("HTTP %d", status), "invalid_from_address", "nothing was sent") {
+			t.Errorf("%d: outcome %+v", status, out)
+		}
+	}
+	e.fake.FailNext(500, "internal_server_error", "")
+	if out := e.run(e.sendReq(mailParams())); !out.Unconfirmed || !has(errorText(out), "internal_server_error") {
+		t.Errorf("500: %+v", out)
+	}
 }

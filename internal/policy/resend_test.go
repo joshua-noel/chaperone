@@ -175,36 +175,42 @@ func TestEngineProblemsNamesAnUnusableResendBlock(t *testing.T) {
 	}
 }
 
-// An `@domain` entry for a large public mailbox domain is refused when the block is
-// loaded, with a message that says an exact address is needed. An exact address at the
-// same domain, and a domain of one's own, are fine. This is the Resend block only: the
-// Gmail block's rule is not changed.
+// An `@domain` entry for a large public mailbox domain, or for a subdomain of one, is
+// refused when the block is loaded, with a message that says an exact address is
+// needed. An exact address at the same domain, and a domain of one's own, are fine.
+// This is the Resend block only: the Gmail block's rule is not changed.
 func TestResendRefusesAWholePublicMailboxDomain(t *testing.T) {
 	want := []string{
 		"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com",
 		"me.com", "proton.me", "protonmail.com", "aol.com", "gmx.com", "yandex.com", "mail.com",
+		"yahoo.co.uk", "yahoo.co.jp", "yahoo.fr", "yahoo.de", "ymail.com", "rocketmail.com", "msn.com",
+		"live.co.uk", "hotmail.co.uk", "hotmail.fr", "outlook.fr", "outlook.de", "gmx.de", "gmx.net", "web.de",
+		"mail.ru", "yandex.ru", "qq.com", "163.com", "126.com", "pm.me", "zoho.com", "fastmail.com", "hey.com",
+		"duck.com", "tutanota.com", "tuta.io",
 	}
 	if strings.Join(ResendMailboxDomains, ",") != strings.Join(want, ",") {
 		t.Fatalf("the built-in list is %v", ResendMailboxDomains)
 	}
 	for _, d := range want {
-		eff, err := linearProject(t, "resend:\n  senders: [alerts@mail.example.com]\n  allow_recipients: [\"@"+d+"\"]\n")
-		if err != nil {
-			t.Errorf("@%s: the whole project was refused: %v", d, err)
-			continue
-		}
-		r := eff.Resend
-		if r == nil || r.Invalid == nil || !strings.Contains(r.Invalid.Error(), "@"+d) || !strings.Contains(r.Invalid.Error(), "exact addresses") {
-			t.Errorf("@%s: not refused with a clear reason: %+v", d, r)
+		for _, entry := range []string{"@" + d, "@mail." + d, "@a.b." + d} { // the domain and any subdomain of it
+			eff, err := linearProject(t, "resend:\n  senders: [alerts@mail.example.com]\n  allow_recipients: [\""+entry+"\"]\n")
+			if err != nil {
+				t.Errorf("%s: the whole project was refused: %v", entry, err)
+				continue
+			}
+			r := eff.Resend
+			if r == nil || r.Invalid == nil || !strings.Contains(r.Invalid.Error(), entry) || !strings.Contains(r.Invalid.Error(), "exact address") {
+				t.Errorf("%s: not refused with a clear reason: %+v", entry, r)
+			}
 		}
 		// An exact address there is fine.
-		eff, err = linearProject(t, "resend:\n  senders: [alerts@mail.example.com]\n  allow_recipients: [\"me@"+d+"\"]\n")
+		eff, err := linearProject(t, "resend:\n  senders: [alerts@mail.example.com]\n  allow_recipients: [\"me@"+d+"\"]\n")
 		if err != nil || eff.Resend == nil || eff.Resend.Invalid != nil || !eff.Resend.RecipientAllowed("me@"+d) || eff.Resend.RecipientAllowed("you@"+d) {
 			t.Errorf("an exact address at %s: %+v %v", d, eff.Resend, err)
 		}
 	}
-	// A subdomain and a domain of one's own are not on the list.
-	eff, err := linearProject(t, "resend:\n  senders: [alerts@mail.example.com]\n  allow_recipients: [\"@mail.gmail.com\", \"@team.example.com\"]\n")
+	// A domain of one's own, and one that only ends in a listed name, is not on the list.
+	eff, err := linearProject(t, "resend:\n  senders: [alerts@mail.example.com]\n  allow_recipients: [\"@team.example.com\", \"@notgmail.com\", \"@gmail.com.example.org\"]\n")
 	if err != nil || eff.Resend.Invalid != nil {
 		t.Errorf("%+v %v", eff.Resend, err)
 	}

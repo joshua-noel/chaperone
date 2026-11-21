@@ -155,6 +155,8 @@ func TestPatternShapes(t *testing.T) {
 		{"slack-workflow-token", "xwfp-" + "0123456789-0123456789-0123456789-0123456789abcdef"},
 		{"stripe-key", "sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc"},
 		{"stripe-key", "sk_test_" + "4eC39HqLyjWDarjtT1zdp7dc"},
+		{"resend-api-key", "re_" + "Qw3rTy7u_Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8"}, // made up, in the documented shape: 8 then 24
+		{"resend-api-key", "re_" + "AbCdEf12_" + "Zy9Xw8Vu7Ts6Rq5Po4Nm3Lk2"},
 		{"jwt", "eyJ" + randB64URL(t, 30) + ".eyJ" + randB64URL(t, 60) + "." + randB64URL(t, 43)},
 	}
 	for _, c := range cases {
@@ -176,6 +178,9 @@ func TestSecretShapeRulesLeaveOrdinaryTextAlone(t *testing.T) {
 		"the sntryu_ prefix and sntrys_ short", "sntryu_tooShort", "MAKIAIOSFODNN7EXAMPLEX", "AKIA", "AKIAshort", "akiaiosfodnn7example",
 		"xoxb- and xoxz-1234567890123456", "the xoxo-love-letters-collection", "xoxb-notdigits-abcdefgh", "xoxe-mail", "xoxe and xoxes", "hugs xoxe-1-love", "xapp-store-listing", "xwfp-short", "xoxe.xoxb-notdigits-abcdefghijklmnopqrstuvwxyz", "xoxb-short", "sk_live_short", "task_live_4eC39HqLyjWDarjtT1zdp7dc", "desk_test_4eC39HqLyjWDarjtT1zdp7dc",
 		"Rack and Pinion AKIRA", "ValueError: bad total (cart 4501234567)",
+		"re_export_defaultConfigurationSettings", "func re_render_componentDidUpdateWithPrevProps()", "re_compile_patternWithNamedCaptureGroups",
+		"re_deploy_0123456789abcdef0123456789abcdef01234567", "re_commit_0123456789abcdef0123456789abcdef01234567", "re_upload_0123456789abcdefABCDEF",
+		"re_use", "re_enter_password", "please re_enter_your_password_here", "re_validate_user_session_token_for_every_request", "re_initialize_the_connection_pool_again", "re_Qw3rTy7u_short", "re_Qw3rTy7u-Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8", "are_Qw3rTy7u_Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8",
 	} {
 		if out, res := r.Redact(in); res.Blocked() || out != in {
 			t.Errorf("%q changed: %q %+v", in, out, res.Hits)
