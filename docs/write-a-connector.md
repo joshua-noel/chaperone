@@ -165,6 +165,8 @@ The tool does not do these. Each one is a decision.
    ```
 
    The first command writes the manual entry in `api/manual.yaml` and the params schema in `api/openapi.yaml`. The second rewrites `docs/manual.md`. The third records the help line of the new command. Read the diff of each file.
+
+   Once the catalog lists your operations, the baseline must have a rule for each: every test of `internal/policy` that loads the baseline fails with `baseline: no rule for catalog op ...` until step 4 is done. Do step 4 now, or expect that noise. (The first connector to follow this page hit it: with one rule missing, 186 tests and subtests failed in `internal/policy`, `cmd/chap`, `cmd/chapd`, `internal/ops` and `internal/connectors`.)
 3. **Wire the adapters into chapd.** Copy `installLinear` in `cmd/chapd/linear.go`. Build the client from the vault: read the token with `a.vault.Use`, and pass `a.Reg` as the `Registry` so the redaction check learns the token. Call `notes.Adapters`. Add the adapters to the map. `kit.Bind` stops chapd at start-up when a declared operation has no adapter, or an adapter has no declaration.
 4. **Add the baseline rule, off.** In `internal/policy/data/baseline.yaml`, add one line for each operation. The rate must be the declared one:
 

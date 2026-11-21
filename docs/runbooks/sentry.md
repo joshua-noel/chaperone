@@ -29,7 +29,7 @@ Use an **internal integration**. It is owned by the organisation, so it does not
    | the four writes as well | **Issue & Event: Read & Write** | `event:read`, `event:write` |
 
    Leave every other permission at **No Access**: Project, Team, Release, Distribution, Organization, Member, Alerts, Settings. **check:** if Sentry's page names these differently, pick the ones that give the scopes `event:read` (and `event:write`) and nothing more.
-4. Press **Save**. The page shows the **token**. Keep it open: you copy it straight into the console in step 3. **Do not paste it into chat, a file, a note or a ticket.** Sentry shows it again on this page, and you can make a new one and delete the old one.
+4. Press **Save**. The page shows the **token**. Keep it open: you copy it straight into the console in step 3. **Do not paste it into chat, a file, a note or a ticket.** **check:** whether Sentry shows the token again later. If it does not, make a new token and delete the old one.
 5. **check:** note the **organisation slug** (the part of the address after `/organizations/`, for example `acme`), the **slugs of the projects** the orchestrator may use (the project's address ends with its slug, for example `web`), and the **server**:
 
    | Your Sentry | `base_url` |
