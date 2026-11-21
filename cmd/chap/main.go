@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/joshua-noel/chaperone/internal/privfile"
 	"github.com/joshua-noel/chaperone/internal/version"
 )
 
@@ -101,8 +102,11 @@ func osApp(stdout, stderr io.Writer) *app {
 	}
 }
 
+// createPrivateFile writes data to a NEW file that only the current user can open: mode 0600 on Unix, and on Windows
+// (where the mode means nothing) a protected, user-only access list given at creation, so the key file does not
+// take its folder's. It fails if anything exists at path (a link included).
 func createPrivateFile(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := privfile.Create(path)
 	if err != nil {
 		return err
 	}

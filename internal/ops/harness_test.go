@@ -234,6 +234,8 @@ type rig struct {
 	ids     int
 	alerts  []Alert
 	alertMu sync.Mutex
+	// keyLive stands in for the keys store: what it says about a key at release. Nil means every key lives.
+	keyLive func(keyID string) error
 }
 
 func (g *rig) Alert(_ context.Context, a Alert) {
@@ -346,7 +348,13 @@ func newRig(t *testing.T, o rigOpts) *rig {
 	for _, op := range cat.Ops() {
 		adapters[op] = g.ad
 	}
-	g.svc, err = NewService(Config{DB: g.db, Ledger: g.led, Policy: g.engine, Adapters: adapters, Approvals: o.approvals, Alerter: g, Now: g.clock})
+	g.svc, err = NewService(Config{DB: g.db, Ledger: g.led, Policy: g.engine, Adapters: adapters, Approvals: o.approvals, Alerter: g, Now: g.clock,
+		KeyLive: func(_ context.Context, _ *store.Tx, id string) error {
+			if g.keyLive == nil {
+				return nil
+			}
+			return g.keyLive(id)
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}

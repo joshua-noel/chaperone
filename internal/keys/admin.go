@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/joshua-noel/chaperone/internal/ops"
 )
@@ -13,8 +14,10 @@ import (
 // of caller may do to which key.
 //
 //   - The orchestrator that asked for a key (and only it) claims it, once.
-//   - An orchestrator lists every key and revokes any (a human act: the agent
-//     that held the key is stopped). It never reads a token.
+//   - An orchestrator lists, reads and revokes the keys it owns, in the projects
+//     its own token covers, and reads the requests of the agents it owns. It sees
+//     no other owner's key or request, and it never reads a token. Its revoke is
+//     never a human stop: a stop is the owner's own act, at the console.
 //   - A key may read and revoke itself and nothing else; its own revoke is not
 //     a human stop.
 //   - A run has no part in keys at all.
@@ -47,6 +50,20 @@ func self(c *ops.Caller, id string) string {
 	return id
 }
 
+// ownedBy reports whether an orchestrator owns something that lives in project: the owner is that orchestrator
+// and the project is one its token covers. Anything else looks like nothing at all.
+func ownedBy(c *ops.Caller, owner, project string) bool {
+	return c.OrchID != "" && owner == c.OrchID && slices.Contains(c.Projects, project)
+}
+
+// noOwner refuses an orchestrator that has no id, which owns nothing (and must never be read as "every owner").
+func noOwner(c *ops.Caller) error {
+	if c.OrchID == "" {
+		return fmt.Errorf("%w: an orchestrator without an id owns no keys", ops.ErrKeyForbidden)
+	}
+	return nil
+}
+
 // Claim implements [ops.KeyAdmin].
 func (a *Admin) Claim(c *ops.Caller, id string, r *http.Request) (string, ops.KeyInfo, error) {
 	var claimant string
@@ -72,11 +89,22 @@ func agentOnly(c *ops.Caller) error {
 	return fmt.Errorf("%w: only an agent's key reads or withdraws its own requests", ops.ErrKeyForbidden)
 }
 
-// Requests implements [ops.KeyAdmin]: an agent's key sees its own agent's requests; an orchestrator sees all.
+// Requests implements [ops.KeyAdmin]: an agent's key sees its own agent's requests; an orchestrator sees the
+// requests of the agents it owns, in its own projects.
 func (a *Admin) Requests(c *ops.Caller, r *http.Request) ([]ops.KeyRequestInfo, error) {
 	switch c.Kind {
 	case ops.KindOrchestrator:
-		return a.s.ListRequests(r.Context(), "", "", false)
+		if err := noOwner(c); err != nil {
+			return nil, err
+		}
+		all, err := a.s.ListRequests(r.Context(), c.OrchID, "", false)
+		out := all[:0:0]
+		for _, q := range all {
+			if ownedBy(c, q.Owner, q.Project) {
+				out = append(out, q)
+			}
+		}
+		return out, err
 	case ops.KindKey:
 		if err := agentOnly(c); err != nil {
 			return nil, err
@@ -86,13 +114,17 @@ func (a *Admin) Requests(c *ops.Caller, r *http.Request) ([]ops.KeyRequestInfo, 
 	return nil, fmt.Errorf("%w: a run has no keys", ops.ErrKeyForbidden)
 }
 
-// ownRequest reads one request of the caller's own agent: another agent's request looks like no request.
+// ownRequest reads one request of the caller's own agent (a key), or of an agent the orchestrator owns, in its
+// projects: another owner's request looks like no request.
 func (a *Admin) ownRequest(c *ops.Caller, id string, r *http.Request) (ops.KeyRequestInfo, error) {
 	v, err := a.s.GetRequest(r.Context(), id)
 	if err != nil {
 		return ops.KeyRequestInfo{}, mapErr(err)
 	}
-	if c.Kind == ops.KindKey && (v.Owner != c.KeyOwner || v.Holder != c.KeyHolder) {
+	switch {
+	case c.Kind == ops.KindKey && (v.Owner != c.KeyOwner || v.Holder != c.KeyHolder):
+		return ops.KeyRequestInfo{}, ops.ErrKeyNotFound
+	case c.Kind == ops.KindOrchestrator && !ownedBy(c, v.Owner, v.Project):
 		return ops.KeyRequestInfo{}, ops.ErrKeyNotFound
 	}
 	return v, nil
@@ -171,14 +203,24 @@ func (e *Enrolment) Poll(ctx context.Context, id, deviceCode string) (ops.AgentE
 	return out, nil
 }
 
-// List implements [ops.KeyAdmin].
+// List implements [ops.KeyAdmin]: an orchestrator lists the keys it owns, in its own projects.
 func (a *Admin) List(c *ops.Caller, r *http.Request) ([]ops.KeyInfo, error) {
 	switch c.Kind {
 	case ops.KindOrchestrator:
+		if err := noOwner(c); err != nil {
+			return nil, err
+		}
 		if _, err := a.s.Sweep(r.Context()); err != nil {
 			return nil, err
 		}
-		return a.s.List(r.Context(), "")
+		all, err := a.s.List(r.Context(), c.OrchID)
+		out := all[:0:0]
+		for _, k := range all {
+			if ownedBy(c, k.Owner, k.Project) {
+				out = append(out, k)
+			}
+		}
+		return out, err
 	case ops.KindKey:
 		k, err := a.s.Get(r.Context(), c.KeyID)
 		if err != nil {
@@ -189,7 +231,7 @@ func (a *Admin) List(c *ops.Caller, r *http.Request) ([]ops.KeyInfo, error) {
 	return nil, fmt.Errorf("%w: a run has no keys", ops.ErrKeyForbidden)
 }
 
-// Get implements [ops.KeyAdmin].
+// Get implements [ops.KeyAdmin]: a key somebody else owns looks like no key.
 func (a *Admin) Get(c *ops.Caller, id string, r *http.Request) (ops.KeyInfo, error) {
 	id = self(c, id)
 	switch c.Kind {
@@ -202,16 +244,32 @@ func (a *Admin) Get(c *ops.Caller, id string, r *http.Request) (ops.KeyInfo, err
 		return ops.KeyInfo{}, fmt.Errorf("%w: a run has no keys", ops.ErrKeyForbidden)
 	}
 	k, err := a.s.Get(r.Context(), id)
-	return k, mapErr(err)
+	if err != nil {
+		return ops.KeyInfo{}, mapErr(err)
+	}
+	if c.Kind == ops.KindOrchestrator && !ownedBy(c, k.Owner, k.Project) {
+		return ops.KeyInfo{}, ops.ErrKeyNotFound
+	}
+	return k, nil
 }
 
-// Revoke implements [ops.KeyAdmin].
+// Revoke implements [ops.KeyAdmin]. A caller with a token revokes only what it owns (an orchestrator: its own
+// keys in its own projects; a key: itself), and such a revoke is never a human stop: only the owner, at the
+// console, stops an agent for good (Decider.Revoke). A key owned by a person is out of an orchestrator's reach.
 func (a *Admin) Revoke(c *ops.Caller, id string, r *http.Request) (ops.KeyInfo, error) {
 	id = self(c, id)
-	human := false
 	switch c.Kind {
 	case ops.KindOrchestrator:
-		human = true
+		if err := noOwner(c); err != nil {
+			return ops.KeyInfo{}, err
+		}
+		k, err := a.s.Get(r.Context(), id)
+		if err != nil {
+			return ops.KeyInfo{}, mapErr(err)
+		}
+		if !ownedBy(c, k.Owner, k.Project) {
+			return ops.KeyInfo{}, ops.ErrKeyNotFound
+		}
 	case ops.KindKey:
 		if id != c.KeyID {
 			return ops.KeyInfo{}, ops.ErrKeyNotFound
@@ -219,7 +277,7 @@ func (a *Admin) Revoke(c *ops.Caller, id string, r *http.Request) (ops.KeyInfo, 
 	default:
 		return ops.KeyInfo{}, fmt.Errorf("%w: a run has no keys", ops.ErrKeyForbidden)
 	}
-	k, err := a.s.Revoke(r.Context(), id, c.Key(), human)
+	k, err := a.s.Revoke(r.Context(), id, c.Key(), false)
 	if errors.Is(err, ErrRevoked) {
 		return ops.KeyInfo{}, fmt.Errorf("%w: the key is already revoked", ops.ErrKeyConflict)
 	}

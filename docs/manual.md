@@ -121,9 +121,9 @@ Surface `op` is `POST /v0/ops`; surface `git` is the git proxy (`chap git setup`
 | `chap key claim` | take a granted key into --out, once (only the caller that asked for it) |
 | `chap key create` | build a key for a script or an agent: a card you sign in the console, then the key goes to --out (orchestrator only) |
 | `chap key extend` | ask your owner to make this key last longer: one tap and a Hello for them; it adds time and no access (an agent's key only) |
-| `chap key list` | list keys: holder, state, ops, repositories, expiry, uses (orchestrator only) |
+| `chap key list` | list the keys you own: holder, state, ops, repositories, expiry, uses (orchestrator only) |
 | `chap key request` | ask your owner for a key: what, how long and why; wait, and the key replaces the one in CHAP_KEY_FILE (an agent's key only) |
-| `chap key revoke` | revoke a key at once; an agent's key also stops the agent (orchestrator only) |
+| `chap key revoke` | revoke a key you own at once; it does not stop the agent, only its owner does that at the console (orchestrator only) |
 | `chap key show` | show the key this process holds: what it can do and until when (a key only) |
 | `chap ledger verify` | walk the ledger hash chain, optionally against the signed anchor copies (orchestrator only) |
 | `chap logs` | read recent log lines from a fixed source |
@@ -225,7 +225,7 @@ chap dev-token --project <p> --repo <owner/name> --branch <b> --path <glob> --op
 | `--json` | print chapd's JSON reply instead of text |
 | `--minutes <int>` | lifetime in minutes, 1 to 120 (default 60) |
 | `--op <value>` | op the token may ask for (repeat, required) |
-| `--out <string>` | file to write the token to; created 0600, never overwritten (required) |
+| `--out <string>` | file to write the token to; private to you (mode 0600, or an access list for you alone on Windows), never overwritten (required) |
 | `--path <value>` | path glob the run may change (repeat, required) |
 | `--project <string>` | project slug (required) [env CHAP_PROJECT] |
 | `--repo <string>` | owner/name the run may push to (required) |
@@ -549,7 +549,7 @@ chap key create --project <p> --holder <name> (--agent | --person) --ops <op,op>
 
 | Flag | Meaning |
 | --- | --- |
-| `--agent` | the holder is an agent (a human revoke stops it) |
+| `--agent` | the holder is an agent (its owner can stop it at the console) |
 | `--holder <string>` | the name of the script, person or agent that will hold the key |
 | `--json` | print chapd's JSON reply instead of text |
 | `--ops <string>` | comma-separated ops the key may use; routine ops, and risky ones that still ask each time |
@@ -580,7 +580,7 @@ chap key extend --for <1h..30d> --reason <why> [--today] [--wait <s>]
 
 ### `chap key list`
 
-list keys: holder, state, ops, repositories, expiry, uses (orchestrator only)
+list the keys you own: holder, state, ops, repositories, expiry, uses (orchestrator only)
 
 ```
 chap key list
@@ -614,7 +614,7 @@ chap key request --reason <why> (--ops <op,op> [--repo owner/name] | --same-as-m
 
 ### `chap key revoke`
 
-revoke a key at once; an agent's key also stops the agent (orchestrator only)
+revoke a key you own at once; it does not stop the agent, only its owner does that at the console (orchestrator only)
 
 ```
 chap key revoke <k-id>
@@ -991,7 +991,7 @@ Every rule below has a test that fails if the code stops enforcing it. `go test 
 | `chap` takes its credential from `CHAP_RUN_TOKEN`, else the orchestrator token file. No flag accepts a token or any other secret. | cmd/chap: `loadToken`, and every flag set | `TestNoFlagAcceptsASecret` (cmd/chap), `TestTokenPrecedence` (cmd/chap), `TestNoFlagNamesACredential` (docs/manualgen) |
 | `chap` sends its token only to a loopback `chapd`: a `CHAP_URL` anywhere else is refused, and a redirect is not followed. | cmd/chap: `baseURL`, the HTTP client's `CheckRedirect` | `TestBaseURL` (cmd/chap), `TestRedirectIsNotFollowed` (cmd/chap) |
 | Everything `chap` prints is masked: the token in use, and anything shaped like an orchestrator token, a JWT, a GitHub or API key or a PEM block. A request or denial that holds a registered secret is refused by `chapd` (`REDACTION_BLOCKED`) before it is stored or echoed. | cmd/chap: `app.scrub`; internal/redact; internal/ops: `submissionLeaks` | `TestScrubMasksSecretShapes` (cmd/chap), `TestRT26CanaryNeverAppearsAnywhere` (test/redteam), `TestRT26AgentSuppliedSecret` (test/redteam) |
-| `chap dev-token` writes the token it mints to a new file and prints nothing of it. It creates the file exclusively, so an existing file is refused, not overwritten. The mode is 0600 where the system has file modes; on Windows the file takes the ACL of its folder, which is why the default place is your own profile. | cmd/chap: `createPrivateFile` (`O_EXCL`), `cmdDevToken` | `TestDevTokenWritesFileOnly` (cmd/chap) |
+| `chap dev-token` writes the token it mints to a new file and prints nothing of it. It creates the file exclusively, so an existing file is refused, not overwritten. The file is private to you from the moment it exists: mode 0600 where the system has file modes, and on Windows, where the mode means nothing, a protected access list for your user alone that is given in the same call that creates the file, so it does not take the access of its folder. A link at the path is refused, not followed. | cmd/chap: `createPrivateFile`, `cmdDevToken`; internal/privfile: `Create` | `TestDevTokenWritesFileOnly` (cmd/chap), `TestKeyFilesArePrivateFromCreation` (cmd/chap), `TestCreateIsOwnerOnlyByIcacls` (internal/privfile), `TestCreateIsMode0600` (internal/privfile), `TestCreateDoesNotFollowALink` (internal/privfile) |
 | `chap vault status` shows secret names and counts only. No chapd route, `chap` command or ledger field returns a secret value; the vault's only reader is `Vault.Use`, which hands the value to one adapter closure. | internal/vault: `Use`; internal/ops: the vault status route | `TestNoFunctionReturnsASecret` (internal/vault), `TestRT26CanaryNeverAppearsAnywhere` (test/redteam) |
 | The `--reason` text is for the approver to read. The card shows it in a box labelled as written by the requester and untrusted, and it is recorded. It is not part of the op hash an approval binds to, and no policy or adapter code reads it. | internal/spec: `OpHash`; internal/approvals: `card.go` | `TestReasonIsNotPartOfTheOpHash` (docs/manualgen), `TestNoAdapterOrPolicyReadsTheReason` (docs/manualgen) |
 | A high or critical op always needs one approval bound to the exact request (`OP_APPROVAL_REQUIRED` until it is approved); a changed parameter is a new card (`APPROVAL_HASH_MISMATCH`). | internal/ops: `service.go` (`Class.NeedsApproval`); internal/approvals | `TestApprovalFlow` (internal/ops), `TestRT24DemoEmail` (test/redteam) |

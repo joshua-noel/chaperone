@@ -51,7 +51,7 @@ func issueReq(g *rig, mutate func(p map[string]any)) *ops.Request {
 	}
 	return &ops.Request{
 		ID: rq, Op: OpIssue, Project: "acme-shop", Params: p,
-		Target: spec.Target{Adapter: "chaperone", Ref: "key:scout"}, Caller: &ops.Caller{Kind: ops.KindOrchestrator, OrchID: "main"},
+		Target: spec.Target{Adapter: "chaperone", Ref: "key:scout"}, Caller: &ops.Caller{Kind: ops.KindOrchestrator, OrchID: "main", ScopeOps: []string{"keys.issue", "pr.*", "deploy", "health"}},
 	}
 }
 

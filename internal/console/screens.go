@@ -170,6 +170,8 @@ func (c *Console) screenRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /agents/requests/{id}/grant", s.agentRequestGrant)
 	mux.HandleFunc("POST /agents/requests/{id}/deny", s.agentRequestDeny)
 	mux.HandleFunc("POST /agents/keys/{id}/extend", s.agentKeyExtend)
+	mux.HandleFunc("POST /agents/keys/{id}/revoke", s.agentKeyRevoke)
+	mux.HandleFunc("POST /agents/enrolments/{id}/cancel", s.agentEnrolCancel)
 }
 
 // ---- shared plumbing ----

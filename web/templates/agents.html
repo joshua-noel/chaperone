@@ -5,6 +5,11 @@
 {{if not .On}}
 <p class="empty">This chapd runs without agent keys, so there is nothing to answer here.</p>
 {{else}}
+{{if .PolicyOff}}
+<div class="alert" data-tone="warning" role="status" id="keys-policy-off">
+  <p><strong>Agent keys are off.</strong> The policy turns keys.issue, keys.request and keys.extend off for every project this chapd knows, so no agent can enrol or ask for a key. A key that already exists can still be revoked here. To turn agent keys on, change the policy.</p>
+</div>
+{{end}}
 
 <div class="card" role="region" aria-labelledby="pending-heading">
   <header>
@@ -58,7 +63,13 @@
           {{if .CanExtend}}
             <button class="btn" data-size="sm" type="button" hx-post="/agents/keys/{{.ID}}/extend" hx-vals='{"hours":"24"}' hx-target="#agents-status" hx-swap="innerHTML"
               aria-label="Extend the key of {{.Holder}} by 24 hours">Extend 24 hours</button>
-          {{else}}-{{end}}
+          {{end}}
+          {{if .CanRevoke}}{{if $.Restricted}}<span class="muted">Re-open to revoke</span>{{else}}
+            <button class="btn" data-variant="destructive" data-size="sm" type="button" hx-post="/agents/keys/{{.ID}}/revoke" hx-target="#agents-status" hx-swap="innerHTML"
+              hx-confirm="Revoke the key of {{.Holder}}? The agent is refused from its next call and is stopped for good: it cannot be enrolled again."
+              aria-label="Revoke the key of {{.Holder}}">Revoke</button>{{end}}
+          {{end}}
+          {{if not (or .CanExtend .CanRevoke)}}-{{end}}
           </td>
         </tr>
       {{end}}
@@ -84,6 +95,35 @@
     <div id="enrol-status" aria-live="polite"></div>
   </section>
 </div>
+
+{{if .Waiting}}
+<div class="card" role="region" aria-labelledby="waiting-heading">
+  <header>
+    <h2 id="waiting-heading">Agents waiting to be enrolled</h2>
+    <p>These agents started an enrolment and have not been answered. Starting one needs no credential, so any process on this machine can start one: if you do not know an agent here, cancel it. An enrolment that nobody answers ends by itself after 10 minutes.</p>
+  </header>
+  <section>
+    <table class="table table-stack" id="waiting-enrolments">
+      <caption class="sr-only">Agents waiting to be enrolled</caption>
+      <thead><tr><th scope="col">Name it asked for</th><th scope="col">Project</th><th scope="col">Waiting</th><th scope="col">Ends</th><th scope="col">Action</th></tr></thead>
+      <tbody>
+      {{range .Waiting}}
+        <tr>
+          <th scope="row"><code>{{.Label}}</code></th>
+          <td data-label="Project">{{.Project}}</td>
+          <td data-label="Waiting">{{.Age}}</td>
+          <td data-label="Ends">{{template "t" .Expires}}</td>
+          <td data-label="Action">{{if $.Restricted}}<span class="muted">Re-open to cancel</span>{{else}}
+            <button class="btn" data-variant="destructive" data-size="sm" type="button" hx-post="/agents/enrolments/{{.ID}}/cancel" hx-target="#agents-status" hx-swap="innerHTML"
+              hx-confirm="Cancel the enrolment of {{.Label}}? Its agent is told the enrolment ended."
+              aria-label="Cancel the enrolment of {{.Label}}">Cancel</button>{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+{{end}}
 
 {{if .Recent}}
 <div class="card" role="region" aria-labelledby="recent-heading">

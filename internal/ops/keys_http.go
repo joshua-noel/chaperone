@@ -47,14 +47,14 @@ type KeyInfo struct {
 type KeyAdmin interface {
 	// Claim hands the claimant of a granted key its token, once.
 	Claim(c *Caller, id string, r *http.Request) (token string, info KeyInfo, err error)
-	// List lists the keys of the caller's owner: every key for an orchestrator.
+	// List lists the keys the caller may see: for an orchestrator the keys it owns, in its own projects.
 	List(c *Caller, r *http.Request) ([]KeyInfo, error)
-	// Get returns one key; a key may read only itself.
+	// Get returns one key; a key may read only itself, an orchestrator only a key it owns.
 	Get(c *Caller, id string, r *http.Request) (KeyInfo, error)
-	// Revoke revokes a key: an orchestrator any key (a human act: an agent's key
-	// stops the agent), a key only itself.
+	// Revoke revokes a key: an orchestrator a key it owns, in its own projects (never a human stop: only the owner at
+	// the console stops an agent), a key only itself.
 	Revoke(c *Caller, id string, r *http.Request) (KeyInfo, error)
-	// Requests lists key requests: an agent's key its own agent's, an orchestrator all of them.
+	// Requests lists key requests: an agent's key its own agent's, an orchestrator those of the agents it owns, in its projects.
 	Requests(c *Caller, r *http.Request) ([]KeyRequestInfo, error)
 	// Request returns one request; an agent's key reads only its own agent's.
 	Request(c *Caller, id string, r *http.Request) (KeyRequestInfo, error)

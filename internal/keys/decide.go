@@ -317,3 +317,42 @@ func (d *Decider) ApproveEnrol(ctx context.Context, approver, code string) (ops.
 	}
 	return card, nil
 }
+
+// Revoke is the human stop (ADR-008): the owner revokes a key of theirs at the console, and if an agent held it,
+// the agent is stopped for good (an orchestrator's token can never do this). Revoking only takes access away, so
+// the signed-in session is enough and there is no card: the same rule as denying a request, cancelling a card or
+// revoking a run. Another person's key looks like no key.
+func (d *Decider) Revoke(ctx context.Context, approver, keyID string) (ops.KeyInfo, error) {
+	k, err := d.s.Get(ctx, keyID)
+	if err != nil {
+		return ops.KeyInfo{}, err
+	}
+	if k.Owner != OwnerOf(approver) {
+		return ops.KeyInfo{}, ErrNotFound
+	}
+	info, err := d.s.Revoke(ctx, keyID, OwnerOf(approver), true)
+	if errors.Is(err, ErrRevoked) {
+		return ops.KeyInfo{}, rule("this key is already revoked")
+	}
+	return info, err
+}
+
+// WaitingEnrolments lists the enrolments that wait for an owner now, oldest first. Until an owner answers, an
+// enrolment has no owner, so every signed-in approver sees them all: that is the point, because a start needs no
+// credential and a process may keep the slots filled.
+func (d *Decider) WaitingEnrolments(ctx context.Context) ([]EnrolView, error) {
+	return d.s.WaitingEnrolments(ctx)
+}
+
+// CancelEnrol cancels a waiting enrolment. Like a revoke it only takes away, so a session is enough. An
+// enrolment whose card is already waiting is refused: deny the card first.
+func (d *Decider) CancelEnrol(ctx context.Context, id string) error {
+	e, err := d.s.enrolRow(ctx, d.s.cfg.DB.SQL(), id)
+	if err != nil {
+		return err
+	}
+	if d.cardWaiting(ctx, e.IssueOp) {
+		return rule("a card for this enrolment is already waiting: deny it on the approvals page first")
+	}
+	return d.s.CancelEnrolment(ctx, id)
+}

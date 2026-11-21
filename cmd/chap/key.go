@@ -23,7 +23,7 @@ import (
 
 var (
 	keyIDRE    = regexp.MustCompile(`^k-[0-9a-f]{16}$`)
-	holderRE   = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,62}$`)
+	holderRE   = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,39}$`) // the most an agent label or holder name may be: keys.MaxLabel
 	repoNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}$`)
 )
 
@@ -39,9 +39,9 @@ func keyCommands() []*command {
 		{path: "key claim", usage: "chap key claim <k-id> --out <file>",
 			summary: "take a granted key into --out, once (only the caller that asked for it)", run: cmdKeyClaim},
 		{path: "key list", usage: "chap key list",
-			summary: "list keys: holder, state, ops, repositories, expiry, uses (orchestrator only)", run: cmdKeyList},
+			summary: "list the keys you own: holder, state, ops, repositories, expiry, uses (orchestrator only)", run: cmdKeyList},
 		{path: "key revoke", usage: "chap key revoke <k-id>",
-			summary: "revoke a key at once; an agent's key also stops the agent (orchestrator only)", run: cmdKeyRevoke},
+			summary: "revoke a key you own at once; it does not stop the agent, only its owner does that at the console (orchestrator only)", run: cmdKeyRevoke},
 		{path: "key show", usage: "chap key show",
 			summary: "show the key this process holds: what it can do and until when (a key only)", run: cmdKeyShow},
 	}
@@ -120,7 +120,7 @@ func cmdKeyCreate(a *app, c *command, args []string) int {
 	asJSON := jsonOnly(fs)
 	fs.StringVar(&project, "project", "", "the project the key is bound to")
 	fs.StringVar(&holder, "holder", "", "the name of the script, person or agent that will hold the key")
-	fs.BoolVar(&agent, "agent", false, "the holder is an agent (a human revoke stops it)")
+	fs.BoolVar(&agent, "agent", false, "the holder is an agent (its owner can stop it at the console)")
 	fs.BoolVar(&person, "person", false, "the holder is a person or a script")
 	fs.StringVar(&opsFlag, "ops", "", "comma-separated ops the key may use; routine ops, and risky ones that still ask each time")
 	fs.StringVar(&repo, "repo", "", "owner/name the key is bound to (needed for pull-request ops)")
@@ -136,7 +136,7 @@ func cmdKeyCreate(a *app, c *command, args []string) int {
 	case !slugRE.MatchString(project):
 		return a.usageErr(c, "--project is required")
 	case !holderRE.MatchString(holder):
-		return a.usageErr(c, "--holder is required: a lower-case name")
+		return a.usageErr(c, "--holder is required: a lower-case name of at most 40 characters")
 	case agent == person:
 		return a.usageErr(c, "say whether the holder is an --agent or a --person")
 	case rate < 1 || rate > defaultKeyRate:

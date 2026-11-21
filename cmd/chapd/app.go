@@ -308,6 +308,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	var svcRef *ops.Service
 	keyStore, err := keystore.New(keystore.Config{
 		DB: db, Ledger: sink, Redact: a.Reg, Now: cfg.now, PolicyVersion: base.BaselineVersion,
+		Catalog: a.Policy.Catalog(), Log: a.log,
 		// Agents may be enrolled only for a project whose policy turns keys.request on; a looping agent is logged.
 		EnrolProject: func(project string) bool { return a.Policy.For(project).Enabled(keystore.OpRequest) },
 		OnLooping: func(_ context.Context, l keystore.Looping) {
@@ -396,6 +397,8 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	svc, err := ops.NewService(ops.Config{
 		DB: db, Ledger: sink, Policy: a.Policy, Adapters: ads, Redactor: a.Reg, Log: a.log, Now: cfg.now,
 		Approvals: bridge, Alerter: alerts, ExecTimeout: execTimeout,
+		// ADR-008: an approved op of a key is released only while the key lives (checked in the release transaction).
+		KeyLive: func(ctx context.Context, tx *store.Tx, id string) error { return keyStore.Live(ctx, tx, id) },
 	})
 	if err != nil {
 		return nil, err

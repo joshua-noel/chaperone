@@ -317,3 +317,29 @@ func TestOrchestratorIdsCannotStartWithTheKeyPrefix(t *testing.T) {
 		t.Errorf("an id that merely starts with key: %v", err)
 	}
 }
+
+// The reserved ids are refused when a token is issued and again when it is verified: a row that got there another
+// way (a database from before the ids were reserved, or an insert) never acts as the console's own identity
+// ("operator" passes the gates that only a person's own Hello may pass) or as a name chapd records for keys, people,
+// agents and enrolments.
+func TestReservedOrchestratorIdsAreRefusedAtVerifyToo(t *testing.T) {
+	ctx := context.Background()
+	for _, id := range []string{"operator", "key.k-0123456789abcdef", "person.operator", "agent.operator.scout", "enrol.en-0123456789abcdef"} {
+		e := newEnv(t)
+		r := e.issueOrch("main", mainScope, 0)
+		if _, err := e.orch.Verify(ctx, r.Token); err != nil {
+			t.Fatalf("control: %v", err)
+		}
+		if _, err := e.db.SQL().Exec(`UPDATE orchestrators SET id = ?`, id); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		_, err := e.orch.Verify(ctx, r.Token)
+		if re := wantCode(t, err, CauseTokenInvalid); !strings.Contains(re.Error(), "reserved") && !strings.Contains(re.Error(), "must not start") {
+			t.Errorf("%s: %v", id, re)
+		}
+		// Issue still refuses them.
+		if _, err := e.orch.Issue(ctx, IssueParams{ID: id, Scope: mainScope}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("issue %s: %v", id, err)
+		}
+	}
+}

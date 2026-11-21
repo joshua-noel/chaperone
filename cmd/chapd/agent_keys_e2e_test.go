@@ -305,8 +305,16 @@ func TestE2EAgentAsksOwnerTaps(t *testing.T) {
 	}
 
 	// 9. A human stop keeps the agent stopped: it cannot ask again, and it cannot be enrolled again without the owner.
-	if st, body := e.call("POST", "/v0/keys/"+scoutKey+"/revoke", e.token, nil); st != 200 || body["stopped_by_human"] != true {
-		t.Fatalf("revoke: %d %v", st, body)
+	// Only the owner stops an agent, at the console: an orchestrator's token cannot even see the key, so its revoke is
+	// refused and changes nothing.
+	if st, body := e.call("POST", "/v0/keys/"+scoutKey+"/revoke", e.token, nil); st != http.StatusNotFound {
+		t.Fatalf("an orchestrator revoked its owner's agent key: %d %v", st, body)
+	}
+	if st, body := e.call("GET", "/v0/keys/self", scoutTok, nil); st != 200 || body["state"] != "live" {
+		t.Fatalf("the refused revoke changed the key: %d %v", st, body)
+	}
+	if k, err := e.app.KeyDecider.Revoke(ctx, "operator", scoutKey); err != nil || k.State != "revoked" || !k.StoppedByHuman {
+		t.Fatalf("revoke at the console: %+v %v", k, err)
 	}
 	st, body := e.ask(scoutTok, scoutAsk(), "scout asks again")
 	if st != http.StatusForbidden && st != http.StatusUnauthorized {
@@ -385,4 +393,93 @@ func (e *agentE2E) view(token string, n int) (int, map[string]any) {
 		"op": "pr.view", "project": "storefront",
 		"target": map[string]any{"adapter": "github", "ref": "example-org/storefront#" + strconv.Itoa(n)}, "params": map[string]any{},
 	})
+}
+
+// selfKey enrols an agent, lets it ask, grants the ask as asked, and returns the id and token of the key it claims.
+func (e *agentE2E) selfKey(label string) (string, string) {
+	e.t.Helper()
+	ctx := context.Background()
+	_, boot := e.enrol(label)
+	st, op := e.ask(boot, scoutAsk(), "reads pull requests")
+	id, _ := resultOf(op)["request_id"].(string)
+	if st != 200 || id == "" {
+		e.t.Fatalf("ask: %d %v", st, op)
+	}
+	card, err := e.app.KeyDecider.Grant(ctx, "operator", id, nil)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if err := e.signAs(operator, card.ApprovalID); err != nil {
+		e.t.Fatal(err)
+	}
+	e.waitOp(card.OpID, "succeeded")
+	_, rq := e.call("GET", "/v0/keys/requests/"+id, boot, nil)
+	kid, _ := rq["key_id"].(string)
+	st, cl := e.call("POST", "/v0/keys/"+kid+"/claim", boot, nil)
+	if st != 200 {
+		e.t.Fatalf("claim %s: %d %v", kid, st, cl)
+	}
+	return kid, cl["token"].(string)
+}
+
+// P2-1, the scenario of the review: an orchestrator that holds only pr.merge (no keys.* operation) sees nothing of
+// the owner's agents, reads none of their words, and cannot revoke their keys, so it cannot stop them for good.
+func TestE2EAnOrchestratorHoldingOnlyPrMergeSeesNothingOfTheOwnersAgents(t *testing.T) {
+	e := newAgentE2E(t)
+	kid, tok := e.selfKey("scout")
+	if st, _ := e.ask(tok, map[string]any{"ops": []any{"pr.view"}, "units": []any{"example-org/storefront"}, "ttl_hours": 4}, "SECRET-PLAN: reading the PR for the acquisition"); st != 200 {
+		t.Fatalf("ask: %d", st)
+	}
+	st, list := e.call("GET", "/v0/keys", e.token, nil)
+	if items, _ := list["items"].([]any); st != http.StatusOK || len(items) != 0 {
+		t.Errorf("the orchestrator lists keys of the owner's agents: %d %v", st, list)
+	}
+	st, rqs := e.call("GET", "/v0/keys/requests", e.token, nil)
+	if items, _ := rqs["items"].([]any); st != http.StatusOK || len(items) != 0 || strings.Contains(strings.Join(strs(rqs["items"]), ""), "SECRET-PLAN") {
+		t.Errorf("the orchestrator reads the agent's requests: %d %v", st, rqs)
+	}
+	if st, body := e.call("GET", "/v0/keys/"+kid, e.token, nil); st != http.StatusNotFound {
+		t.Errorf("the orchestrator reads the owner's key: %d %v", st, body)
+	}
+	if st, body := e.call("POST", "/v0/keys/"+kid+"/revoke", e.token, nil); st != http.StatusNotFound {
+		t.Fatalf("the orchestrator's revoke: %d %v", st, body)
+	}
+	// Nothing changed: the agent still works, is not stopped, and can be enrolled again after a revoke at the console.
+	if st, body := e.call("GET", "/v0/keys/self", tok, nil); st != 200 || body["state"] != "live" {
+		t.Errorf("the key after the refused revoke: %d %v", st, body)
+	}
+	var stopped int
+	e.app.DB.SQL().QueryRow(`SELECT count(*) FROM key_agents`).Scan(&stopped)
+	if stopped != 0 {
+		t.Errorf("%d agents stopped", stopped)
+	}
+}
+
+// P3-1: a label too long for the ledger's id is refused when the agent starts its enrolment, not when it claims.
+func TestE2EAnOverLongLabelIsRefusedAtEnrolment(t *testing.T) {
+	e := newAgentE2E(t)
+	st, body := e.call("POST", "/v0/agents/enrolments", "", map[string]any{"project": "storefront", "label": "s" + strings.Repeat("x", 59)})
+	if st != http.StatusBadRequest || !strings.Contains(body["why"].(string), "at most 40 characters") {
+		t.Errorf("a 60-character label: %d %v", st, body)
+	}
+	// The longest allowed label enrols and claims its own key.
+	if _, tok := e.enrol("s" + strings.Repeat("x", keys.MaxLabel-1)); tok == "" {
+		t.Error("the longest label did not enrol")
+	}
+}
+
+// P3-2: the agent's reason reaches the owner without bidirectional or zero-width characters.
+func TestE2EAReasonWithBidiControlsIsStoredClean(t *testing.T) {
+	e := newAgentE2E(t)
+	_, boot := e.enrol("scout")
+	if st, op := e.ask(boot, scoutAsk(), "please \u202egnirotinom\u202c read only\u200b"); st != 200 {
+		t.Fatalf("ask: %d %v", st, op)
+	}
+	list, err := e.app.KeyDecider.Pending(context.Background(), "operator")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("pending: %v %v", list, err)
+	}
+	if strings.ContainsAny(list[0].Reason, "\u202e\u202c\u200b") || !strings.Contains(list[0].Reason, "read only") {
+		t.Errorf("the reason reaches the owner as %q", list[0].Reason)
+	}
 }

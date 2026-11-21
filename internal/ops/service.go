@@ -38,6 +38,10 @@ type Config struct {
 	Log       *slog.Logger
 	// ExecTimeout bounds one adapter Execute call. Default 5 minutes.
 	ExecTimeout time.Duration
+	// KeyLive answers, inside the transaction that releases an op, whether the key that asked is still live. It
+	// returns nil when it is, a *Refusal when it is revoked or has expired, and any other error for a fault. Nil
+	// means no keys are in use: an op of a key is then never released.
+	KeyLive func(ctx context.Context, tx *store.Tx, keyID string) error
 }
 
 // Service runs the op lifecycle.
@@ -52,6 +56,7 @@ type Service struct {
 	nowFn    func() time.Time
 	log      *slog.Logger
 	execTO   time.Duration
+	keyLive  func(ctx context.Context, tx *store.Tx, keyID string) error
 
 	// idFn lets tests choose ids; nil means random.
 	idFn func(prefix string) string
@@ -75,7 +80,7 @@ func NewService(cfg Config) (*Service, error) {
 	s := &Service{
 		db: cfg.DB, led: cfg.Ledger, policy: cfg.Policy, adapters: cfg.Adapters,
 		appr: cfg.Approvals, alert: cfg.Alerter, redactor: cfg.Redactor,
-		nowFn: cfg.Now, log: cfg.Log, execTO: cfg.ExecTimeout,
+		nowFn: cfg.Now, log: cfg.Log, execTO: cfg.ExecTimeout, keyLive: cfg.KeyLive,
 		inflight: map[string]chan struct{}{},
 	}
 	if s.nowFn == nil {
@@ -503,6 +508,7 @@ func (s *Service) newRecord(c *Caller, sub *Submission, project string, entry po
 		r.ScopeJSON = scopeJSON(c)
 	case KindOrchestrator:
 		r.OrchID = c.OrchID
+		r.ScopeJSON = scopeJSON(c)
 	case KindKey:
 		r.KeyID, r.OwnerID = c.KeyID, c.KeyOwner
 		r.ScopeJSON = scopeJSON(c)

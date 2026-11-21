@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -129,7 +130,7 @@ func (s *Store) StartEnrolment(ctx context.Context, project, label string) (Enro
 		return EnrolStart{}, &EnrolRefusal{Why: "project must be a project name", Status: 400}
 	}
 	if !labelRE.MatchString(label) {
-		return EnrolStart{}, &EnrolRefusal{Why: "label must be a lower-case name: letters, digits, '.', '_' and '-'", Status: 400}
+		return EnrolStart{}, &EnrolRefusal{Why: fmt.Sprintf("label must be a lower-case name of at most %d characters: letters, digits, '.', '_' and '-'", MaxLabel), Status: 400}
 	}
 	if s.cfg.EnrolProject != nil && !s.cfg.EnrolProject(project) {
 		return EnrolStart{}, &EnrolRefusal{Why: "agents cannot ask for keys in project " + project + ": the policy does not turn keys.request on for it", Status: 403}
@@ -171,13 +172,85 @@ func (s *Store) StartEnrolment(ctx context.Context, project, label string) (Enro
 		out = EnrolStart{ID: id, UserCode: user[:4] + "-" + user[4:], DeviceCode: device, ExpiresAt: expires}
 		return nil
 	})
+	var ref *EnrolRefusal
+	if errors.As(err, &ref) && (ref.Status == 409 || ref.Status == 429) {
+		s.noteRefusedStart(ctx, project, label, ref)
+	}
 	return out, err
 }
 
 // EnrolView is a waiting enrolment as the console shows it to the owner.
 type EnrolView struct {
 	ID, Project, Label string
+	CreatedAt          time.Time
 	ExpiresAt          time.Time
+}
+
+// refusedStartEvery is the least time between two written-down refusals of an enrolment start: a process that
+// keeps asking must not fill the log and the ledger, only show up in them.
+const refusedStartEvery = time.Minute
+
+// noteRefusedStart makes a refused start (the cap, or a label that already waits) visible: one WARN in the log
+// and one event in the ledger, and no more than one of each a minute. A start needs no credential, so a local
+// process can keep the slots or a label filled; this does not stop it, it lets the operator see it.
+func (s *Store) noteRefusedStart(ctx context.Context, project, label string, ref *EnrolRefusal) {
+	now := s.now()
+	s.mu.Lock()
+	if !s.lastRefuse.IsZero() && now.Sub(s.lastRefuse) < refusedStartEvery {
+		s.mu.Unlock()
+		return
+	}
+	s.lastRefuse = now
+	s.mu.Unlock()
+	log := s.cfg.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Warn("an agent enrolment was refused: the slots are full or the label already waits", "project", project, "label", label, "why", ref.Why)
+	err := s.cfg.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
+		return s.appendNote(ctx, tx, note{
+			Op: "keys.enrol", Project: project, Requester: "enrol.start", Ref: "enrol:" + label, Severity: "WARN",
+			Params: map[string]any{"project": project, "label": label, "status": ref.Status},
+			Body:   "agent enrolment refused for " + label + ": " + ref.Why, Cause: "ENROLMENT_REFUSED",
+		})
+	})
+	if err != nil {
+		log.Error("could not write the refused enrolment to the ledger", "err", err)
+	}
+}
+
+// WaitingEnrolments lists the enrolments that wait for their owner now, oldest first.
+func (s *Store) WaitingEnrolments(ctx context.Context) ([]EnrolView, error) {
+	rows, err := s.cfg.DB.SQL().QueryContext(ctx, `SELECT `+enrolColumns+` FROM key_enrolments WHERE state = 'pending' AND expires_at > ? ORDER BY created_at, id`, s.now().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EnrolView
+	for rows.Next() {
+		e, err := scanEnrol(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, EnrolView{ID: e.ID, Project: e.Project, Label: e.Label, CreatedAt: unixTime(e.Created), ExpiresAt: unixTime(e.Expires)})
+	}
+	return out, rows.Err()
+}
+
+// CancelEnrolment ends a waiting enrolment: its agent's next poll is told it expired. A card that was already
+// started for it must be denied on the approvals page first (cardWaiting says so, in the Decider).
+func (s *Store) CancelEnrolment(ctx context.Context, id string) error {
+	if !enrolIDRE.MatchString(id) {
+		return ErrNotFound
+	}
+	res, err := s.cfg.DB.SQL().ExecContext(ctx, `UPDATE key_enrolments SET state = 'cancelled' WHERE id = ? AND state = 'pending'`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // EnrolmentByCode finds the waiting enrolment a short code names. An unknown, expired or answered code is
@@ -197,7 +270,7 @@ func (s *Store) EnrolmentByCode(ctx context.Context, userCode string) (EnrolView
 	if e.State != enrolPending || !s.now().Before(unixTime(e.Expires)) {
 		return EnrolView{}, ErrNotFound
 	}
-	return EnrolView{ID: e.ID, Project: e.Project, Label: e.Label, ExpiresAt: unixTime(e.Expires)}, nil
+	return EnrolView{ID: e.ID, Project: e.Project, Label: e.Label, CreatedAt: unixTime(e.Created), ExpiresAt: unixTime(e.Expires)}, nil
 }
 
 // BindEnrolIssue remembers the card the owner started for an enrolment.

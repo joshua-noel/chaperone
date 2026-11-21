@@ -230,9 +230,9 @@ func TestKeyCannotAskForAnOpOutsideItsList(t *testing.T) {
 	}
 }
 
-// A critical op, an op on the never list and an op the key ceiling lacks are refused for a key even when a
-// hand-edited row lists them (defence in depth).
-func TestCriticalAndNeverOpsAreRefusedEvenInAHandEditedKey(t *testing.T) {
+// A critical op, an op on the never list and an op the key ceiling lacks are refused for a key even when its
+// row lists them (defence in depth): a key cannot gain such an op.
+func TestCriticalAndNeverInKeyOpsAreRefusedEvenWhenARowListsThem(t *testing.T) {
 	ap := &fakeApprovals{}
 	g := newRig(t, rigOpts{enable: []string{"repo.settings", "secrets.write", "keys.issue", "pr.open", "approvers.enroll"}, approvals: ap})
 	hand := keyCaller([]string{"repo.settings", "secrets.write", "keys.issue", "pr.open", "approvers.enroll", "ci.report"}, "acme/shop")

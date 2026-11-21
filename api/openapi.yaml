@@ -579,7 +579,7 @@ paths:
     get:
       tags: [keys]
       operationId: listKeys
-      summary: "`chap key list`: every key (orchestrator token), or only the caller's own (a key)."
+      summary: "`chap key list`: the keys the orchestrator token owns in its projects, or only the caller's own (a key)."
       responses:
         "200":
           description: The keys, newest first. No token and no hash.
@@ -644,12 +644,13 @@ paths:
     post:
       tags: [keys]
       operationId: revokeKey
-      summary: "`chap key revoke <key>`: revoke at once (orchestrator token: any key, a human act; a key: itself)."
+      summary: "`chap key revoke <key>`: revoke at once (orchestrator token: a key it owns, in its projects; a key: itself)."
       description: |
         Removes authority, so it needs no approval. The key's pending cards and
-        waiting ops are cancelled in the same transaction. A human revoke of an
-        agent's key stops the agent: no key can be issued for it again until its
-        owner resumes it. A key revoking itself does not stop its agent.
+        waiting ops are cancelled in the same transaction. A caller sees only what
+        it owns: another owner's key is `404`. A revoke with a token never stops
+        an agent. Only the owner's revoke at the console (Agents, Revoke) does: no
+        key can be issued for that agent again until its owner resumes it.
       responses:
         "200":
           description: The key, revoked.
@@ -665,7 +666,7 @@ paths:
     get:
       tags: [keys]
       operationId: listKeyRequests
-      summary: "`chap key request --status`: an agent's own requests (its key), or every request (orchestrator token)."
+      summary: "`chap key request --status`: an agent's own requests (its key), or the requests of the agents an orchestrator token owns, in its projects."
       responses:
         "200":
           description: The requests, newest first. No token and no hash.
@@ -737,7 +738,7 @@ paths:
               type: object
               properties:
                 project: { type: string, pattern: "^[a-z][a-z0-9-]{1,38}$" }
-                label: { type: string, pattern: "^[a-z][a-z0-9._-]{0,62}$" }
+                label: { type: string, pattern: "^[a-z][a-z0-9._-]{0,39}$" }
               required: [project, label]
               additionalProperties: false
       responses:
@@ -1893,10 +1894,10 @@ components:
       additionalProperties: false
     # END generated: connector github
     ParamsKeysIssue:
-      description: "Target is `{adapter: chaperone, ref: \"key:<holder>\"}`. Class high: every key is a card the operator signs with Windows Hello, so the request is made with `POST /v0/approvals`. Orchestrator only; a key never issues a key. `ops` are routine ops, or risky ones the key holds ask-only (every use raises its own card); never a critical op and never an op that decides, issues or administers. `ops` and `units` are sorted, lower case and without repeats, and both numbers are required: what is signed is what is granted. `units` are the repositories (needed for pull-request ops). At most 30 days, and at most 7 days for a key with a risky op. The result holds `key_id`, `expires_at`, `claim_deadline` and the next step; it never holds the key."
+      description: "Target is `{adapter: chaperone, ref: \"key:<holder>\"}`. Class high: every key is a card the operator signs with Windows Hello, so the request is made with `POST /v0/approvals`. Orchestrator only; a key never issues a key. The `ops` must all be ops the asking orchestrator token itself holds. `ops` are routine ops, or risky ones the key holds ask-only (every use raises its own card); never a critical op and never an op that decides, issues or administers. `ops` and `units` are sorted, lower case and without repeats, and both numbers are required: what is signed is what is granted. `units` are the repositories (needed for pull-request ops). At most 30 days, and at most 7 days for a key with a risky op. The result holds `key_id`, `expires_at`, `claim_deadline` and the next step; it never holds the key."
       type: object
       properties:
-        holder: { type: string, pattern: "^[a-z][a-z0-9._-]{0,62}$" }
+        holder: { type: string, pattern: "^[a-z][a-z0-9._-]{0,39}$" }
         holder_kind: { enum: [person, agent] }
         ops: { type: array, minItems: 1, maxItems: 16, items: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$" } }
         units: { type: array, maxItems: 8, items: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,99}/[a-z0-9._-]{1,100}$" } }
@@ -1933,7 +1934,7 @@ components:
         revoked_at: { type: string, format: date-time }
         revoked_by: { type: string }
         revoke_reason: { type: string }
-        stopped_by_human: { type: boolean, description: "A human revoked this agent's key, so the agent stays stopped until its owner resumes it" }
+        stopped_by_human: { type: boolean, description: "The owner revoked this agent's key at the console, so the agent stays stopped until its owner resumes it. A revoke with a token never sets it" }
         last_used_at: { type: string, format: date-time }
         uses: { type: integer }
       required: [id, state, project, owner, holder_kind, holder, ops, units, sensitive, grant_kind, rate_per_hour, issued_at, expires_at, granted_by, approval_id, request_id, uses]

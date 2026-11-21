@@ -11,10 +11,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joshua-noel/chaperone/internal/ops"
+	"github.com/joshua-noel/chaperone/internal/policy"
 	"github.com/joshua-noel/chaperone/internal/spec"
 	"github.com/joshua-noel/chaperone/internal/store"
 )
@@ -49,12 +52,22 @@ type Config struct {
 	// EnrolProject reports whether agents may be enrolled for a project (the policy turns keys.request on for
 	// it). Nil allows any project name; chapd always sets it.
 	EnrolProject func(project string) bool
+	// Catalog gives the class of each op, so that a key's sensitivity is worked out again whenever it is used and
+	// is never taken from the row alone. Optional in tests only: without it the row's own flag stands.
+	Catalog interface {
+		Lookup(op string) (policy.Entry, bool)
+	}
+	// Log receives the warning about an enrolment that was refused for lack of room. Nil means slog.Default().
+	Log *slog.Logger
 }
 
 // Store issues, claims, verifies and revokes keys.
 type Store struct {
 	cfg Config
 	now func() time.Time
+
+	mu         sync.Mutex
+	lastRefuse time.Time // when a refused enrolment start was last written down (at most once a minute)
 }
 
 var (
@@ -301,7 +314,10 @@ func claimerID(callerKey string) string {
 	}
 	if rest, ok := strings.CutPrefix(callerKey, "agent:"); ok {
 		// "agent:person:operator/scout": the agent, named the way the ledger can hold it
-		return clipText(strings.ToLower(strings.NewReplacer("person:", "", "/", ".", ":", ".").Replace("agent."+rest)), 62)
+		return fitID(strings.ToLower(strings.NewReplacer("person:", "", "/", ".", ":", ".").Replace("agent." + rest)))
+	}
+	if name, ok := strings.CutPrefix(callerKey, "person:"); ok {
+		return fitID("person." + strings.ToLower(name)) // the owner at the console
 	}
 	if id, ok := strings.CutPrefix(callerKey, "enrol:"); ok {
 		return "enrol." + id
@@ -309,10 +325,22 @@ func claimerID(callerKey string) string {
 	return "operator"
 }
 
-// Revoke revokes a key. A human revoke (by an orchestrator, standing for the
-// owner or an approver) of an agent's key also stops the agent: the owner must
-// resume it before it can be given a key again. A key revoking itself does not.
-// Revoking a revoked key is ErrRevoked.
+// maxLedgerID is the longest id the ledger holds for a requester (^[a-z][a-z0-9._-]{0,62}$).
+const maxLedgerID = 63
+
+// fitID makes an id fit the ledger. A longer one keeps its head and ends with 8 hex digits of its own hash, so
+// the id never fails the ledger's pattern and two long ids stay apart.
+func fitID(id string) string {
+	if len(id) <= maxLedgerID {
+		return id
+	}
+	sum := sha256.Sum256([]byte(id))
+	return id[:maxLedgerID-9] + "." + hex.EncodeToString(sum[:4])
+}
+
+// Revoke revokes a key. A human revoke (by the owner at the console, Decider.Revoke) of an agent's key also stops
+// the agent: the owner must resume it before it can be given a key again. A revoke by a token (an orchestrator
+// that owns the key, or the key itself) is never human. Revoking a revoked key is ErrRevoked.
 func (s *Store) Revoke(ctx context.Context, id, by string, human bool) (ops.KeyInfo, error) {
 	var info ops.KeyInfo
 	err := s.cfg.DB.Immediate(ctx, func(ctx context.Context, tx *store.Tx) error {
@@ -422,7 +450,10 @@ func (s *Store) Sweep(ctx context.Context) (int, error) {
 // compare, revoked (a human-stopped agent is told so), expired. A key is
 // recognised (and its refusal named) as soon as its hash is found; an unknown
 // token is an unidentified caller. The scope is cut down to what a key may
-// ever hold, so a hand-edited row cannot add a critical op.
+// ever hold, so a row that lists a critical or never-in-key op does not give the key that op. The sensitivity of the
+// key is worked out again from the ops (the catalog), and a life longer than the limit for it is refused, so the
+// row's own flag and dates cannot widen a key either. A row can still name another project or other repositories:
+// whoever can write the database is the trusted administrator.
 func (s *Store) VerifyKey(ctx context.Context, bearer string) (*ops.Caller, error) {
 	secret, ok := strings.CutPrefix(bearer, Prefix)
 	if !ok || len(secret) != secretChars {
@@ -438,12 +469,12 @@ func (s *Store) VerifyKey(ctx context.Context, bearer string) (*ops.Caller, erro
 		issued, expires                                                        int64
 		revoked, lastUsed                                                      sql.NullInt64
 		revokeReason                                                           sql.NullString
-		stopped                                                                int
+		stopped, sensitiveRow                                                  int
 	)
 	err := s.cfg.DB.SQL().QueryRowContext(ctx, `SELECT id, project, owner_id, holder_kind, holder, ops_json, units_json, rate_per_hour,
-            issued_at, expires_at, token_sha256, fingerprint, revoked_at, revoke_reason, human_stopped, last_used_at
+            issued_at, expires_at, token_sha256, fingerprint, revoked_at, revoke_reason, human_stopped, last_used_at, sensitive
         FROM keys WHERE token_sha256 = ?`, want).
-		Scan(&id, &project, &owner, &holderKind, &holder, &opsJSON, &unitsJSON, &rate, &issued, &expires, &stored, &fp, &revoked, &revokeReason, &stopped, &lastUsed)
+		Scan(&id, &project, &owner, &holderKind, &holder, &opsJSON, &unitsJSON, &rate, &issued, &expires, &stored, &fp, &revoked, &revokeReason, &stopped, &lastUsed, &sensitiveRow)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, &ops.VerifyError{Code: ops.CodeTokenInvalid, Detail: "unknown key"}
@@ -472,10 +503,19 @@ func (s *Store) VerifyKey(ctx context.Context, bearer string) (*ops.Caller, erro
 	if json.Unmarshal([]byte(opsJSON), &granted) != nil || json.Unmarshal([]byte(unitsJSON), &units) != nil {
 		return nil, &ops.VerifyError{Code: ops.CodeTokenInvalid, Detail: "key " + id + " has an unreadable scope", Key: who}
 	}
+	sensitive := sensitiveRow == 1
 	for _, op := range granted {
 		if _, ok := ops.KeyUnitKind(op); ok && !ops.NeverInKey(op) {
 			who.KeyOps = append(who.KeyOps, op)
+			if s.cfg.Catalog != nil {
+				if entry, known := s.cfg.Catalog.Lookup(op); !known || entry.Class != policy.ClassRoutine {
+					sensitive = true // worked out again: the row's own flag can only add to it
+				}
+			}
 		}
+	}
+	if sensitive && time.Duration(expires-issued)*time.Second > SensitiveMaxDays*24*time.Hour {
+		return nil, &ops.VerifyError{Code: ops.CodeTokenInvalid, Detail: "key " + id + " holds an op that asks for a card each time and lives longer than " + fmt.Sprint(SensitiveMaxDays) + " days", Key: who}
 	}
 	who.KeyUnits, who.KeyRate, who.Expires = units, rate, time.Unix(expires, 0).UTC()
 	// The last use is written at most once a minute: a busy key is not a write per call.
@@ -485,6 +525,27 @@ func (s *Store) VerifyKey(ctx context.Context, bearer string) (*ops.Caller, erro
 		}
 	}
 	return who, nil
+}
+
+// Live is the ops.Config.KeyLive hook: it says, inside the transaction that releases an approved op, whether the
+// key that asked still lives. It returns nil when it does, and a refusal (TOKEN_REVOKED or TOKEN_EXPIRED) when
+// the key was revoked or has expired, so a call in flight when the key was revoked, or an op whose card was signed
+// after the key ran out, does not run and its approval is not spent.
+func (s *Store) Live(ctx context.Context, q queryer, id string) error {
+	var claimed, revoked sql.NullInt64
+	var expires int64
+	err := q.QueryRowContext(ctx, `SELECT claimed_at, revoked_at, expires_at FROM keys WHERE id = ?`, id).Scan(&claimed, &revoked, &expires)
+	switch {
+	case errors.Is(err, sql.ErrNoRows), err == nil && !claimed.Valid:
+		return &ops.Refusal{Code: ops.CodeTokenRevoked, Why: "key " + clipText(id, 40) + " is not a live key, so the op it asked for does not run"}
+	case err != nil:
+		return err
+	case revoked.Valid:
+		return &ops.Refusal{Code: ops.CodeTokenRevoked, Why: "key " + id + " was revoked, so the op it asked for does not run"}
+	case !s.now().Before(time.Unix(expires, 0)):
+		return &ops.Refusal{Code: ops.CodeTokenExpired, Why: "key " + id + " has expired, so the op it asked for does not run"}
+	}
+	return nil
 }
 
 // get reads one key row as the API shows it.

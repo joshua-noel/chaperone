@@ -37,7 +37,7 @@ func newKeysE2E(t *testing.T) *keysE2E {
 		file := filepath.Join(dir, "keymaker.token")
 		var out, errb bytes.Buffer
 		if code := orchCmd([]string{"issue", "-db", db, "-instance", "test", "-id", "keymaker", "-project", "storefront",
-			"-ops", "keys.issue,pr.view", "-token-file", file, "-days", "1"}, &out, &errb); code != 0 {
+			"-ops", "keys.issue,pr.view,pr.diff", "-token-file", file, "-days", "1"}, &out, &errb); code != 0 {
 			t.Fatalf("orch issue keymaker: %d %s", code, errb.String())
 		}
 		raw, err := os.ReadFile(file)
@@ -276,8 +276,36 @@ func TestE2EAKeyYouBuildYourself(t *testing.T) {
 	}
 }
 
-// A stopped agent stays stopped: a human revoke of its key stops it, and no card can be made for it again.
-func TestE2EAStoppedAgentCannotBeGivenAKeyAgain(t *testing.T) {
+// P2-2: a key built directly holds only what its orchestrator's own token holds. The keymaker holds keys.issue, pr.view
+// and pr.diff, so a key with pr.checks is refused before any card is made.
+func TestE2EADirectKeyCannotHoldWhatItsOrchestratorDoesNot(t *testing.T) {
+	e := newKeysE2E(t)
+	req := e.issueBody(map[string]any{"ops": []any{"pr.checks", "pr.view"}})
+	st, body := e.call("POST", "/v0/ops", e.maker, req)
+	if st != http.StatusForbidden {
+		t.Fatalf("direct keys.issue: %d %v", st, body)
+	}
+	mustValidDenial(t, body, "OP_POLICY_REFUSED")
+	if why, _ := body["why"].(string); !strings.Contains(why, "pr.checks") || !strings.Contains(why, "your own token") {
+		t.Errorf("why = %v", body["why"])
+	}
+	req["kind"] = "op"
+	if st, body := e.call("POST", "/v0/approvals", e.maker, req); st != http.StatusForbidden {
+		t.Errorf("a card for a key beyond its orchestrator: %d %v", st, body)
+	}
+	if cards, _ := e.app.Approvals.Pending(context.Background()); len(cards) != 0 {
+		t.Errorf("%d cards were made", len(cards))
+	}
+	// What it holds itself is fine.
+	if id := e.grant(nil); id == "" {
+		t.Error("no key for ops the orchestrator holds")
+	}
+}
+
+// A revoke with a token is never a human stop: the orchestrator that owns a key may revoke it, the key stops
+// working at once, and the agent is not stopped, so a new key can be asked for. The human stop is the owner's
+// revoke at the console (TestE2EAgentAsksOwnerTaps).
+func TestE2EARevokeByAnOrchestratorIsNotAHumanStop(t *testing.T) {
 	e := newKeysE2E(t)
 	n, _ := e.mediumPR("agent/for-scout")
 	id := e.grant(nil)
@@ -286,30 +314,24 @@ func TestE2EAStoppedAgentCannotBeGivenAKeyAgain(t *testing.T) {
 	if st, _ := e.view(token, n); st != http.StatusOK {
 		t.Fatalf("the key does not work: %d", st)
 	}
-	if st, body := e.call("POST", "/v0/keys/"+id+"/revoke", e.maker, nil); st != http.StatusOK || body["stopped_by_human"] != true {
+	if st, body := e.call("POST", "/v0/keys/"+id+"/revoke", e.maker, nil); st != http.StatusOK || body["state"] != "revoked" || body["stopped_by_human"] == true {
 		t.Fatalf("revoke: %d %v", st, body)
 	}
 	st, body := e.view(token, n)
 	mustValidDenial(t, body, "TOKEN_REVOKED")
-	if !strings.Contains(body["why"].(string), "stopped by a human: ask your owner") || st != http.StatusForbidden && st != http.StatusUnauthorized {
-		t.Errorf("the stopped agent is told: %d %v", st, body["why"])
+	if strings.Contains(body["why"].(string), "stopped by a human") || st != http.StatusForbidden && st != http.StatusUnauthorized {
+		t.Errorf("the revoked key is told: %d %v", st, body["why"])
 	}
-	// It asks again: refused at the request, with the same words, and no card exists.
+	// The agent is not stopped: the same request for a key is a card again.
 	req := e.issueBody(nil)
-	st, body = e.call("POST", "/v0/ops", e.maker, req)
-	if st != http.StatusForbidden {
-		t.Fatalf("keys.issue for a stopped agent: %d %v", st, body)
-	}
-	mustValidDenial(t, body, "OP_POLICY_REFUSED")
-	if !strings.Contains(body["why"].(string), "stopped by a human: ask your owner") {
-		t.Errorf("why = %v", body["why"])
-	}
 	req["kind"] = "op"
-	if st, body := e.call("POST", "/v0/approvals", e.maker, req); st != http.StatusForbidden {
-		t.Errorf("a card for a stopped agent: %d %v", st, body)
+	if st, body := e.call("POST", "/v0/approvals", e.maker, req); st != http.StatusAccepted {
+		t.Errorf("a card for the same agent after the revoke: %d %v", st, body)
 	}
-	if cards, _ := e.app.Approvals.Pending(context.Background()); len(cards) != 0 {
-		t.Errorf("%d cards for a stopped agent", len(cards))
+	var stopped int
+	e.app.DB.SQL().QueryRow(`SELECT count(*) FROM key_agents`).Scan(&stopped)
+	if stopped != 0 {
+		t.Errorf("%d agents were stopped by a token's revoke", stopped)
 	}
 }
 

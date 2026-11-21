@@ -5,10 +5,11 @@ package main
 import (
 	"errors"
 	"fmt"
-	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/joshua-noel/chaperone/internal/privfile"
 )
 
 // elevated reports whether this process runs with an elevated token. `chapd orch`
@@ -25,7 +26,7 @@ func restrictToCurrentUser(path string) error {
 	if err != nil {
 		return err
 	}
-	acl, err := userOnlyACL(sid, windows.NO_INHERITANCE)
+	acl, err := privfile.UserOnlyACL(sid, windows.NO_INHERITANCE)
 	if err != nil {
 		return err
 	}
@@ -33,30 +34,8 @@ func restrictToCurrentUser(path string) error {
 		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil)
 }
 
-func currentUserSID() (*windows.SID, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil {
-		return nil, fmt.Errorf("read the current user: %w", err)
-	}
-	return user.User.Sid, nil
-}
-
-func userOnlyACL(sid *windows.SID, inheritance uint32) (*windows.ACL, error) {
-	acl, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
-		AccessPermissions: windows.GENERIC_ALL,
-		AccessMode:        windows.SET_ACCESS,
-		Inheritance:       inheritance,
-		Trustee: windows.TRUSTEE{
-			TrusteeForm:  windows.TRUSTEE_IS_SID,
-			TrusteeType:  windows.TRUSTEE_IS_USER,
-			TrusteeValue: windows.TrusteeValueFromSID(sid),
-		},
-	}}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build the ACL: %w", err)
-	}
-	return acl, nil
-}
+// currentUserSID is the SID of the user this process runs as (shared with chap: internal/privfile).
+func currentUserSID() (*windows.SID, error) { return privfile.CurrentUserSID() }
 
 // createPrivateDir makes a NEW folder that is private from the instant it exists: CreateDirectory is given a
 // security descriptor that already names the current user as owner and holds the protected, user-only DACL
@@ -64,36 +43,16 @@ func userOnlyACL(sid *windows.SID, inheritance uint32) (*windows.ACL, error) {
 // under looser permissions (Windows checks access when a handle is opened, and a handle opened with WRITE_DAC
 // before a later lock keeps that right), and nobody else owns it. The result is read back.
 func createPrivateDir(path string) error {
-	sid, err := currentUserSID()
+	d, err := privfile.NewDescriptor(windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT)
 	if err != nil {
 		return err
 	}
-	acl, err := userOnlyACL(sid, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT)
-	if err != nil {
-		return err
-	}
-	sd, err := windows.NewSecurityDescriptor()
-	if err != nil {
-		return err
-	}
-	if err := sd.SetOwner(sid, false); err != nil {
-		return fmt.Errorf("set the owner: %w", err)
-	}
-	if err := sd.SetDACL(acl, true, false); err != nil {
-		return err
-	}
-	if err := sd.SetControl(windows.SE_DACL_PROTECTED, windows.SE_DACL_PROTECTED); err != nil {
-		return err
-	}
-	sa := &windows.SecurityAttributes{SecurityDescriptor: sd}
-	sa.Length = uint32(unsafe.Sizeof(*sa))
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return err
 	}
-	err = windows.CreateDirectory(p, sa)
-	runtime.KeepAlive(acl)
-	runtime.KeepAlive(sd)
+	err = windows.CreateDirectory(p, d.Attributes())
+	d.Release()
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}

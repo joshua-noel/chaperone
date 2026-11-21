@@ -40,7 +40,7 @@ const secretChars = 43 // base64url of 32 bytes, unpadded
 
 var (
 	projectRE   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,38}$`)
-	labelRE     = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,62}$`)
+	labelRE     = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,39}$`) // MaxLabel characters
 	unitRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}$`)
 	keyIDRE     = regexp.MustCompile(`^k-[0-9a-f]{16}$`)
 	requestIDRE = regexp.MustCompile(`^kr-[0-9a-f]{16}$`)
@@ -48,6 +48,11 @@ var (
 	// personRE is the owner of an agent: a person at the console, by the id the ledger names them with.
 	personRE = regexp.MustCompile(`^person:[a-z0-9][a-z0-9._-]{0,62}$`)
 )
+
+// MaxLabel is the longest agent label or holder name. The ledger names an agent "agent.<owner>.<label>" and holds ids
+// of at most 63 characters, so a label is capped to keep that name whole for any ordinary owner (and claimerID
+// shortens the rest), and an over-long label is refused at enrolment, not when the agent first claims.
+const MaxLabel = 40
 
 // Holder kinds.
 const (

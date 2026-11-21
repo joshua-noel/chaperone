@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/joshua-noel/chaperone/internal/connectors/untrusted"
 	"github.com/joshua-noel/chaperone/internal/ops"
 	"github.com/joshua-noel/chaperone/internal/policy"
+	"github.com/joshua-noel/chaperone/internal/spec"
 )
 
 // OpIssue is the grant op. It is class high: every key is a card a person signs with Windows Hello, and the
@@ -179,6 +181,12 @@ func (a *IssueAdapter) parseDirect(ctx context.Context, req *ops.Request) (parse
 	g.Sensitive = sensitive
 	if err := g.Shape(); err != nil {
 		return parsed{}, refuse("%s", err)
+	}
+	// A key never reaches past its owner's own access: the orchestrator may hand out only what its own token holds.
+	for _, op := range g.Ops {
+		if !spec.OpAllowed(op, c.ScopeOps) {
+			return parsed{}, refuse("%s is not an op your own token holds, so a key you build cannot hold it (a key never reaches past its owner)", clipText(op, 60))
+		}
 	}
 	if g.HolderKind == HolderAgent {
 		stopped, err := a.cfg.Store.AgentStopped(ctx, g.Owner, g.Holder)
@@ -465,16 +473,14 @@ func hours(h int) string {
 	return fmt.Sprintf("%d hours", h)
 }
 
-// plainText makes agent-written text one safe line: control characters become spaces, and it is clipped.
+// plainText makes agent-written text one safe line, with the shared cleaner every connector uses (untrusted.Line):
+// control characters, bidirectional controls and zero-width characters become spaces, and a cut stays on a rune.
 func plainText(s string, n int) string {
-	b := make([]rune, 0, len(s))
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
-			r = ' '
-		}
-		b = append(b, r)
+	s = strings.TrimSpace(untrusted.Line(s))
+	if len(s) <= n {
+		return s
 	}
-	return clipText(strings.TrimSpace(string(b)), n)
+	return strings.ToValidUTF8(s[:n], "") + "..."
 }
 
 // Execute implements [ops.Adapter]: it writes the key's row. No token is made here; the claim makes it. The

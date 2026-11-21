@@ -158,6 +158,17 @@ func (s *Service) startRelease(ctx context.Context, id string) (<-chan struct{},
 
 	execID := s.newID("x-")
 	err = s.db.Immediate(bg, func(ctx context.Context, tx *store.Tx) error {
+		// An op of a key runs only while the key lives. This is checked in the transaction that releases the op, which
+		// the revoke's own transaction cannot interleave with: a key revoked while the call was in flight, or that
+		// ran out while its card waited, is refused here, and the approval is not spent.
+		if rec.RequesterKind == KindKey {
+			if s.keyLive == nil {
+				return errors.New("ops: an op of a key, and no key store to ask")
+			}
+			if err := s.keyLive(ctx, tx, rec.KeyID); err != nil {
+				return err
+			}
+		}
 		if err := (transition{From: StateAllowed, To: StateExecuting, Now: s.now(), ExecutionID: execID}).apply(ctx, tx, id); err != nil {
 			return err
 		}

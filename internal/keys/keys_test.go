@@ -391,7 +391,7 @@ func TestVerifyAndItsRefusals(t *testing.T) {
 	}
 }
 
-func TestVerifyCutsAHandEditedRowDownToWhatAKeyMayHold(t *testing.T) {
+func TestVerifyCutsARowDownToWhatAKeyMayHold(t *testing.T) {
 	g := newRig(t)
 	ctx := context.Background()
 	token, info := g.issueAndClaim(nil)
@@ -399,7 +399,9 @@ func TestVerifyCutsAHandEditedRowDownToWhatAKeyMayHold(t *testing.T) {
 	if _, err := g.db.SQL().Exec(`UPDATE keys SET ops_json = '["repo.settings"]' WHERE id = ?`, info.ID); err == nil {
 		t.Fatal("the database let a key's ops be rewritten")
 	}
-	// A row written with a critical op in it (a bug or a hand insert) is cut down at verify.
+	// A row that lists a critical or never-in-key op (a bug, or an insert by someone who can write the database) is
+	// cut down at verify: the key cannot gain such an op. That is all this proves: the trigger above can be dropped
+	// by anyone who can write the database, and a row can name another project or a longer life (TestVerifyReworksSensitivityAndTheLongestLife).
 	ap, rq := g.approved()
 	now := g.now.Unix()
 	secret := Prefix + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
@@ -414,7 +416,7 @@ func TestVerifyCutsAHandEditedRowDownToWhatAKeyMayHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Join(c.KeyOps, ",") != "pr.view,health" {
-		t.Errorf("a hand-edited key holds %v", c.KeyOps)
+		t.Errorf("a key whose row lists a critical op holds %v", c.KeyOps)
 	}
 	_ = token
 }

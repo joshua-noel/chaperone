@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -202,6 +203,11 @@ func (o *Orchestrators) Verify(ctx context.Context, bearer string) (*Principal, 
 	if scopeErr == nil && len(scope.Projects) > 0 {
 		project = scope.Projects[0]
 	}
+	// A row from before these ids were reserved, or written by hand, must not act as the console's own identity
+	// ("operator" passes the gates that only a person's own Hello may pass) or as a name chapd records for keys.
+	if why := reservedOrchID(id); why != "" {
+		return nil, forOrch(refuse(CauseTokenInvalid, "orchestrator token %s: %s", id, why), id, project)
+	}
 	if revoked.Valid {
 		return nil, forOrch(misuse(refuse(CauseTokenRevoked, "orchestrator token %s was revoked", id)), id, project)
 	}
@@ -234,21 +240,35 @@ type IssueResult struct {
 	ExpiresAt   time.Time
 }
 
+// reservedOrchID says why an orchestrator id may not be used, or returns "" when it may. These are the ids chapd
+// writes into the ledger for what is not an orchestrator: the person at the console, a key, a person's own
+// agent, an enrolment. Issue refuses them when a token is made, and Verify refuses them again, so a row that
+// got there another way is never accepted.
+func reservedOrchID(id string) string {
+	if id == OperatorID {
+		return "it is reserved: it is what chapd records for a person at the console"
+	}
+	if strings.HasPrefix(id, spec.KeyRequesterPrefix) {
+		return "it must not start with " + strconv.Quote(spec.KeyRequesterPrefix) + " (reserved for keys)"
+	}
+	for _, prefix := range []string{"person.", "agent.", "enrol."} {
+		if strings.HasPrefix(id, prefix) {
+			return "it must not start with " + strconv.Quote(prefix) + " (reserved for what chapd records for people, agents and enrolments)"
+		}
+	}
+	return ""
+}
+
 // Issue creates a token and stores only its SHA-256. A live token for the same
 // id is revoked in the same transaction (rotation: revoked_by "rotated"). The
 // token is added to the redaction sink before the row commits. The events are
 // the operator-only ops orchestrator.issue (op.request, op.result).
 func (o *Orchestrators) Issue(ctx context.Context, p IssueParams) (IssueResult, error) {
-	if !orchIDRe.MatchString(p.ID) || strings.HasPrefix(p.ID, spec.KeyRequesterPrefix) {
-		return IssueResult{}, invalid("orchestrator id %q must match %s and must not start with %q (reserved for keys)", p.ID, orchIDRe, spec.KeyRequesterPrefix)
+	if !orchIDRe.MatchString(p.ID) {
+		return IssueResult{}, invalid("orchestrator id %q must match %s", p.ID, orchIDRe)
 	}
-	if p.ID == OperatorID {
-		return IssueResult{}, invalid("orchestrator id %q is reserved: it is what chapd records for a person at the console", p.ID)
-	}
-	for _, prefix := range []string{"person.", "agent.", "enrol."} {
-		if strings.HasPrefix(p.ID, prefix) {
-			return IssueResult{}, invalid("orchestrator id %q must not start with %q (reserved for what chapd records for people, agents and enrolments)", p.ID, prefix)
-		}
+	if why := reservedOrchID(p.ID); why != "" {
+		return IssueResult{}, invalid("orchestrator id %q: %s", p.ID, why)
 	}
 	if err := p.Scope.check(); err != nil {
 		return IssueResult{}, err

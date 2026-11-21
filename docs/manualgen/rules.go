@@ -33,9 +33,9 @@ var rules = []rule{
 		Tests: []testRef{{"cmd/chap", "TestScrubMasksSecretShapes"}, {"test/redteam", "TestRT26CanaryNeverAppearsAnywhere"}, {"test/redteam", "TestRT26AgentSuppliedSecret"}},
 	},
 	{
-		Text:   "`chap dev-token` writes the token it mints to a new file and prints nothing of it. It creates the file exclusively, so an existing file is refused, not overwritten. The mode is 0600 where the system has file modes; on Windows the file takes the ACL of its folder, which is why the default place is your own profile.",
-		Where:  "cmd/chap: `createPrivateFile` (`O_EXCL`), `cmdDevToken`",
-		Tests:  []testRef{{"cmd/chap", "TestDevTokenWritesFileOnly"}},
+		Text:   "`chap dev-token` writes the token it mints to a new file and prints nothing of it. It creates the file exclusively, so an existing file is refused, not overwritten. The file is private to you from the moment it exists: mode 0600 where the system has file modes, and on Windows, where the mode means nothing, a protected access list for your user alone that is given in the same call that creates the file, so it does not take the access of its folder. A link at the path is refused, not followed.",
+		Where:  "cmd/chap: `createPrivateFile`, `cmdDevToken`; internal/privfile: `Create`",
+		Tests:  []testRef{{"cmd/chap", "TestDevTokenWritesFileOnly"}, {"cmd/chap", "TestKeyFilesArePrivateFromCreation"}, {"internal/privfile", "TestCreateIsOwnerOnlyByIcacls"}, {"internal/privfile", "TestCreateIsMode0600"}, {"internal/privfile", "TestCreateDoesNotFollowALink"}},
 		Covers: []string{"never overwritten"},
 	},
 	{

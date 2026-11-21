@@ -45,7 +45,7 @@ type record struct {
 	ResultJSON    string
 	ChecksJSON    string
 	DenialJSON    string
-	ScopeJSON     string // the run's or key's scope at request time; "" for an orchestrator
+	ScopeJSON     string // the requester's scope at request time (a run's task scope, a key's units, an orchestrator's ops)
 	KeyID         string // requester_kind key: the key's id
 	OwnerID       string // requester_kind key: who the key acts for
 }
@@ -194,7 +194,14 @@ type keyScope struct {
 	Kind   string   `json:"holder_kind,omitempty"`
 }
 
-// scopeJSON is the stored form of a caller's scope, "" for an orchestrator.
+// orchScope is the same for an orchestrator: the ops its token held when it asked. keys.issue reads it, at the
+// release of an approved op too, when the token is not at hand: a key built directly never reaches past the ops
+// of the orchestrator that asked for it. A row from before this was stored has none, and then holds no op.
+type orchScope struct {
+	Ops []string `json:"ops"`
+}
+
+// scopeJSON is the stored form of a caller's scope; an unknown kind has none to store.
 func scopeJSON(c *Caller) string {
 	var v any
 	switch c.Kind {
@@ -202,7 +209,9 @@ func scopeJSON(c *Caller) string {
 		v = runScope{Repo: c.Repo, Base: c.Base, Branch: c.Branch, Paths: c.Paths}
 	case KindKey:
 		v = keyScope{Units: nonNilStrings(c.KeyUnits), Holder: c.KeyHolder, Kind: c.KeyHolderKind}
-	default: // an orchestrator has no stored scope; an unknown kind has none to store
+	case KindOrchestrator:
+		v = orchScope{Ops: nonNilStrings(c.ScopeOps)}
+	default:
 		return ""
 	}
 	b, err := json.Marshal(v)
@@ -219,8 +228,8 @@ func nonNilStrings(s []string) []string {
 	return s
 }
 
-// caller rebuilds the identity and, for a run or a key, the scope of the op's
-// requester. The token itself is not kept (it may be gone by now).
+// caller rebuilds the identity and the scope of the op's requester: for a run its task scope, for a key its units
+// and holder, for an orchestrator the ops it held. The token itself is not kept (it may be gone by now).
 func (r *record) caller() *Caller {
 	c := &Caller{Kind: r.RequesterKind, RunID: r.RunID, OrchID: r.OrchID, Profile: r.Profile, JTI: r.TokenJTI}
 	switch r.RequesterKind {
@@ -235,6 +244,11 @@ func (r *record) caller() *Caller {
 		var s keyScope
 		if r.ScopeJSON != "" && json.Unmarshal([]byte(r.ScopeJSON), &s) == nil {
 			c.KeyUnits, c.KeyHolder, c.KeyHolderKind = s.Units, s.Holder, s.Kind
+		}
+	case KindOrchestrator:
+		var s orchScope
+		if r.ScopeJSON != "" && json.Unmarshal([]byte(r.ScopeJSON), &s) == nil {
+			c.ScopeOps = s.Ops
 		}
 	}
 	return c

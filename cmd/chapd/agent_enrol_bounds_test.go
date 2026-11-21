@@ -112,10 +112,11 @@ func TestEnrolmentCapHoldsUnderConcurrentStarts(t *testing.T) {
 }
 
 // What a process on the machine can do with no credential: fill the slots, or take the one label of the agent it
-// wants to block. The real agent is refused until those enrolments expire (ten minutes), and nothing tells the
-// operator: no ledger event, no page lists a waiting enrolment (the page finds one only by the code typed).
+// wants to block. The real agent is refused until those enrolments expire (ten minutes). Nothing can stop that (a
+// per-source limit cannot work on loopback), so it is made visible: the refusal is written to the log and the ledger
+// (once a minute), and the waiting enrolments are listed for the operator, who can cancel them (the Agents page).
 // This test pins what happens, so a change to it is a decision.
-func TestAProcessOnTheMachineCanBlockEnrolmentForTenMinutesAndNothingShowsIt(t *testing.T) {
+func TestAProcessOnTheMachineCanBlockEnrolmentForTenMinutesAndTheOperatorSeesIt(t *testing.T) {
 	e := newAgentE2E(t)
 	before := e.ledgerEvents()
 	// Squat on the label the real agent will use.
@@ -135,8 +136,23 @@ func TestAProcessOnTheMachineCanBlockEnrolmentForTenMinutesAndNothingShowsIt(t *
 	if st, _ := e.startRaw("other"); st != http.StatusTooManyRequests {
 		t.Errorf("a different agent while the slots are full: %d", st)
 	}
-	if after := e.ledgerEvents(); after != before {
-		t.Errorf("starting enrolments wrote %d ledger events: the operator is told, which this test did not expect", after-before)
+	// The two refusals came within a minute: one is written down (a request and a result event), not one each.
+	if after := e.ledgerEvents(); after-before != 2 {
+		t.Errorf("refused enrolment starts wrote %d ledger events, want the 2 of one refusal", after-before)
+	}
+	var refused int
+	e.app.DB.SQL().QueryRow(`SELECT count(*) FROM ledger_events WHERE event_name = 'op.result' AND event LIKE '%ENROLMENT_REFUSED%'`).Scan(&refused)
+	if refused != 1 {
+		t.Errorf("%d refused-enrolment results in the ledger, want 1", refused)
+	}
+	// The waiting enrolments are listed for the operator, with the name each one asked for.
+	waiting, err := e.app.KeyDecider.WaitingEnrolments(context.Background())
+	labels := map[string]bool{}
+	for _, w := range waiting {
+		labels[w.Label] = true
+	}
+	if err != nil || len(waiting) != keys.MaxPendingEnrolments || !labels["scout"] {
+		t.Errorf("waiting enrolments: %+v %v", waiting, err)
 	}
 	// Nine minutes later it is still blocked; after the ten the real agent gets through.
 	e.advance(keys.EnrolLife - time.Minute)

@@ -84,14 +84,25 @@ type agentKeyView struct {
 	ID, Holder, Project, State, Ops, Units, Expires, LastUsed string
 	Uses                                                      int
 	CanExtend                                                 bool
+	CanRevoke                                                 bool // a key that is granted or live can be revoked
+}
+
+// waitingEnrolView is an enrolment that waits for its owner: what the agent asked to be called, in which project,
+// and for how long it has waited.
+type waitingEnrolView struct {
+	ID, Label, Project, Age, Expires string
 }
 
 type agentsView struct {
 	shell
-	On      bool
-	Pending []reqView
-	Recent  []reqView
-	Keys    []agentKeyView
+	On bool
+	// PolicyOff: keys are wired in this chapd, but the policy turns all three key operations off for every project it
+	// knows, so no agent can enrol or ask. Existing keys can still be read and revoked.
+	PolicyOff bool
+	Waiting   []waitingEnrolView
+	Pending   []reqView
+	Recent    []reqView
+	Keys      []agentKeyView
 }
 
 type agentRequestView struct {
@@ -128,6 +139,16 @@ func (s *screens) agentsPage(w http.ResponseWriter, r *http.Request) {
 		s.page(w, http.StatusOK, "agents", v)
 		return
 	}
+	v.PolicyOff = !s.keyOpsEnabled()
+	waiting, err := s.cfg.Keys.WaitingEnrolments(r.Context())
+	if err != nil {
+		s.fail(w, "list waiting enrolments", err)
+		return
+	}
+	now := s.c.now()
+	for _, e := range waiting {
+		v.Waiting = append(v.Waiting, waitingEnrolView{ID: e.ID, Label: e.Label, Project: e.Project, Age: ago(now, e.CreatedAt), Expires: stamp(e.ExpiresAt)})
+	}
 	ctx, me := r.Context(), approverSpecID(st.user)
 	pending, err := s.cfg.Keys.Pending(ctx, me)
 	if err != nil {
@@ -155,9 +176,26 @@ func (s *screens) agentsPage(w http.ResponseWriter, r *http.Request) {
 		v.Keys = append(v.Keys, agentKeyView{
 			ID: k.ID, Holder: k.Holder, Project: k.Project, State: k.State, Ops: listText(k.Ops), Units: listText(k.Units),
 			Expires: k.ExpiresAt, LastUsed: last, Uses: k.Uses, CanExtend: k.State == "live" && k.GrantKind == keys.GrantSelf,
+			CanRevoke: k.State == "live" || k.State == "granted",
 		})
 	}
 	s.page(w, http.StatusOK, "agents", v)
+}
+
+// keyOps are the three operations that turn custom keys on, each by a policy change.
+var keyOps = []string{keys.OpIssue, keys.OpRequest, keys.OpExtend}
+
+// keyOpsEnabled says whether the policy turns at least one key operation on. A project file can only narrow the
+// baseline (it cannot turn an op on), so when the baseline has all three off, they are off for every project, and
+// no agent can enrol or ask. The page then says keys are off.
+func (s *screens) keyOpsEnabled() bool {
+	base := s.cfg.Policy.Baseline()
+	for _, op := range keyOps {
+		if base != nil && base.Ops[op].Enabled {
+			return true
+		}
+	}
+	return false
 }
 
 // keyRefusal answers a call with what the keys package says about it.
@@ -345,4 +383,37 @@ func (s *screens) agentKeyExtend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	toApprovals(w)
+}
+
+// agentKeyRevoke is POST /agents/keys/{id}/revoke: the human stop. It takes access away and nothing else, so the
+// signed-in session is enough and there is no card, like revoking a run or an orchestrator, denying a request or
+// cancelling a card. If an agent held the key, the agent is stopped for good: nothing resumes it yet.
+func (s *screens) agentKeyRevoke(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.user(w, r)
+	if !ok || !s.needKeys(w, "#agents-status") {
+		return
+	}
+	k, err := s.cfg.Keys.Revoke(r.Context(), approverSpecID(st.user), r.PathValue("id"))
+	if err != nil {
+		s.keyRefusal(w, "#agents-status", "Not revoked", err)
+		return
+	}
+	s.c.log.Warn("operator revoked an agent key", "key", k.ID, "agent", k.Holder, "stopped", k.StoppedByHuman)
+	w.Header().Set("HX-Redirect", "/agents")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// agentEnrolCancel is POST /agents/enrolments/{id}/cancel: end a waiting enrolment. Like a revoke it only takes
+// away, so a session is enough.
+func (s *screens) agentEnrolCancel(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.user(w, r); !ok || !s.needKeys(w, "#agents-status") {
+		return
+	}
+	if err := s.cfg.Keys.CancelEnrol(r.Context(), r.PathValue("id")); err != nil {
+		s.keyRefusal(w, "#agents-status", "Not cancelled", err)
+		return
+	}
+	s.c.log.Warn("operator cancelled a waiting agent enrolment", "enrolment", r.PathValue("id"))
+	w.Header().Set("HX-Redirect", "/agents")
+	w.WriteHeader(http.StatusNoContent)
 }

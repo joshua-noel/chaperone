@@ -12,7 +12,7 @@ func TestAgentsScreenWithoutKeysIsOffAndActionsRefuse(t *testing.T) {
 	sr := newScrRig(t)
 	b, _ := sr.signedIn()
 	mustHave(t, "agents page", get(t, b, "/agents"), "without agent keys", `href="/agents"`)
-	for _, p := range []string{"/agents/enrol/lookup", "/agents/enrol/approve", "/agents/requests/kr-0123456789abcdef/grant", "/agents/requests/kr-0123456789abcdef/deny", "/agents/keys/k-0123456789abcdef/extend"} {
+	for _, p := range []string{"/agents/enrol/lookup", "/agents/enrol/approve", "/agents/requests/kr-0123456789abcdef/grant", "/agents/requests/kr-0123456789abcdef/deny", "/agents/keys/k-0123456789abcdef/extend", "/agents/keys/k-0123456789abcdef/revoke", "/agents/enrolments/en-0123456789abcdef/cancel"} {
 		rec := hxPost(b, p, url.Values{"code": {"ABCD-EFGH"}})
 		if rec.Code != 404 || !strings.Contains(rec.Body.String(), "Agent keys are off") {
 			t.Errorf("POST %s: %d %s", p, rec.Code, rec.Body)

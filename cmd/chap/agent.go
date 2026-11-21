@@ -59,7 +59,7 @@ func cmdAgentEnrol(a *app, c *command, args []string) int {
 	}
 	switch {
 	case !holderRE.MatchString(label):
-		return a.usageErr(c, "--label is required: a lower-case name")
+		return a.usageErr(c, "--label is required: a lower-case name of at most 40 characters")
 	case !slugRE.MatchString(project):
 		return a.usageErr(c, "--project is required")
 	case wait < 10 || wait > 3600:

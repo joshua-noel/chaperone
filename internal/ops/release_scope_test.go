@@ -138,7 +138,9 @@ func opShow(g *rig, id string) map[string]any {
 	return body
 }
 
-func TestRecordKeepsTheRunScopeAndNothingForOthers(t *testing.T) {
+// A run keeps its task scope, a key its units and holder, an orchestrator the ops it held (and nothing else): the
+// scope of the requester when it asked is what an adapter judges the request against, at release too.
+func TestRecordKeepsTheRequestersScope(t *testing.T) {
 	run := &Caller{Kind: KindRun, RunID: "r-7f3a", Project: "p", Repo: "acme/shop", Base: "main", Branch: "agent/r-7f3a", Paths: []string{"README.md", "docs/**"}}
 	rec := &record{RequesterKind: KindRun, RunID: "r-7f3a", Project: "p", ScopeJSON: scopeJSON(run)}
 	got := rec.caller()
@@ -148,8 +150,16 @@ func TestRecordKeepsTheRunScopeAndNothingForOthers(t *testing.T) {
 	if old := (&record{RequesterKind: KindRun, RunID: "r-7f3a", Project: "p"}).caller(); old.Repo != "" || old.Branch != "" {
 		t.Errorf("a row without a stored scope must rebuild with none: %+v", old)
 	}
-	if s := scopeJSON(&Caller{Kind: KindOrchestrator, OrchID: "main"}); s != "" {
-		t.Errorf("an orchestrator has no task scope, stored %q", s)
+	orch := &Caller{Kind: KindOrchestrator, OrchID: "main", Projects: []string{"p"}, ScopeOps: []string{"pr.view", "pr.*"}}
+	back := (&record{RequesterKind: KindOrchestrator, OrchID: "main", Project: "p", ScopeJSON: scopeJSON(orch)}).caller()
+	if strings.Join(back.ScopeOps, ",") != "pr.view,pr.*" || back.Repo != "" || len(back.Projects) != 0 {
+		t.Errorf("an orchestrator keeps its ops and nothing else: %+v", back)
+	}
+	if old := (&record{RequesterKind: KindOrchestrator, OrchID: "main", Project: "p"}).caller(); len(old.ScopeOps) != 0 {
+		t.Errorf("a row without a stored scope must rebuild with no op: %+v", old)
+	}
+	if s := scopeJSON(&Caller{Kind: "ghost"}); s != "" {
+		t.Errorf("an unknown kind has no scope to store, stored %q", s)
 	}
 }
 
