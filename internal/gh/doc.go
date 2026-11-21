@@ -1,6 +1,6 @@
 // Package gh is Chaperone's GitHub App client (ticket L1-05, ADR-002).
 //
-// It does four things and nothing else:
+// It does five things and nothing else:
 //
 //   - signs the short App JWT (RS256, 10 minutes) with a key that comes from a
 //     [KeySource], so the vault (L1-03) plugs in without this package knowing it;
@@ -8,7 +8,9 @@
 //     revokes them ([Client.MintToken], [Client.RevokeToken]);
 //   - makes the typed REST calls ADR-002 needs: pulls, pull files, check-runs,
 //     compare, merge with `sha`, update-branch, create PR, deployments;
-//   - returns every GitHub refusal to the caller as an [*APIError].
+//   - returns every GitHub refusal to the caller as an [*APIError];
+//   - sets the App up: the manifest Chaperone asks GitHub to turn into an App, the exchange of the temporary
+//     code for the App's key, and the two calls that show the new App works (manifest.go; `chapd connect github`).
 //
 // # Rules the code keeps
 //

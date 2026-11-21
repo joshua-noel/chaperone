@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -66,6 +67,20 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Keys == nil {
 		return nil, fmt.Errorf("%w: Keys", ErrInvalidArgument)
 	}
+	return newClient(cfg)
+}
+
+// NewAnonymous returns a Client with no App and no key, for the one call GitHub
+// answers without a credential: the exchange of a manifest code (see
+// [Client.ConvertManifest]). Every call that needs an App JWT fails on it.
+func NewAnonymous(cfg Config) (*Client, error) {
+	if cfg.AppID != "" || cfg.Keys != nil {
+		return nil, fmt.Errorf("%w: an anonymous client has no App and no key", ErrInvalidArgument)
+	}
+	return newClient(cfg)
+}
+
+func newClient(cfg Config) (*Client, error) {
 	base := cfg.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
@@ -205,7 +220,9 @@ func (c *Client) do(ctx context.Context, k call, out any) error {
 	req.Header.Set("Accept", accept)
 	req.Header.Set("X-GitHub-Api-Version", APIVersion)
 	req.Header.Set("User-Agent", c.agent)
-	req.Header.Set("Authorization", "Bearer "+k.secret)
+	if k.secret != "" { // the manifest exchange is the one call that takes no credential
+		req.Header.Set("Authorization", "Bearer "+k.secret)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -332,5 +349,8 @@ func (c *Client) asToken(t *Token) (string, error) { return t.bearer(c.now()) }
 
 // asApp signs a fresh App JWT.
 func (c *Client) asApp(ctx context.Context) (string, error) {
+	if c.keys == nil {
+		return "", errors.New("gh: this client has no App key")
+	}
 	return appJWT(ctx, c.keys, c.appID, c.now())
 }

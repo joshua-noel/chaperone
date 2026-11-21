@@ -94,6 +94,7 @@ type Server struct {
 	faults   []*fault
 	before   []*hook
 	mintAll  bool
+	web      manifestState // the app-manifest flow (manifest.go)
 }
 
 // New starts the fake on a loopback port and stops it when the test ends. The
@@ -286,6 +287,7 @@ type Installation struct {
 	Granted map[string]string
 	s       *Server
 	repos   map[string]*Repo
+	app     *App // the App made through the manifest flow that this belongs to; nil: the fake's own App
 }
 
 // AddInstallation registers an installation of the App on account with the
@@ -335,27 +337,32 @@ func (s *Server) newTokenValue() string {
 // verifyJWT checks the App JWT the way GitHub does (RS256, iss, exp within 10
 // minutes of now, iat not in the future). Returns "" if good, else GitHub's message.
 func (s *Server) verifyJWT(authz string) string {
+	_, msg := s.verifyApp(authz)
+	return msg
+}
+
+// verifyApp is verifyJWT that also says which App signed: nil for the fake's own
+// App ([OwnAppID], signed with [TestKey]), else an App made through the manifest
+// flow (see [Server.Apps]), found by its numeric id or its client id in `iss`.
+func (s *Server) verifyApp(authz string) (*App, string) {
+	const undecodable = "A JSON web token could not be decoded"
 	tok, ok := strings.CutPrefix(authz, "Bearer ")
 	if !ok {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
 	sig, err1 := base64.RawURLEncoding.DecodeString(parts[2])
 	hdr, err2 := base64.RawURLEncoding.DecodeString(parts[0])
 	claimsRaw, err3 := base64.RawURLEncoding.DecodeString(parts[1])
 	if err1 != nil || err2 != nil || err3 != nil {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
 	var h struct{ Alg string }
 	if json.Unmarshal(hdr, &h) != nil || h.Alg != "RS256" {
-		return "A JSON web token could not be decoded"
-	}
-	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if rsa.VerifyPKCS1v15(&TestKey().PublicKey, crypto.SHA256, digest[:], sig) != nil {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
 	var c struct {
 		Iss json.RawMessage `json:"iss"`
@@ -363,23 +370,32 @@ func (s *Server) verifyJWT(authz string) string {
 		Exp int64           `json:"exp"`
 	}
 	if json.Unmarshal(claimsRaw, &c) != nil {
-		return "A JSON web token could not be decoded"
+		return nil, undecodable
 	}
-	if strings.Trim(string(c.Iss), `"`) != s.appID {
-		return "A JSON web token could not be decoded"
+	iss := strings.Trim(string(c.Iss), `"`)
+	pub, app := &TestKey().PublicKey, (*App)(nil)
+	if iss != s.appID {
+		if app = s.appByIss(iss); app == nil {
+			return nil, undecodable
+		}
+		pub = &app.key.PublicKey
+	}
+	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	if rsa.VerifyPKCS1v15(pub, crypto.SHA256, digest[:], sig) != nil {
+		return nil, undecodable
 	}
 	s.mu.Lock()
 	now := s.now.Unix()
 	s.mu.Unlock()
 	switch {
 	case c.Iat > now:
-		return "'Issued at' claim ('iat') must be an Integer representing the time that the assertion was issued"
+		return nil, "'Issued at' claim ('iat') must be an Integer representing the time that the assertion was issued"
 	case c.Exp <= now:
-		return "'Expiration time' claim ('exp') must be a numeric value representing the future time at which the assertion expires"
+		return nil, "'Expiration time' claim ('exp') must be a numeric value representing the future time at which the assertion expires"
 	case c.Exp > now+600:
-		return "'Expiration time' claim ('exp') is too far in the future"
+		return nil, "'Expiration time' claim ('exp') is too far in the future"
 	}
-	return ""
+	return app, ""
 }
 
 func bearer(r *http.Request) string {

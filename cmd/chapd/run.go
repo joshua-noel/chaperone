@@ -97,6 +97,9 @@ func parseRunFlags(name string, args []string, stderr io.Writer, demo bool) (Con
 			cfg.ProfilesDir = d
 		}
 	}
+	if code := applyGitHubAppRecord(&cfg, stderr); code != 0 {
+		return cfg, code
+	}
 	return cfg, 0
 }
 

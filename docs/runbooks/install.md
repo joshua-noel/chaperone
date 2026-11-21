@@ -27,7 +27,7 @@ Service `chapd`: runs as `svc-chaperone`, starts automatically (delayed), restar
 ## Before you start
 
 1. The three programs are built in `D:\Chaperone\bin-src\` (`chapd.exe`, `chap.exe`, and `chap-host.exe` for `-WithHost`). Build steps: [development.md](../development.md) and the README.
-2. If `D:\Chaperone\data\` already holds a vault from a test run (`vault-keys\` has files): that vault is bound to **your** account, and the service account could not open it. The installer stops with a message and changes nothing. Rename the folder first (`Rename-Item D:\Chaperone\data chaperone.test`); it is kept, not deleted. A real secret in it (for example the GitHub App key) is imported again after the install.
+2. If `D:\Chaperone\data\` already holds a vault from a test run (`vault-keys\` has files): that vault is bound to **your** account, and the service account could not open it. The installer stops with a message and changes nothing. Rename the folder first (`Rename-Item D:\Chaperone\data chaperone.test`); it is kept, not deleted. A real secret in it (for example the GitHub App key) is imported again after the install. (The App itself is made by [github-app-setup.md](github-app-setup.md). Its guided command cannot run as `svc-chaperone`, so on this install use the "By hand" part of that page and import the key on the console's Secrets screen.)
 3. Do not run the installer under `Start-Transcript` or a recorder: with `-WithVault` it prints the vault's recovery identity to the window, once.
 4. Ten minutes at the server. Have the offline place ready for the recovery identity (a printer or a USB stick that is not the server).
 

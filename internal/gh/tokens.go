@@ -15,6 +15,9 @@ type Installation struct {
 	ID      int64
 	AppID   int64
 	Account string // login of the account that installed the App
+	// Selection is "all" or "selected": whether the installation covers every repository of the account. Only
+	// [Client.ListInstallations] fills it.
+	Selection string
 }
 
 // FindInstallation returns the App's installation on repo (App JWT auth).

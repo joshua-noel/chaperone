@@ -18,7 +18,7 @@ func main() {
 // run executes one invocation and returns the process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: chapd version | run [flags] | svc [flags] | orch issue|revoke|list | vault init|import|list | profile add|digest | connect google | host keygen | ledger keygen | enroll [flags] | quickstart [flags]")
+		fmt.Fprintln(stderr, "usage: chapd version | run [flags] | svc [flags] | orch issue|revoke|list | vault init|import|list | profile add|digest | connect google|github | host keygen | ledger keygen | enroll [flags] | quickstart [flags]")
 		return 2
 	}
 	switch args[0] {
