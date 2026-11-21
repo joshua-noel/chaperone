@@ -332,15 +332,21 @@ func mustBeEmpty(t *testing.T, dir, what string) {
 // resolved path must lie inside the root (on Windows a junction is not followed and is refused as a link). Either way it
 // is refused, and nothing is made anywhere, the link's target included.
 func TestQuickstartRefusesALinkInTheGivenPathThatLeadsOut(t *testing.T) {
+	// The home folder is moved to a fresh folder for this test, so the temp area is not inside it. Without that, on
+	// Windows (and on a Unix system whose TMPDIR is inside home) the "outside" folder would be inside the allowed root,
+	// and a real symlink to it, which is followed once, would rightly be accepted.
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	root, outside := rootAndOutside(t)
+	if within(outside, home) {
+		t.Fatalf("the outside folder %s is inside the home folder %s", outside, home)
+	}
 	link := filepath.Join(root, "lnk")
 	linkOrJunction(t, link, outside)
-	// A junction is refused whatever it leads to. A real symlink is followed once, so when the temp folder is inside the
-	// home folder (always on Windows, where a symlink needs a privilege the CI runner has) its target is inside the
-	// allowed root and accepting it is right.
-	if home, err := os.UserHomeDir(); err == nil && within(outside, home) && followedAsSymlink(link) {
-		t.Skipf("the temp folder %s is inside the home folder %s, so the \"outside\" folder is inside the allowed root and a symlink to it is rightly accepted", outside, home)
-	}
 	dir := filepath.Join(link, "deeper", "qs")
 	if _, _, err := checkQuickstartDir(dir); err == nil {
 		t.Error("check accepted a link that leads out")
@@ -508,11 +514,4 @@ func TestConfirmCreatedComparesWithTheRecordedIdentity(t *testing.T) {
 	if err := confirmCreated(dir, created[len(created)-1]); err == nil {
 		t.Error("a folder swapped after it was made was accepted")
 	}
-}
-
-// followedAsSymlink reports whether resolving link follows it to another path (a symlink), as opposed to leaving it
-// in place (a Windows junction, which the quickstart does not follow).
-func followedAsSymlink(link string) bool {
-	res, err := filepath.EvalSymlinks(link)
-	return err == nil && !samePath(res, link)
 }
